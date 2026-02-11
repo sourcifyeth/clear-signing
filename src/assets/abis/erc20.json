@@ -7,8 +7,6 @@
       { "name": "spender", "type": "address" },
       { "name": "value", "type": "uint256" }
     ],
-    "outputs": [
-      { "name": "", "type": "bool" }
-    ]
+    "outputs": [{ "name": "", "type": "bool" }]
   }
 ]

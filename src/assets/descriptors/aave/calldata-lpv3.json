@@ -118,21 +118,12 @@
             "format": "addressName",
             "label": "For debt holder",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "interestRateMode",
-          "onBehalfOf"
-        ]
+        "required": ["amount", "interestRateMode", "onBehalfOf"]
       },
       "repayWithPermit(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf, uint256 deadline, uint8 permitV, bytes32 permitR, bytes32 permitS)": {
         "$id": "repayWithPermit",
@@ -162,27 +153,13 @@
             "format": "addressName",
             "label": "For debt holder",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "interestRateMode",
-          "onBehalfOf"
-        ],
-        "excluded": [
-          "deadline",
-          "permitV",
-          "permitR",
-          "permitS"
-        ]
+        "required": ["amount", "interestRateMode", "onBehalfOf"],
+        "excluded": ["deadline", "permitV", "permitR", "permitS"]
       },
       "setUserUseReserveAsCollateral(address asset, bool useAsCollateral)": {
         "intent": "Manage collateral",
@@ -193,13 +170,8 @@
             "format": "addressName",
             "label": "For asset",
             "params": {
-              "types": [
-                "token"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["token"],
+              "sources": ["local", "ens"]
             }
           },
           {
@@ -208,10 +180,7 @@
             "label": "Enable use as collateral"
           }
         ],
-        "required": [
-          "asset",
-          "useAsCollateral"
-        ]
+        "required": ["asset", "useAsCollateral"]
       },
       "withdraw(address asset, uint256 amount, address to)": {
         "intent": "Withdraw",
@@ -232,20 +201,12 @@
             "format": "addressName",
             "label": "To recipient",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "to"
-        ]
+        "required": ["amount", "to"]
       },
       "borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)": {
         "intent": "Borrow",
@@ -272,24 +233,13 @@
             "format": "addressName",
             "label": "Debtor",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "onBehalfOf",
-          "interestRateMode"
-        ],
-        "excluded": [
-          "referralCode"
-        ]
+        "required": ["amount", "onBehalfOf", "interestRateMode"],
+        "excluded": ["referralCode"]
       },
       "deposit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)": {
         "$id": "deposit",
@@ -309,23 +259,13 @@
             "format": "addressName",
             "label": "Collateral recipient",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "onBehalfOf"
-        ],
-        "excluded": [
-          "referralCode"
-        ]
+        "required": ["amount", "onBehalfOf"],
+        "excluded": ["referralCode"]
       },
       "supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)": {
         "$id": "supply",
@@ -345,23 +285,13 @@
             "format": "addressName",
             "label": "Collateral recipient",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "onBehalfOf"
-        ],
-        "excluded": [
-          "referralCode"
-        ]
+        "required": ["amount", "onBehalfOf"],
+        "excluded": ["referralCode"]
       },
       "supplyWithPermit(address asset, uint256 amount, address onBehalfOf, uint16 referralCode, uint256 deadline, uint8 permitV, bytes32 permitR, bytes32 permitS)": {
         "$id": "supplyWithPermit",
@@ -381,20 +311,12 @@
             "format": "addressName",
             "label": "Collateral recipient",
             "params": {
-              "types": [
-                "eoa"
-              ],
-              "sources": [
-                "local",
-                "ens"
-              ]
+              "types": ["eoa"],
+              "sources": ["local", "ens"]
             }
           }
         ],
-        "required": [
-          "amount",
-          "onBehalfOf"
-        ],
+        "required": ["amount", "onBehalfOf"],
         "excluded": [
           "referralCode",
           "deadline",

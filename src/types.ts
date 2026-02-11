@@ -119,9 +119,9 @@ export interface DecodedArgument {
 
 /** Argument value union type. */
 export type ArgumentValue =
-  | { type: 'address'; bytes: Uint8Array }
-  | { type: 'uint'; value: bigint }
-  | { type: 'raw'; bytes: Uint8Array };
+  | { type: "address"; bytes: Uint8Array }
+  | { type: "uint"; value: bigint }
+  | { type: "raw"; bytes: Uint8Array };
 
 /** Full descriptor structure. */
 export interface Descriptor {

@@ -2,10 +2,9 @@
  * Presentation engine for clear signing previews.
  */
 
-import { EngineError, TokenLookupError } from './errors.js';
+import { EngineError } from "./errors.js";
 import type {
   ArgumentValue,
-  DecodedArgument,
   DisplayField,
   DisplayFormat,
   DisplayItem,
@@ -14,12 +13,12 @@ import type {
   RawPreview,
   ResolvedCall,
   TokenMeta,
-} from './types.js';
+} from "./types.js";
+import type { DecodedArguments } from "./descriptor.js";
 import {
   buildDescriptor,
   decodeArguments,
   defaultValueString,
-  DecodedArguments,
   determineTokenKey,
   displayLabel,
   getFormatMap,
@@ -27,7 +26,7 @@ import {
   isDescriptorBoundTo,
   rawWordHex,
   resolveEffectiveField,
-} from './descriptor.js';
+} from "./descriptor.js";
 import {
   bytesEqual,
   bytesToHex,
@@ -37,7 +36,7 @@ import {
   nativeTokenKey,
   parseBigInt,
   toChecksumAddress,
-} from './utils.js';
+} from "./utils.js";
 
 interface FormatRender {
   items: DisplayItem[];
@@ -54,7 +53,7 @@ export function formatWithResolvedCall(
   chainId: number,
   to: string,
   value: Uint8Array | undefined,
-  calldata: Uint8Array
+  calldata: Uint8Array,
 ): DisplayModel {
   const tokenMetadata = resolved.tokenMetadata;
   const descriptor = buildDescriptor(resolved.descriptor);
@@ -62,7 +61,9 @@ export function formatWithResolvedCall(
   const warnings: string[] = [];
 
   if (!isDescriptorBoundTo(descriptor, chainId, to)) {
-    warnings.push(`Descriptor deployment mismatch for chain ${chainId} and address ${to}`);
+    warnings.push(
+      `Descriptor deployment mismatch for chain ${chainId} and address ${to}`,
+    );
   }
 
   const selector = extractSelector(calldata);
@@ -77,7 +78,7 @@ export function formatWithResolvedCall(
   if (!fn) {
     warnings.push(`No ABI match for selector ${selectorHex}`);
     return {
-      intent: 'Unknown transaction',
+      intent: "Unknown transaction",
       items: [],
       warnings,
       raw: rawPreviewFromCalldata(selector, calldata),
@@ -96,7 +97,7 @@ export function formatWithResolvedCall(
       to,
       addressBook,
       descriptor.display.definitions || {},
-      tokenMetadata
+      tokenMetadata,
     );
     warnings.push(...render.warnings);
     return {
@@ -114,7 +115,7 @@ export function formatWithResolvedCall(
   }));
 
   return {
-    intent: 'Transaction',
+    intent: "Transaction",
     items,
     warnings,
     raw: {
@@ -132,7 +133,7 @@ function applyDisplayFormat(
   contractAddress: string,
   addressBook: Map<string, string>,
   definitions: Record<string, DisplayField>,
-  tokenMetadata: Map<string, TokenMeta>
+  tokenMetadata: Map<string, TokenMeta>,
 ): FormatRender {
   const items: DisplayItem[] = [];
   const warnings: string[] = [];
@@ -158,7 +159,7 @@ function applyDisplayFormat(
         chainId,
         contractAddress,
         addressBook,
-        tokenMetadata
+        tokenMetadata,
       );
       items.push({
         label: effective.label,
@@ -172,7 +173,10 @@ function applyDisplayFormat(
 
   let interpolatedIntent: string | undefined;
   if (format.interpolatedIntent) {
-    const result = interpolateTemplate(format.interpolatedIntent, renderedValues);
+    const result = interpolateTemplate(
+      format.interpolatedIntent,
+      renderedValues,
+    );
     if (result.error) {
       warnings.push(result.error);
     } else {
@@ -188,19 +192,19 @@ function applyDisplayFormat(
  */
 export function interpolateTemplate(
   template: string,
-  values: Map<string, string>
+  values: Map<string, string>,
 ): { value?: string; error?: string } {
-  let output = '';
+  let output = "";
   let i = 0;
 
   while (i < template.length) {
     const ch = template[i];
-    if (ch === '{') {
-      let placeholder = '';
+    if (ch === "{") {
+      let placeholder = "";
       i++;
       let closed = false;
       while (i < template.length) {
-        if (template[i] === '}') {
+        if (template[i] === "}") {
           closed = true;
           i++;
           break;
@@ -209,11 +213,11 @@ export function interpolateTemplate(
         i++;
       }
       if (!closed) {
-        return { error: 'Unclosed placeholder in interpolated intent' };
+        return { error: "Unclosed placeholder in interpolated intent" };
       }
       const key = placeholder.trim();
       if (key.length === 0) {
-        return { error: 'Empty placeholder in interpolated intent' };
+        return { error: "Empty placeholder in interpolated intent" };
       }
       const value = values.get(key);
       if (value === undefined) {
@@ -237,12 +241,12 @@ function renderField(
   chainId: number,
   contractAddress: string,
   addressBook: Map<string, string>,
-  tokenMetadata: Map<string, TokenMeta>
+  tokenMetadata: Map<string, TokenMeta>,
 ): string {
   switch (field.format) {
-    case 'date':
+    case "date":
       return formatDate(value);
-    case 'tokenAmount':
+    case "tokenAmount":
       return formatTokenAmount(
         field,
         value,
@@ -250,16 +254,16 @@ function renderField(
         metadata,
         chainId,
         contractAddress,
-        tokenMetadata
+        tokenMetadata,
       );
-    case 'amount':
+    case "amount":
       return formatNativeAmount(value, chainId, tokenMetadata);
-    case 'address':
-    case 'addressName':
+    case "address":
+    case "addressName":
       return formatAddress(value, addressBook);
-    case 'enum':
+    case "enum":
       return formatEnum(field, value, metadata);
-    case 'number':
+    case "number":
       return formatNumber(value);
     default:
       return defaultValueString(value);
@@ -267,7 +271,7 @@ function renderField(
 }
 
 function formatDate(value: ArgumentValue): string {
-  if (value.type !== 'uint') {
+  if (value.type !== "uint") {
     return defaultValueString(value);
   }
 
@@ -275,11 +279,11 @@ function formatDate(value: ArgumentValue): string {
     const seconds = Number(value.value);
     const date = new Date(seconds * 1000);
     const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    const secs = String(date.getUTCSeconds()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const hours = String(date.getUTCHours()).padStart(2, "0");
+    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+    const secs = String(date.getUTCSeconds()).padStart(2, "0");
     return `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`;
   } catch {
     return defaultValueString(value);
@@ -293,9 +297,9 @@ function formatTokenAmount(
   metadata: Record<string, unknown>,
   chainId: number,
   contractAddress: string,
-  tokenMetadata: Map<string, TokenMeta>
+  tokenMetadata: Map<string, TokenMeta>,
 ): string {
-  if (value.type !== 'uint') {
+  if (value.type !== "uint") {
     return defaultValueString(value);
   }
 
@@ -307,7 +311,7 @@ function formatTokenAmount(
       decoded,
       chainId,
       contractAddress,
-      tokenMetadata
+      tokenMetadata,
     );
 
     const message = tokenAmountMessage(field, amount, metadata);
@@ -325,9 +329,9 @@ function formatTokenAmount(
 function formatNativeAmount(
   value: ArgumentValue,
   chainId: number,
-  tokenMetadata: Map<string, TokenMeta>
+  tokenMetadata: Map<string, TokenMeta>,
 ): string {
-  if (value.type !== 'uint') {
+  if (value.type !== "uint") {
     return defaultValueString(value);
   }
 
@@ -348,9 +352,9 @@ function formatNativeAmount(
 
 function formatAddress(
   value: ArgumentValue,
-  addressBook: Map<string, string>
+  addressBook: Map<string, string>,
 ): string {
-  if (value.type !== 'address') {
+  if (value.type !== "address") {
     return defaultValueString(value);
   }
 
@@ -366,7 +370,7 @@ function formatAddress(
 }
 
 function formatNumber(value: ArgumentValue): string {
-  if (value.type !== 'uint') {
+  if (value.type !== "uint") {
     return defaultValueString(value);
   }
   return value.value.toString();
@@ -375,24 +379,24 @@ function formatNumber(value: ArgumentValue): string {
 function formatEnum(
   field: EffectiveField,
   value: ArgumentValue,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): string {
-  if (value.type !== 'uint') {
+  if (value.type !== "uint") {
     return defaultValueString(value);
   }
 
   const reference = field.params.$ref;
-  if (typeof reference !== 'string') {
+  if (typeof reference !== "string") {
     return defaultValueString(value);
   }
 
   const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== 'object') {
+  if (!enumMap || typeof enumMap !== "object") {
     return defaultValueString(value);
   }
 
   const label = (enumMap as Record<string, unknown>)[value.value.toString()];
-  if (typeof label === 'string') {
+  if (typeof label === "string") {
     return label;
   }
 
@@ -402,21 +406,21 @@ function formatEnum(
 function tokenAmountMessage(
   field: EffectiveField,
   amount: bigint,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): string | undefined {
   const thresholdSpec = field.params.threshold;
   const message = field.params.message;
 
-  if (typeof thresholdSpec !== 'string' || typeof message !== 'string') {
+  if (typeof thresholdSpec !== "string" || typeof message !== "string") {
     return undefined;
   }
 
   let threshold: bigint | undefined;
-  if (thresholdSpec.startsWith('$.')) {
+  if (thresholdSpec.startsWith("$.")) {
     const value = resolveMetadataValue(metadata, thresholdSpec);
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       threshold = parseBigInt(value);
-    } else if (typeof value === 'number') {
+    } else if (typeof value === "number") {
       threshold = BigInt(value);
     }
   } else {
@@ -435,7 +439,7 @@ function lookupTokenMeta(
   decoded: DecodedArguments,
   chainId: number,
   contractAddress: string,
-  tokenMetadata: Map<string, TokenMeta>
+  tokenMetadata: Map<string, TokenMeta>,
 ): TokenMeta {
   const key = determineTokenKey(field, decoded, chainId, contractAddress);
   const meta = tokenMetadata.get(key);
@@ -450,9 +454,9 @@ function lookupTokenMeta(
  */
 export function resolveMetadataValue(
   metadata: Record<string, unknown>,
-  pointer: string
+  pointer: string,
 ): unknown {
-  const prefix = '$.metadata.';
+  const prefix = "$.metadata.";
   if (!pointer.startsWith(prefix)) {
     return undefined;
   }
@@ -460,8 +464,8 @@ export function resolveMetadataValue(
   const rest = pointer.slice(prefix.length);
   let current: unknown = metadata;
 
-  for (const segment of rest.split('.')) {
-    if (current === null || typeof current !== 'object') {
+  for (const segment of rest.split(".")) {
+    if (current === null || typeof current !== "object") {
       return undefined;
     }
     current = (current as Record<string, unknown>)[segment];
@@ -470,7 +474,10 @@ export function resolveMetadataValue(
   return current;
 }
 
-function rawPreviewFromCalldata(selector: Uint8Array, calldata: Uint8Array): RawPreview {
+function rawPreviewFromCalldata(
+  selector: Uint8Array,
+  calldata: Uint8Array,
+): RawPreview {
   const args: string[] = [];
   if (calldata.length > 4) {
     const data = calldata.slice(4);

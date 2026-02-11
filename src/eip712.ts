@@ -2,27 +2,25 @@
  * EIP-712 typed data formatting for clear signing.
  */
 
-import { Eip712Error } from './errors.js';
+import { Eip712Error } from "./errors.js";
 import type {
   DisplayField,
   DisplayFormat,
   DisplayItem,
   DisplayModel,
   EffectiveField,
-  TokenMeta,
   TypedData,
-} from './types.js';
-import { resolveEffectiveField } from './descriptor.js';
-import { resolveTyped, mergedDescriptorValue } from './resolver.js';
-import { lookupTokenByCaip19 } from './token-registry.js';
+} from "./types.js";
+import { resolveEffectiveField } from "./descriptor.js";
+import { resolveTyped, mergedDescriptorValue } from "./resolver.js";
+import { lookupTokenByCaip19 } from "./token-registry.js";
 import {
   formatAmountWithDecimals,
-  normalizeAddress,
   parseBigInt,
   toChecksumAddress,
   hexToBytes,
-} from './utils.js';
-import { interpolateTemplate, resolveMetadataValue } from './engine.js';
+} from "./utils.js";
+import { interpolateTemplate, resolveMetadataValue } from "./engine.js";
 
 interface TypedDescriptor {
   context?: TypedContext;
@@ -51,25 +49,30 @@ export function formatTypedData(data: TypedData): DisplayModel {
   const verifyingContract = extractVerifyingContract(data.domain);
 
   const resolved = resolveTyped(chainId, verifyingContract);
-  const descriptor = parseDescriptor(resolved.descriptorJson, resolved.includes);
+  const descriptor = parseDescriptor(
+    resolved.descriptorJson,
+    resolved.includes,
+  );
   const warnings: string[] = [];
 
   if (descriptor.context) {
     const hasDeployment = descriptor.context.eip712.deployments.some(
       (d) =>
         d.chainId === chainId &&
-        d.address.toLowerCase() === verifyingContract.toLowerCase()
+        d.address.toLowerCase() === verifyingContract.toLowerCase(),
     );
     if (!hasDeployment) {
       warnings.push(
-        `Descriptor deployment mismatch for chain ${chainId} and address ${verifyingContract}`
+        `Descriptor deployment mismatch for chain ${chainId} and address ${verifyingContract}`,
       );
     }
   }
 
   const format = descriptor.display.formats[data.primaryType];
   if (!format) {
-    throw Eip712Error.typedData(`No display format for primary type ${data.primaryType}`);
+    throw Eip712Error.typedData(
+      `No display format for primary type ${data.primaryType}`,
+    );
   }
 
   const items: DisplayItem[] = [];
@@ -86,7 +89,7 @@ export function formatTypedData(data: TypedData): DisplayModel {
     const effective = resolveEffectiveField(
       field,
       descriptor.display.definitions,
-      warnings
+      warnings,
     );
     if (!effective) continue;
 
@@ -103,7 +106,7 @@ export function formatTypedData(data: TypedData): DisplayModel {
       descriptor.metadata,
       chainId,
       addressBook,
-      warnings
+      warnings,
     );
     renderedValues.set(effective.path, rendered);
     items.push({ label: effective.label, value: rendered });
@@ -111,7 +114,10 @@ export function formatTypedData(data: TypedData): DisplayModel {
 
   let interpolatedIntent: string | undefined;
   if (format.interpolatedIntent) {
-    const result = interpolateTemplate(format.interpolatedIntent, renderedValues);
+    const result = interpolateTemplate(
+      format.interpolatedIntent,
+      renderedValues,
+    );
     if (result.error) {
       warnings.push(result.error);
     } else {
@@ -127,7 +133,10 @@ export function formatTypedData(data: TypedData): DisplayModel {
   };
 }
 
-function parseDescriptor(descriptorJson: string, includes: string[]): TypedDescriptor {
+function parseDescriptor(
+  descriptorJson: string,
+  includes: string[],
+): TypedDescriptor {
   const descriptorValue = mergedDescriptorValue(descriptorJson, includes);
 
   return {
@@ -135,15 +144,11 @@ function parseDescriptor(descriptorJson: string, includes: string[]): TypedDescr
     metadata: (descriptorValue.metadata as Record<string, unknown>) || {},
     display: {
       definitions:
-        ((descriptorValue.display as Record<string, unknown>)?.definitions as Record<
-          string,
-          DisplayField
-        >) || {},
+        ((descriptorValue.display as Record<string, unknown>)
+          ?.definitions as Record<string, DisplayField>) || {},
       formats:
-        ((descriptorValue.display as Record<string, unknown>)?.formats as Record<
-          string,
-          DisplayFormat
-        >) || {},
+        ((descriptorValue.display as Record<string, unknown>)
+          ?.formats as Record<string, DisplayFormat>) || {},
     },
   };
 }
@@ -155,21 +160,28 @@ function renderField(
   metadata: Record<string, unknown>,
   chainId: number,
   addressBook: Map<string, string>,
-  warnings: string[]
+  warnings: string[],
 ): string {
   switch (field.format) {
-    case 'tokenAmount':
-      return formatTokenAmount(field, value, message, metadata, chainId, warnings);
-    case 'date':
+    case "tokenAmount":
+      return formatTokenAmount(
+        field,
+        value,
+        message,
+        metadata,
+        chainId,
+        warnings,
+      );
+    case "date":
       return formatDate(value);
-    case 'number':
+    case "number":
       return formatNumber(value);
-    case 'address':
-    case 'addressName':
+    case "address":
+    case "addressName":
       return formatAddress(value, addressBook);
-    case 'enum':
+    case "enum":
       return formatEnum(field, value, metadata);
-    case 'raw':
+    case "raw":
     default:
       return formatRaw(value);
   }
@@ -181,7 +193,7 @@ function formatTokenAmount(
   message: Record<string, unknown>,
   metadata: Record<string, unknown>,
   chainId: number,
-  warnings: string[]
+  warnings: string[],
 ): string {
   const amount = parseBigIntFromValue(value);
   if (amount === undefined) {
@@ -189,26 +201,32 @@ function formatTokenAmount(
   }
 
   const tokenPath = field.params.tokenPath;
-  if (typeof tokenPath !== 'string') {
+  if (typeof tokenPath !== "string") {
     return formatRaw(value);
   }
 
   const tokenValue = getValue(message, tokenPath);
   if (tokenValue === undefined) {
-    warnings.push(`token path '${tokenPath}' not found for field '${field.path}'`);
+    warnings.push(
+      `token path '${tokenPath}' not found for field '${field.path}'`,
+    );
     return formatRaw(value);
   }
 
   const tokenAddress = extractAddressValue(tokenValue);
   if (tokenAddress === undefined) {
-    warnings.push(`token path '${tokenPath}' is not an address for field '${field.path}'`);
+    warnings.push(
+      `token path '${tokenPath}' is not an address for field '${field.path}'`,
+    );
     return formatRaw(value);
   }
 
   const caip19 = `eip155:${chainId}/erc20:${tokenAddress.toLowerCase()}`;
   const meta = lookupTokenByCaip19(caip19);
   if (!meta) {
-    warnings.push(`Token registry missing entry for chain ${chainId} and address ${tokenAddress}`);
+    warnings.push(
+      `Token registry missing entry for chain ${chainId} and address ${tokenAddress}`,
+    );
     return formatRaw(value);
   }
 
@@ -224,17 +242,17 @@ function formatTokenAmount(
 function tokenAmountMessage(
   field: EffectiveField,
   amount: bigint,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): string | undefined {
   const thresholdSpec = field.params.threshold;
   const message = field.params.message;
 
-  if (typeof thresholdSpec !== 'string' || typeof message !== 'string') {
+  if (typeof thresholdSpec !== "string" || typeof message !== "string") {
     return undefined;
   }
 
   let threshold: bigint | undefined;
-  if (thresholdSpec.startsWith('$.')) {
+  if (thresholdSpec.startsWith("$.")) {
     const value = resolveMetadataValue(metadata, thresholdSpec);
     threshold = parseBigIntFromValue(value);
   } else {
@@ -258,11 +276,11 @@ function formatDate(value: unknown): string {
     const seconds = Number(amount);
     const date = new Date(seconds * 1000);
     const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    const secs = String(date.getUTCSeconds()).padStart(2, '0');
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const hours = String(date.getUTCHours()).padStart(2, "0");
+    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+    const secs = String(date.getUTCSeconds()).padStart(2, "0");
     return `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`;
   } catch {
     return formatRaw(value);
@@ -270,14 +288,17 @@ function formatDate(value: unknown): string {
 }
 
 function formatNumber(value: unknown): string {
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return value.toString();
   }
   const str = valueAsString(value);
   return str ?? formatRaw(value);
 }
 
-function formatAddress(value: unknown, addressBook: Map<string, string>): string {
+function formatAddress(
+  value: unknown,
+  addressBook: Map<string, string>,
+): string {
   const address = valueAsString(value);
   if (address === undefined) {
     return formatRaw(value);
@@ -285,7 +306,9 @@ function formatAddress(value: unknown, addressBook: Map<string, string>): string
 
   const cleaned = address.trim();
   try {
-    const bytes = hexToBytes(cleaned.startsWith('0x') ? cleaned.slice(2) : cleaned);
+    const bytes = hexToBytes(
+      cleaned.startsWith("0x") ? cleaned.slice(2) : cleaned,
+    );
     if (bytes.length !== 20) {
       return address;
     }
@@ -306,22 +329,22 @@ function formatAddress(value: unknown, addressBook: Map<string, string>): string
 function formatEnum(
   field: EffectiveField,
   value: unknown,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): string {
   const reference = field.params.$ref;
-  if (typeof reference !== 'string') {
+  if (typeof reference !== "string") {
     return formatRaw(value);
   }
 
   const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== 'object') {
+  if (!enumMap || typeof enumMap !== "object") {
     return formatRaw(value);
   }
 
   const text = valueAsString(value);
   if (text !== undefined) {
     const label = (enumMap as Record<string, unknown>)[text];
-    if (typeof label === 'string') {
+    if (typeof label === "string") {
       return label;
     }
   }
@@ -330,40 +353,40 @@ function formatEnum(
 }
 
 function formatRaw(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'boolean') return value.toString();
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return value.toString();
+  if (typeof value === "boolean") return value.toString();
   return JSON.stringify(value);
 }
 
 function extractChainId(domain: Record<string, unknown>): number {
   const chainValue = domain.chainId;
   if (chainValue === undefined) {
-    throw Eip712Error.typedData('typed data domain missing chainId');
+    throw Eip712Error.typedData("typed data domain missing chainId");
   }
 
-  if (typeof chainValue === 'number') {
+  if (typeof chainValue === "number") {
     return chainValue;
   }
 
-  if (typeof chainValue === 'string') {
+  if (typeof chainValue === "string") {
     const value = parseBigInt(chainValue);
     if (value === undefined) {
-      throw Eip712Error.typedData('chainId is not a valid integer');
+      throw Eip712Error.typedData("chainId is not a valid integer");
     }
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw Eip712Error.typedData('chainId out of range');
+      throw Eip712Error.typedData("chainId out of range");
     }
     return Number(value);
   }
 
-  throw Eip712Error.typedData('chainId must be a number or string');
+  throw Eip712Error.typedData("chainId must be a number or string");
 }
 
 function extractVerifyingContract(domain: Record<string, unknown>): string {
   const value = domain.verifyingContract;
-  if (typeof value !== 'string') {
-    throw Eip712Error.typedData('typed data domain missing verifyingContract');
+  if (typeof value !== "string") {
+    throw Eip712Error.typedData("typed data domain missing verifyingContract");
   }
   return value.toLowerCase();
 }
@@ -371,15 +394,15 @@ function extractVerifyingContract(domain: Record<string, unknown>): string {
 function getValue(root: Record<string, unknown>, path: string): unknown {
   let current: unknown = root;
   let trimmed = path.trim();
-  if (trimmed.startsWith('@.')) {
+  if (trimmed.startsWith("@.")) {
     trimmed = trimmed.slice(2);
   }
   if (trimmed.length === 0) {
     return current;
   }
 
-  for (const segment of trimmed.split('.')) {
-    if (current === null || typeof current !== 'object') {
+  for (const segment of trimmed.split(".")) {
+    if (current === null || typeof current !== "object") {
       return undefined;
     }
     current = (current as Record<string, unknown>)[segment];
@@ -389,10 +412,10 @@ function getValue(root: Record<string, unknown>, path: string): unknown {
 }
 
 function parseBigIntFromValue(value: unknown): bigint | undefined {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return parseBigInt(value);
   }
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return BigInt(value);
   }
   return undefined;
@@ -401,15 +424,15 @@ function parseBigIntFromValue(value: unknown): bigint | undefined {
 function extractAddressValue(value: unknown): string | undefined {
   const text = valueAsString(value);
   if (text === undefined) return undefined;
-  if (text.startsWith('0x') && text.length === 42) {
+  if (text.startsWith("0x") && text.length === 42) {
     return text.toLowerCase();
   }
   return undefined;
 }
 
 function valueAsString(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'boolean') return value.toString();
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return value.toString();
+  if (typeof value === "boolean") return value.toString();
   return undefined;
 }

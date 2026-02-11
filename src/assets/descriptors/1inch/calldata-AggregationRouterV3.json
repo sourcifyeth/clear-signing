@@ -5,15 +5,28 @@
     "contract": {
       "abi": "https://api.etherscan.io/api?module=contract&action=getabi&address=0x11111112542d85b3ef69ae05771c2dccff4faa26",
       "deployments": [
-        { "chainId": 1, "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26" },
-        { "chainId": 56, "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26" },
-        { "chainId": 137, "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26" }
+        {
+          "chainId": 1,
+          "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26"
+        },
+        {
+          "chainId": 56,
+          "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26"
+        },
+        {
+          "chainId": 137,
+          "address": "0x11111112542D85B3EF69AE05771c2dCCff4fAa26"
+        }
       ]
     }
   },
   "metadata": {
     "owner": "1inch",
-    "info": { "url": "https://1inch.io/", "legalName": "1inch Network", "deploymentDate": "2021-03-14T20:28:50Z" },
+    "info": {
+      "url": "https://1inch.io/",
+      "legalName": "1inch Network",
+      "deploymentDate": "2021-03-14T20:28:50Z"
+    },
     "constants": {
       "addressAsEth": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
       "addressAsNull": "0x0000000000000000000000000000000000000000"
@@ -24,14 +37,28 @@
       "sendAmount": {
         "label": "Amount to Send",
         "format": "tokenAmount",
-        "params": { "nativeCurrencyAddress": ["$.metadata.constants.addressAsEth", "$.metadata.constants.addressAsNull"] }
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
       },
       "minReceiveAmount": {
         "label": "Minimum to Receive",
         "format": "tokenAmount",
-        "params": { "nativeCurrencyAddress": ["$.metadata.constants.addressAsEth", "$.metadata.constants.addressAsNull"] }
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
       },
-      "lastPool": { "label": "Last pool", "format": "addressName", "params": { "types": ["contract"] } },
+      "lastPool": {
+        "label": "Last pool",
+        "format": "addressName",
+        "params": { "types": ["contract"] }
+      },
       "beneficiary": { "label": "Beneficiary", "format": "addressName" }
     },
     "formats": {
@@ -39,23 +66,43 @@
         "$id": "swap",
         "intent": "Swap",
         "fields": [
-          { "path": "desc.amount", "$ref": "$.display.definitions.sendAmount", "params": { "tokenPath": "desc.srcToken" } },
+          {
+            "path": "desc.amount",
+            "$ref": "$.display.definitions.sendAmount",
+            "params": { "tokenPath": "desc.srcToken" }
+          },
           {
             "path": "desc.minReturnAmount",
             "$ref": "$.display.definitions.minReceiveAmount",
             "params": { "tokenPath": "desc.dstToken" }
           },
-          { "path": "desc.dstReceiver", "$ref": "$.display.definitions.beneficiary" }
+          {
+            "path": "desc.dstReceiver",
+            "$ref": "$.display.definitions.beneficiary"
+          }
         ],
         "required": ["desc.amount", "desc.minReturnAmount", "desc.dstReceiver"],
-        "excluded": ["caller", "desc.srcReceiver", "desc.flags", "desc.permit", "data"]
+        "excluded": [
+          "caller",
+          "desc.srcReceiver",
+          "desc.flags",
+          "desc.permit",
+          "data"
+        ]
       },
       "unoswap(address srcToken, uint256 amount, uint256 minReturn, bytes32[] pools)": {
         "$id": "unoswap",
         "intent": "Swap",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.sendAmount", "params": { "tokenPath": "srcToken" } },
-          { "path": "minReturn", "$ref": "$.display.definitions.minReceiveAmount" },
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.sendAmount",
+            "params": { "tokenPath": "srcToken" }
+          },
+          {
+            "path": "minReturn",
+            "$ref": "$.display.definitions.minReceiveAmount"
+          },
           { "path": "@.from", "$ref": "$.display.definitions.beneficiary" }
         ],
         "required": ["amount", "minReturn", "@.from"],
@@ -65,8 +112,15 @@
         "$id": "unoswapWithPermit",
         "intent": "Swap",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.sendAmount", "params": { "tokenPath": "srcToken" } },
-          { "path": "minReturn", "$ref": "$.display.definitions.minReceiveAmount" },
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.sendAmount",
+            "params": { "tokenPath": "srcToken" }
+          },
+          {
+            "path": "minReturn",
+            "$ref": "$.display.definitions.minReceiveAmount"
+          },
           { "path": "@.from", "$ref": "$.display.definitions.beneficiary" },
           { "path": "pools.[-1]", "$ref": "$.display.definitions.lastPool" }
         ],

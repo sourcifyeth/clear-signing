@@ -67,8 +67,18 @@
               "message": "Unlimited"
             }
           },
-          { "path": "details.expiration", "label": "Approval expires", "format": "date", "params": { "encoding": "timestamp" } },
-          { "path": "sigDeadline", "label": "Signature deadline", "format": "date", "params": { "encoding": "timestamp" } }
+          {
+            "path": "details.expiration",
+            "label": "Approval expires",
+            "format": "date",
+            "params": { "encoding": "timestamp" }
+          },
+          {
+            "path": "sigDeadline",
+            "label": "Signature deadline",
+            "format": "date",
+            "params": { "encoding": "timestamp" }
+          }
         ],
         "required": ["spender", "details.amount"],
         "excluded": [],
@@ -93,7 +103,12 @@
                   "message": "Unlimited"
                 }
               },
-              { "path": "expiration", "label": "Approval expires", "format": "date", "params": { "encoding": "timestamp" } }
+              {
+                "path": "expiration",
+                "label": "Approval expires",
+                "format": "date",
+                "params": { "encoding": "timestamp" }
+              }
             ]
           },
           {

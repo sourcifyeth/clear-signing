@@ -2,7 +2,7 @@
  * Descriptor parsing and calldata decoding for clear signing.
  */
 
-import { DescriptorError, TokenLookupError } from './errors.js';
+import { DescriptorError, TokenLookupError } from "./errors.js";
 import type {
   AbiFunction,
   ArgumentValue,
@@ -15,14 +15,14 @@ import type {
   FunctionDescriptor,
   FunctionInput,
   ResolvedDescriptor,
-} from './types.js';
+} from "./types.js";
 import {
   bytesToHex,
   normalizeAddress,
   normalizeCaip19,
   selectorForSignature,
   tokenKeyFromErc20,
-} from './utils.js';
+} from "./utils.js";
 
 /**
  * Collection of decoded arguments with name-based lookup.
@@ -31,7 +31,12 @@ export class DecodedArguments {
   private ordered: DecodedArgument[] = [];
   private indexByName = new Map<string, number>();
 
-  push(name: string | undefined, index: number, value: ArgumentValue, word: Uint8Array): void {
+  push(
+    name: string | undefined,
+    index: number,
+    value: ArgumentValue,
+    word: Uint8Array,
+  ): void {
     const entryIndex = this.ordered.length;
     if (name !== undefined) {
       this.indexByName.set(name, entryIndex);
@@ -56,7 +61,7 @@ export class DecodedArguments {
   withValue(value: Uint8Array | undefined): DecodedArguments {
     if (value === undefined) return this;
     if (value.length > 32) {
-      throw DescriptorError.calldata('call value must be at most 32 bytes');
+      throw DescriptorError.calldata("call value must be at most 32 bytes");
     }
 
     const word = new Uint8Array(32);
@@ -64,7 +69,12 @@ export class DecodedArguments {
     word.set(value, start);
 
     const amount = bytesToBigInt(word);
-    this.push('@value', this.ordered.length, { type: 'uint', value: amount }, word);
+    this.push(
+      "@value",
+      this.ordered.length,
+      { type: "uint", value: amount },
+      word,
+    );
     return this;
   }
 }
@@ -73,7 +83,7 @@ export class DecodedArguments {
  * Build a descriptor from resolved JSON strings.
  */
 export function buildDescriptor(resolved: ResolvedDescriptor): Descriptor {
-  let descriptorValue = JSON.parse(resolved.descriptorJson);
+  const descriptorValue = JSON.parse(resolved.descriptorJson);
 
   // Merge includes
   for (const includeJson of resolved.includes) {
@@ -99,33 +109,41 @@ function needsAbiInjection(descriptorValue: Record<string, unknown>): boolean {
   if (!abi) return true;
   const abiValue = (abi as Record<string, unknown>).abi;
   if (abiValue === undefined || abiValue === null) return true;
-  if (Array.isArray(abiValue) || typeof abiValue === 'object') return false;
+  if (Array.isArray(abiValue) || typeof abiValue === "object") return false;
   return true;
 }
 
-function injectAbi(descriptorValue: Record<string, unknown>, abiValue: unknown): void {
-  const context = descriptorValue.context as Record<string, unknown> | undefined;
+function injectAbi(
+  descriptorValue: Record<string, unknown>,
+  abiValue: unknown,
+): void {
+  const context = descriptorValue.context as
+    | Record<string, unknown>
+    | undefined;
   if (!context) return;
   const contract = context.contract as Record<string, unknown> | undefined;
   if (!contract) return;
   contract.abi = abiValue;
 }
 
-function mergeInclude(target: Record<string, unknown>, include: Record<string, unknown>): void {
+function mergeInclude(
+  target: Record<string, unknown>,
+  include: Record<string, unknown>,
+): void {
   for (const [key, value] of Object.entries(include)) {
     if (target[key] === undefined) {
       target[key] = value;
     } else if (
-      typeof target[key] === 'object' &&
+      typeof target[key] === "object" &&
       target[key] !== null &&
       !Array.isArray(target[key]) &&
-      typeof value === 'object' &&
+      typeof value === "object" &&
       value !== null &&
       !Array.isArray(value)
     ) {
       mergeInclude(
         target[key] as Record<string, unknown>,
-        value as Record<string, unknown>
+        value as Record<string, unknown>,
       );
     }
   }
@@ -134,15 +152,16 @@ function mergeInclude(target: Record<string, unknown>, include: Record<string, u
 function parseDescriptor(value: Record<string, unknown>): Descriptor {
   const context = value.context as Record<string, unknown> | undefined;
   if (!context) {
-    throw DescriptorError.parse('missing context');
+    throw DescriptorError.parse("missing context");
   }
 
   const contract = context.contract as Record<string, unknown> | undefined;
   if (!contract) {
-    throw DescriptorError.parse('missing context.contract');
+    throw DescriptorError.parse("missing context.contract");
   }
 
-  const deployments = (contract.deployments as Array<Record<string, unknown>>) || [];
+  const deployments =
+    (contract.deployments as Array<Record<string, unknown>>) || [];
   const parsedDeployments = deployments.map((d) => ({
     chainId: Number(d.chainId),
     address: String(d.address),
@@ -151,7 +170,7 @@ function parseDescriptor(value: Record<string, unknown>): Descriptor {
   let abi: AbiFunction[] | string | undefined;
   if (Array.isArray(contract.abi)) {
     abi = contract.abi as AbiFunction[];
-  } else if (typeof contract.abi === 'string') {
+  } else if (typeof contract.abi === "string") {
     abi = contract.abi;
   }
 
@@ -180,25 +199,27 @@ function parseDescriptor(value: Record<string, unknown>): Descriptor {
 export function isDescriptorBoundTo(
   descriptor: Descriptor,
   chainId: number,
-  address: string
+  address: string,
 ): boolean {
   const normalized = normalizeAddress(address);
   return descriptor.context.contract.deployments.some(
-    (d) => d.chainId === chainId && normalizeAddress(d.address) === normalized
+    (d) => d.chainId === chainId && normalizeAddress(d.address) === normalized,
   );
 }
 
 /**
  * Get function descriptors from a descriptor's ABI.
  */
-export function getFunctionDescriptors(descriptor: Descriptor): FunctionDescriptor[] {
+export function getFunctionDescriptors(
+  descriptor: Descriptor,
+): FunctionDescriptor[] {
   const abi = descriptor.context.contract.abi;
-  if (!abi || typeof abi === 'string') {
+  if (!abi || typeof abi === "string") {
     return [];
   }
 
   return abi
-    .filter((fn) => fn.type === 'function')
+    .filter((fn) => fn.type === "function")
     .map((fn) => {
       const typedSignature = typedSignatureFor(fn);
       const selector = selectorForSignature(typedSignature);
@@ -213,7 +234,9 @@ export function getFunctionDescriptors(descriptor: Descriptor): FunctionDescript
 /**
  * Get display format map with normalized signatures.
  */
-export function getFormatMap(descriptor: Descriptor): Map<string, DisplayFormat> {
+export function getFormatMap(
+  descriptor: Descriptor,
+): Map<string, DisplayFormat> {
   const map = new Map<string, DisplayFormat>();
   const formats = descriptor.display.formats || {};
 
@@ -228,8 +251,8 @@ export function getFormatMap(descriptor: Descriptor): Map<string, DisplayFormat>
 }
 
 function normalizeSignatureKey(signature: string): string | undefined {
-  const openParen = signature.indexOf('(');
-  const closeParen = signature.lastIndexOf(')');
+  const openParen = signature.indexOf("(");
+  const closeParen = signature.lastIndexOf(")");
   if (openParen === -1 || closeParen === -1) return undefined;
 
   const name = signature.slice(0, openParen).trim();
@@ -237,7 +260,7 @@ function normalizeSignatureKey(signature: string): string | undefined {
 
   const types: string[] = [];
   if (params.trim().length > 0) {
-    for (const param of params.split(',')) {
+    for (const param of params.split(",")) {
       const trimmed = param.trim();
       if (trimmed.length === 0) continue;
       const ty = trimmed.split(/\s+/)[0];
@@ -245,19 +268,21 @@ function normalizeSignatureKey(signature: string): string | undefined {
     }
   }
 
-  return `${name}(${types.join(',')})`;
+  return `${name}(${types.join(",")})`;
 }
 
 function typedSignatureFor(fn: AbiFunction): string {
   const params = fn.inputs.map(typeSignatureForInput);
-  return `${fn.name.trim()}(${params.join(',')})`;
+  return `${fn.name.trim()}(${params.join(",")})`;
 }
 
 function typeSignatureForInput(input: FunctionInput): string {
   const ty = input.type.trim();
-  if (ty.startsWith('tuple')) {
+  if (ty.startsWith("tuple")) {
     const suffix = ty.slice(5); // Remove 'tuple' prefix
-    const nested = (input.components || []).map(typeSignatureForInput).join(',');
+    const nested = (input.components || [])
+      .map(typeSignatureForInput)
+      .join(",");
     return `(${nested})${suffix}`;
   }
   return ty;
@@ -268,14 +293,17 @@ function typeSignatureForInput(input: FunctionInput): string {
  */
 export function decodeArguments(
   fn: FunctionDescriptor,
-  calldata: Uint8Array
+  calldata: Uint8Array,
 ): DecodedArguments {
-  const totalWords = fn.inputs.reduce((sum, input) => sum + argumentWordCount(input), 0);
+  const totalWords = fn.inputs.reduce(
+    (sum, input) => sum + argumentWordCount(input),
+    0,
+  );
   const expectedLen = 4 + totalWords * 32;
 
   if (calldata.length < expectedLen) {
     throw DescriptorError.calldata(
-      `calldata length ${calldata.length} too small for ${totalWords} arguments`
+      `calldata length ${calldata.length} too small for ${totalWords} arguments`,
     );
   }
 
@@ -299,7 +327,12 @@ export function decodeArguments(
 interface DecodeResult {
   cursor: number;
   globalIndex: number;
-  args: Array<{ name: string | undefined; index: number; value: ArgumentValue; word: Uint8Array }>;
+  args: Array<{
+    name: string | undefined;
+    index: number;
+    value: ArgumentValue;
+    word: Uint8Array;
+  }>;
 }
 
 function decodeInput(
@@ -307,9 +340,13 @@ function decodeInput(
   calldata: Uint8Array,
   cursor: number,
   prefix: string | undefined,
-  globalIndex: number
+  globalIndex: number,
 ): DecodeResult {
-  if (input.type.startsWith('tuple') && input.components && input.components.length > 0) {
+  if (
+    input.type.startsWith("tuple") &&
+    input.components &&
+    input.components.length > 0
+  ) {
     const basePrefix =
       prefix !== undefined
         ? input.name.trim().length === 0
@@ -319,9 +356,15 @@ function decodeInput(
           ? undefined
           : input.name.trim();
 
-    const args: DecodeResult['args'] = [];
+    const args: DecodeResult["args"] = [];
     for (const component of input.components) {
-      const result = decodeInput(component, calldata, cursor, basePrefix, globalIndex);
+      const result = decodeInput(
+        component,
+        calldata,
+        cursor,
+        basePrefix,
+        globalIndex,
+      );
       cursor = result.cursor;
       globalIndex = result.globalIndex;
       args.push(...result.args);
@@ -335,7 +378,7 @@ function decodeInput(
 
   if (end > calldata.length) {
     throw DescriptorError.calldata(
-      `calldata length ${calldata.length} too small while decoding argument '${input.name}'`
+      `calldata length ${calldata.length} too small while decoding argument '${input.name}'`,
     );
   }
 
@@ -351,13 +394,20 @@ function decodeInput(
 }
 
 function argumentWordCount(input: FunctionInput): number {
-  if (input.type.startsWith('tuple') && input.components && input.components.length > 0) {
+  if (
+    input.type.startsWith("tuple") &&
+    input.components &&
+    input.components.length > 0
+  ) {
     return input.components.reduce((sum, c) => sum + argumentWordCount(c), 0);
   }
   return 1;
 }
 
-function argumentName(prefix: string | undefined, input: FunctionInput): string | undefined {
+function argumentName(
+  prefix: string | undefined,
+  input: FunctionInput,
+): string | undefined {
   const trimmed = input.name.trim();
   if (prefix !== undefined) {
     return trimmed.length === 0 ? prefix : `${prefix}.${trimmed}`;
@@ -368,33 +418,36 @@ function argumentName(prefix: string | undefined, input: FunctionInput): string 
 function decodeWord(
   kind: string,
   internalType: string | undefined,
-  word: Uint8Array
+  word: Uint8Array,
 ): ArgumentValue {
-  if (internalTypeIsAddress(internalType, kind) || kind === 'address') {
+  if (internalTypeIsAddress(internalType, kind) || kind === "address") {
     const bytes = word.slice(12);
-    return { type: 'address', bytes };
+    return { type: "address", bytes };
   }
 
-  if (kind.startsWith('uint')) {
-    return { type: 'uint', value: bytesToBigInt(word) };
+  if (kind.startsWith("uint")) {
+    return { type: "uint", value: bytesToBigInt(word) };
   }
 
-  return { type: 'raw', bytes: word };
+  return { type: "raw", bytes: word };
 }
 
-function internalTypeIsAddress(internalType: string | undefined, kind: string): boolean {
+function internalTypeIsAddress(
+  internalType: string | undefined,
+  kind: string,
+): boolean {
   if (!internalType) return false;
   const normalized = internalType.trim();
   if (normalized.length === 0) return false;
-  if (normalized.toLowerCase() === 'address') return true;
+  if (normalized.toLowerCase() === "address") return true;
 
   // Check if last segment is "address"
   const segments = normalized.split(/[.\s:]/);
   const lastSegment = segments[segments.length - 1];
-  if (lastSegment?.toLowerCase() === 'address') return true;
+  if (lastSegment?.toLowerCase() === "address") return true;
 
   // Special case: "Address" internal type with uint kind
-  if (normalized === 'Address' && kind.startsWith('uint')) return true;
+  if (normalized === "Address" && kind.startsWith("uint")) return true;
 
   return false;
 }
@@ -413,7 +466,7 @@ function bytesToBigInt(bytes: Uint8Array): bigint {
 export function resolveEffectiveField(
   field: DisplayField,
   definitions: Record<string, DisplayField>,
-  warnings: string[]
+  warnings: string[],
 ): EffectiveField | undefined {
   let path = field.path;
   let label = field.label;
@@ -448,7 +501,7 @@ export function resolveEffectiveField(
 }
 
 function extractDefinitionName(reference: string): string | undefined {
-  const prefix = '$.display.definitions.';
+  const prefix = "$.display.definitions.";
   if (reference.startsWith(prefix)) {
     return reference.slice(prefix.length);
   }
@@ -457,7 +510,7 @@ function extractDefinitionName(reference: string): string | undefined {
 
 function mergeParams(
   base: Record<string, unknown>,
-  overlay: Record<string, unknown>
+  overlay: Record<string, unknown>,
 ): Record<string, unknown> {
   const merged = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
@@ -475,18 +528,18 @@ export function determineTokenKey(
   field: EffectiveField,
   decoded: DecodedArguments,
   chainId: number,
-  contractAddress: string
+  contractAddress: string,
 ): string {
   const tokenParam = field.params.token;
-  if (typeof tokenParam === 'string') {
+  if (typeof tokenParam === "string") {
     return normalizeCaip19(tokenParam);
   }
 
   const tokenPath = field.params.tokenPath;
-  if (typeof tokenPath === 'string') {
+  if (typeof tokenPath === "string") {
     let address: string;
 
-    if (tokenPath === '@.to') {
+    if (tokenPath === "@.to") {
       address = normalizeAddress(contractAddress);
     } else {
       const tokenValue = decoded.get(tokenPath);
@@ -494,7 +547,7 @@ export function determineTokenKey(
         throw TokenLookupError.missingPath(tokenPath, field.path);
       }
 
-      if (tokenValue.type !== 'address') {
+      if (tokenValue.type !== "address") {
         throw TokenLookupError.notAddress(tokenPath, field.path);
       }
 
@@ -519,11 +572,11 @@ export function displayLabel(arg: DecodedArgument): string {
  */
 export function defaultValueString(value: ArgumentValue): string {
   switch (value.type) {
-    case 'address':
+    case "address":
       return bytesToHex(value.bytes);
-    case 'uint':
+    case "uint":
       return value.value.toString();
-    case 'raw':
+    case "raw":
       return bytesToHex(value.bytes);
   }
 }

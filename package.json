@@ -19,13 +19,18 @@
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "fix": "npm run fix:prettier && npm run fix:eslint",
+    "fix:prettier": "prettier \"**/*.{ts,js,md,json}\" --write",
+    "fix:eslint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
+    "check": "npm run check:prettier && npm run check:eslint",
+    "check:prettier": "prettier \"**/*.{ts,js,md,json}\" --check",
+    "check:eslint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "keywords": [
     "ethereum",
     "clear-signing",
-    "eip-7730",
-    "eip-712",
+    "erc-7730",
     "transaction",
     "wallet"
   ],
@@ -34,10 +39,15 @@
     "@noble/hashes": "^1.7.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.5"
+    "@eslint/js": "9.39.2",
+    "eslint": "9.39.2",
+    "eslint-plugin-no-only-tests": "^3.3.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.55.0",
+    "vitest": "4.0.18"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }

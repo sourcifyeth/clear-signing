@@ -4,7 +4,10 @@
     "$id": "Wrapped Ether",
     "contract": {
       "deployments": [
-        { "chainId": 1, "address": "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2" }
+        {
+          "chainId": 1,
+          "address": "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+        }
       ]
     }
   },

@@ -2,7 +2,7 @@
  * Shared utility functions for the clear signing library.
  */
 
-import { keccak_256 } from '@noble/hashes/sha3';
+import { keccak_256 } from "@noble/hashes/sha3";
 
 /** Compute keccak256 hash of input data. */
 export function keccak256(data: Uint8Array): Uint8Array {
@@ -11,9 +11,9 @@ export function keccak256(data: Uint8Array): Uint8Array {
 
 /** Convert hex string to bytes. */
 export function hexToBytes(hex: string): Uint8Array {
-  const cleaned = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (cleaned.length % 2 !== 0) {
-    throw new Error('Invalid hex string length');
+    throw new Error("Invalid hex string length");
   }
   const bytes = new Uint8Array(cleaned.length / 2);
   for (let i = 0; i < bytes.length; i++) {
@@ -24,9 +24,9 @@ export function hexToBytes(hex: string): Uint8Array {
 
 /** Convert bytes to hex string with 0x prefix. */
 export function bytesToHex(bytes: Uint8Array): string {
-  let hex = '0x';
+  let hex = "0x";
   for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, '0');
+    hex += byte.toString(16).padStart(2, "0");
   }
   return hex;
 }
@@ -39,16 +39,16 @@ export function normalizeAddress(address: string): string {
 /** Convert 20-byte address to EIP-55 checksum format. */
 export function toChecksumAddress(bytes: Uint8Array): string {
   if (bytes.length !== 20) {
-    throw new Error('Address must be 20 bytes');
+    throw new Error("Address must be 20 bytes");
   }
 
   const lower = bytesToHex(bytes).slice(2).toLowerCase();
   const hash = keccak256(new TextEncoder().encode(lower));
 
-  let result = '0x';
+  let result = "0x";
   for (let i = 0; i < lower.length; i++) {
     const char = lower[i];
-    if (char >= 'a' && char <= 'f') {
+    if (char >= "a" && char <= "f") {
       const hashByte = hash[Math.floor(i / 2)];
       const nibble = i % 2 === 0 ? (hashByte >> 4) & 0x0f : hashByte & 0x0f;
       result += nibble >= 8 ? char.toUpperCase() : char;
@@ -61,19 +61,22 @@ export function toChecksumAddress(bytes: Uint8Array): string {
 
 /** Add thousand separators to a numeric string. */
 export function addThousandSeparators(value: string): string {
-  const chars = value.split('').reverse();
+  const chars = value.split("").reverse();
   const result: string[] = [];
   for (let i = 0; i < chars.length; i++) {
     if (i > 0 && i % 3 === 0) {
-      result.push(',');
+      result.push(",");
     }
     result.push(chars[i]);
   }
-  return result.reverse().join('');
+  return result.reverse().join("");
 }
 
 /** Format a bigint amount with decimal places. */
-export function formatAmountWithDecimals(amount: bigint, decimals: number): string {
+export function formatAmountWithDecimals(
+  amount: bigint,
+  decimals: number,
+): string {
   if (decimals === 0) {
     return addThousandSeparators(amount.toString());
   }
@@ -87,9 +90,9 @@ export function formatAmountWithDecimals(amount: bigint, decimals: number): stri
     return integerPart;
   }
 
-  let fractional = remainder.toString().padStart(decimals, '0');
+  let fractional = remainder.toString().padStart(decimals, "0");
   // Trim trailing zeros
-  while (fractional.endsWith('0')) {
+  while (fractional.endsWith("0")) {
     fractional = fractional.slice(0, -1);
   }
 
@@ -104,7 +107,7 @@ export function formatAmountWithDecimals(amount: bigint, decimals: number): stri
 export function parseBigInt(text: string): bigint | undefined {
   try {
     const trimmed = text.trim();
-    if (trimmed.startsWith('0x')) {
+    if (trimmed.startsWith("0x")) {
       return BigInt(trimmed);
     }
     return BigInt(trimmed);
@@ -154,10 +157,10 @@ export function nativeTokenKey(chainId: number): string | undefined {
 /** Get SLIP-44 code for native token on a chain. */
 function nativeSlip44Code(chainId: number): number | undefined {
   switch (chainId) {
-    case 1:      // Ethereum mainnet
-    case 10:     // Optimism
-    case 42161:  // Arbitrum
-    case 8453:   // Base
+    case 1: // Ethereum mainnet
+    case 10: // Optimism
+    case 42161: // Arbitrum
+    case 8453: // Base
       return 60; // ETH
     default:
       return undefined;
@@ -172,7 +175,7 @@ export function formatSelectorHex(selector: Uint8Array): string {
 /** Extract 4-byte selector from calldata. */
 export function extractSelector(calldata: Uint8Array): Uint8Array {
   if (calldata.length < 4) {
-    throw new Error('calldata must be at least 4 bytes');
+    throw new Error("calldata must be at least 4 bytes");
   }
   return calldata.slice(0, 4);
 }
