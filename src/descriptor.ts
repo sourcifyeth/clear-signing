@@ -2,7 +2,7 @@
  * Descriptor parsing and calldata decoding for clear signing.
  */
 
-import { DescriptorError, TokenLookupError } from "./errors.js";
+import { DescriptorError, TokenLookupError } from "./errors";
 import type {
   AbiFunction,
   ArgumentValue,
@@ -15,14 +15,14 @@ import type {
   FunctionDescriptor,
   FunctionInput,
   ResolvedDescriptor,
-} from "./types.js";
+} from "./types";
 import {
   bytesToHex,
   normalizeAddress,
   normalizeCaip19,
   selectorForSignature,
   tokenKeyFromErc20,
-} from "./utils.js";
+} from "./utils";
 
 /**
  * Collection of decoded arguments with name-based lookup.

@@ -2,7 +2,7 @@
  * Token registry helpers for the clear signing engine.
  */
 
-import type { TokenMeta } from "./types.js";
+import type { TokenMeta } from "./types";
 import tokensMinJson from "./assets/tokens-min.json" with { type: "json" };
 
 interface TokenRegistryEntry {

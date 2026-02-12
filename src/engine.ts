@@ -2,7 +2,7 @@
  * Presentation engine for clear signing previews.
  */
 
-import { EngineError } from "./errors.js";
+import { EngineError } from "./errors";
 import type {
   ArgumentValue,
   DisplayField,
@@ -13,8 +13,8 @@ import type {
   RawPreview,
   ResolvedCall,
   TokenMeta,
-} from "./types.js";
-import type { DecodedArguments } from "./descriptor.js";
+} from "./types";
+import type { DecodedArguments } from "./descriptor";
 import {
   buildDescriptor,
   decodeArguments,
@@ -26,7 +26,7 @@ import {
   isDescriptorBoundTo,
   rawWordHex,
   resolveEffectiveField,
-} from "./descriptor.js";
+} from "./descriptor";
 import {
   bytesEqual,
   bytesToHex,
@@ -36,7 +36,7 @@ import {
   nativeTokenKey,
   parseBigInt,
   toChecksumAddress,
-} from "./utils.js";
+} from "./utils";
 
 interface FormatRender {
   items: DisplayItem[];

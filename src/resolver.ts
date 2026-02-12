@@ -2,14 +2,14 @@
  * Descriptor lookup and token metadata resolution for clear signing.
  */
 
-import { ResolverError, EngineError } from "./errors.js";
+import { ResolverError, EngineError } from "./errors";
 import type {
   IndexEntry,
   ResolvedCall,
   ResolvedDescriptor,
   ResolvedTypedDescriptor,
   TokenMeta,
-} from "./types.js";
+} from "./types";
 import {
   buildDescriptor,
   decodeArguments,
@@ -17,9 +17,9 @@ import {
   getFormatMap,
   getFunctionDescriptors,
   resolveEffectiveField,
-} from "./descriptor.js";
-import { lookupTokenByCaip19 } from "./token-registry.js";
-import { bytesEqual, normalizeAddress, nativeTokenKey } from "./utils.js";
+} from "./descriptor";
+import { lookupTokenByCaip19 } from "./token-registry";
+import { bytesEqual, normalizeAddress, nativeTokenKey } from "./utils";
 
 // Import assets
 import indexJson from "./assets/index.json" with { type: "json" };

@@ -21,11 +21,11 @@
  * ```
  */
 
-import { EngineError, ResolverError } from "./errors.js";
-import type { DisplayModel } from "./types.js";
-import { resolveCall } from "./resolver.js";
-import { formatWithResolvedCall } from "./engine.js";
-import { formatTypedData as formatTypedDataInternal } from "./eip712.js";
+import { EngineError, ResolverError } from "./errors";
+import type { DisplayModel } from "./types";
+import { resolveCall } from "./resolver";
+import { formatWithResolvedCall } from "./engine";
+import { formatTypedData as formatTypedDataInternal } from "./eip712";
 
 // Re-export types
 export type {
@@ -35,7 +35,7 @@ export type {
   TokenMeta,
   TypedData,
   TypeMember,
-} from "./types.js";
+} from "./types";
 
 // Re-export errors
 export {
@@ -45,10 +45,10 @@ export {
   Eip712Error,
   ResolverError,
   TokenLookupError,
-} from "./errors.js";
+} from "./errors";
 
 // Re-export utilities
-export { hexToBytes, bytesToHex, toChecksumAddress } from "./utils.js";
+export { hexToBytes, bytesToHex, toChecksumAddress } from "./utils";
 
 /**
  * Formats a clear signing preview for a transaction.
@@ -136,5 +136,5 @@ export { formatTypedDataInternal as formatTypedData };
  * Lower-level function to resolve a descriptor and format with pre-resolved data.
  * Useful when you need more control over the resolution process.
  */
-export { resolveCall } from "./resolver.js";
-export { formatWithResolvedCall } from "./engine.js";
+export { resolveCall } from "./resolver";
+export { formatWithResolvedCall } from "./engine";

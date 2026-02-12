@@ -2,7 +2,7 @@
  * EIP-712 typed data formatting for clear signing.
  */
 
-import { Eip712Error } from "./errors.js";
+import { Eip712Error } from "./errors";
 import type {
   DisplayField,
   DisplayFormat,
@@ -10,17 +10,17 @@ import type {
   DisplayModel,
   EffectiveField,
   TypedData,
-} from "./types.js";
-import { resolveEffectiveField } from "./descriptor.js";
-import { resolveTyped, mergedDescriptorValue } from "./resolver.js";
-import { lookupTokenByCaip19 } from "./token-registry.js";
+} from "./types";
+import { resolveEffectiveField } from "./descriptor";
+import { resolveTyped, mergedDescriptorValue } from "./resolver";
+import { lookupTokenByCaip19 } from "./token-registry";
 import {
   formatAmountWithDecimals,
   parseBigInt,
   toChecksumAddress,
   hexToBytes,
-} from "./utils.js";
-import { interpolateTemplate, resolveMetadataValue } from "./engine.js";
+} from "./utils";
+import { interpolateTemplate, resolveMetadataValue } from "./engine";
 
 interface TypedDescriptor {
   context?: TypedContext;

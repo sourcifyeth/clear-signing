@@ -1,16 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "NodeNext",
-    "lib": ["ES2020", "DOM"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
@@ -19,5 +18,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist"]
 }

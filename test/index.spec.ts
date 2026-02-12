@@ -6,7 +6,7 @@ import {
   bytesToHex,
   toChecksumAddress,
   ResolverError,
-} from "../src/index.js";
+} from "../src/index";
 
 describe("clear-signing", () => {
   describe("hexToBytes", () => {
