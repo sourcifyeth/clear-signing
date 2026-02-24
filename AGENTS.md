@@ -12,16 +12,18 @@ This is a TypeScript implementation of [ERC-7730](https://eips.ethereum.org/EIPS
 
 ```
 src/
-├── index.ts           # Public API: format(), formatWithValue(), formatTypedData()
-├── types.ts           # TypeScript interfaces and types
-├── errors.ts          # Error classes: DescriptorError, EngineError, ResolverError, Eip712Error
-├── utils.ts           # Crypto & formatting: keccak256, checksums, hex conversion
-├── descriptor.ts      # Descriptor parsing, ABI decoding, calldata decoding
-├── engine.ts          # Display formatting logic for transactions
-├── eip712.ts          # Display formatting logic for EIP-712 typed data
-├── resolver.ts        # Descriptor lookup by chain ID + contract address
-├── token-registry.ts  # Token metadata lookup (symbol, decimals, name)
-└── assets/            # Embedded JSON data (descriptors, ABIs, token registry)
+├── index.ts                    # Public API: format(), formatWithValue(), formatTypedData()
+├── types.ts                    # TypeScript interfaces and types
+├── errors.ts                   # Error classes: DescriptorError, EngineError, ResolverError, Eip712Error
+├── utils.ts                    # Crypto & formatting: keccak256, checksums, hex conversion
+├── descriptor.ts               # Descriptor parsing, ABI decoding, calldata decoding
+├── engine.ts                   # Display formatting logic for transactions
+├── eip712.ts                   # Display formatting logic for EIP-712 typed data
+├── resolver.ts                 # Descriptor lookup by chain ID + contract address
+├── token-registry.ts           # Token metadata lookup (symbol, decimals, name)
+├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
+├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
+└── assets/                     # Embedded JSON data (descriptors, ABIs, token registry)
 ```
 
 ## Key Data Flow
@@ -42,6 +44,73 @@ src/
    → eip712.formatTypedData() applies display rules to message fields
    → returns DisplayModel
    ```
+
+## Descriptor Sources
+
+The resolver accepts a `DescriptorSource` union to control where descriptors come from:
+
+### `GitHubRegistrySource`
+
+Fetches descriptors lazily from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) via the GitHub API. This is the default when no source is specified.
+
+```typescript
+const source: GitHubRegistrySource = {
+  type: "github",
+  repo: "LedgerHQ/clear-signing-erc7730-registry", // optional, default
+  ref: "master",                                     // optional, default
+};
+```
+
+**How it works:**
+
+1. `GitHubRegistryIndex.init()` calls the GitHub Git Trees API once to get all file paths.
+2. It fetches every `calldata-*.json` and `eip712-*.json` descriptor in parallel.
+3. Each descriptor is indexed by CAIP-10 key (`eip155:{chainId}:{address}`) into two maps:
+   - `calldataIndexCache` — keyed by `context.contract.deployments[].{chainId, address}`
+   - `eip712IndexCache` — keyed by `context.eip712.deployments[].{chainId, address}`
+4. Lookups return the absolute raw URL; the resolver then fetches and parses the descriptor on demand.
+
+**Known limitation — EIP-712 indexing:**
+
+ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index. Additionally, only one descriptor file per `(chainId, verifyingContract)` pair can be indexed — the first one encountered wins.
+
+### `InlineDescriptorSource`
+
+Provides a descriptor directly in memory, bypassing all network I/O. Intended for testing and self-contained integrations.
+
+```typescript
+const source: InlineDescriptorSource = {
+  type: "inline",
+  descriptor: { /* EIP-7730 descriptor object */ },
+  // ERC-7730 allows one include file per descriptor; the path key must
+  // match the value of descriptor.includes so the resolver can find it.
+  includes: {
+    "../../ercs/calldata-erc20-tokens.json": { /* included descriptor */ },
+  },
+};
+```
+
+The `includes` map is optional. ERC-7730 only allows a single include per descriptor, but the path key is required here to match the `includes` field value inside the descriptor JSON.
+
+### GitHub client module (`github-registry-client.ts`)
+
+Pure I/O layer with no caching. Exports:
+
+- `GithubSource` — `{ repo: string; ref: string }` — the resolved (non-optional) source config
+- `fetchRegistryFilePaths(source)` — returns repo-relative paths of all descriptor files
+- `fetchRegistryFile(path, source)` — fetches and parses a single descriptor file
+- `fetchAbsoluteUrl(url)` — fetches an arbitrary absolute URL (used for includes)
+- `resolveIncludeUrl(descriptorUrl, includePath)` — resolves a relative include path
+- `descriptorUrl(path, source)` — constructs the absolute raw URL for a repo-relative path
+- `DEFAULT_REPO` / `DEFAULT_REF` constants live in `github-registry-index.ts`, not here
+
+### GitHub index module (`github-registry-index.ts`)
+
+- `GitHubRegistryIndex` class — one instance per `(repo, ref)` combination, created via `getIndex()` in resolver
+- Constructor takes `GitHubRegistrySource | undefined`; defaults are applied from `DEFAULT_REPO` / `DEFAULT_REF`
+- `init()` is idempotent (guarded by `built` boolean); called automatically from all lookup methods
+- `lookupCalldataDescriptorUrl(chainId, address)` — returns URL or `undefined`
+- `lookupEip712DescriptorUrl(chainId, address)` — returns URL or `undefined`
 
 ## Important Concepts
 

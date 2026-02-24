@@ -238,6 +238,54 @@ This library works in both environments:
 
 No Node.js-specific APIs are used. Cryptographic operations use [@noble/hashes](https://github.com/paulmillr/noble-hashes) which is browser-compatible.
 
+## Descriptor Sources
+
+By default, the library fetches descriptors from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) on GitHub. You can customise this or provide descriptors inline.
+
+### GitHub Registry (default)
+
+```typescript
+import { format } from "@sourcifyeth/clear-signing";
+import type { GitHubRegistrySource } from "@sourcifyeth/clear-signing";
+
+const source: GitHubRegistrySource = {
+  type: "github",
+  repo: "LedgerHQ/clear-signing-erc7730-registry", // optional
+  ref: "master",                                     // optional
+};
+
+const result = format(1, "0x...", calldata, { source });
+```
+
+On first use, the library fetches the full file tree from the GitHub API and indexes all `calldata-*.json` and `eip712-*.json` descriptor files. Subsequent calls within the same process use the in-memory index.
+
+### Inline Descriptors
+
+Supply a descriptor directly without any network I/O — useful for testing and self-contained integrations:
+
+```typescript
+import type { InlineDescriptorSource } from "@sourcifyeth/clear-signing";
+
+const source: InlineDescriptorSource = {
+  type: "inline",
+  descriptor: myDescriptor,
+  // Optional: provide include files referenced by descriptor.includes
+  includes: {
+    "../../ercs/calldata-erc20-tokens.json": includeDescriptor,
+  },
+};
+```
+
+### Known Limitation — EIP-712 Index Coverage
+
+ERC-7730 supports three ways for an EIP-712 descriptor to declare which contracts it applies to:
+
+- `context.eip712.deployments` — an array of `{ chainId, address }` pairs
+- `context.eip712.domain` — key-value domain constraints (e.g. `name`, `version`)
+- `context.eip712.domainSeparator` — a pre-computed domain separator hash
+
+The GitHub registry index only keys on `context.eip712.deployments`. Descriptors that rely solely on `domain` or `domainSeparator` for binding cannot be pre-indexed without access to a live EIP-712 domain. Additionally, only one descriptor per `(chainId, verifyingContract)` pair is indexed — the first one encountered wins.
+
 ## Adding Custom Descriptors
 
 The library ships with embedded descriptors. To add support for additional contracts, you would need to:

@@ -157,8 +157,39 @@ export interface ResolvedTypedDescriptor {
   addressBook: Map<string, string>;
 }
 
-/** Index entry for descriptor lookup. */
-export interface IndexEntry {
-  descriptor: string;
-  abi?: string;
+/** GitHub registry source for fetching descriptors from the Ledger registry. */
+export interface GitHubRegistrySource {
+  type: "github";
+  /** GitHub repo in "owner/repo" format. Defaults to "LedgerHQ/clear-signing-erc7730-registry". */
+  repo?: string;
+  /** Git ref (branch, tag, commit). Defaults to "master". */
+  ref?: string;
+}
+
+/**
+ * Inline source: a single user-provided descriptor object with optional pre-resolved includes.
+ *
+ * The ERC-7730 standard only allows a single file to be merged via the `includes` field.
+ * Since inline descriptors have no base URL to resolve relative paths against, the `includes`
+ * map requires the caller to supply the path string (matching the value of `descriptor.includes`)
+ * alongside the already-fetched include object.
+ */
+export interface InlineDescriptorSource {
+  type: "inline";
+  /** The raw descriptor JSON object. Must have a valid ERC-7730 context. */
+  descriptor: Record<string, unknown>;
+  /**
+   * Pre-resolved include files, keyed by the path string that appears in `descriptor.includes`.
+   * Required because inline descriptors have no base URL for relative path resolution.
+   */
+  includes?: { [path: string]: Record<string, unknown> };
+}
+
+/** Descriptor source configuration. */
+export type DescriptorSource = GitHubRegistrySource | InlineDescriptorSource;
+
+/** Options for resolver functions. */
+export interface ResolverOptions {
+  /** Descriptor source. Defaults to the Ledger GitHub registry. */
+  source?: DescriptorSource;
 }

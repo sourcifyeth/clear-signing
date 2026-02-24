@@ -31,7 +31,7 @@ export function bytesToHex(bytes: Uint8Array): string {
   return hex;
 }
 
-/** Normalize address to lowercase without 0x prefix check. */
+/** Normalize address to lowercase (preserves 0x prefix). */
 export function normalizeAddress(address: string): string {
   return address.trim().toLowerCase();
 }
