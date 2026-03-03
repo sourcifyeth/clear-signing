@@ -225,3 +225,22 @@ interface ExternalDataProvider {
   ) => Promise<NftCollectionNameResult | null>;
 }
 ```
+
+## Packaging
+
+The library will be published to **npm** under `@sourcifyeth/clear-signing` and is the primary intended distribution channel.
+
+```sh
+npm install @sourcifyeth/clear-signing
+```
+
+```typescript
+import { format, formatTypedData } from "@sourcifyeth/clear-signing";
+```
+
+The package will ship two builds:
+
+- **ESM** — for modern web targets. Works with any browser bundler (Webpack, Vite, Rollup, etc.).
+- **CJS** — for React Native. Metro (the React Native bundler) does not fully support ESM or the `exports` field in `package.json`, so a CommonJS build is required. The `react-native` field in `package.json` will point to this build so Metro picks it up automatically.
+
+Both builds include TypeScript declarations. The single dependency (`@noble/hashes`) is compatible with both environments.
