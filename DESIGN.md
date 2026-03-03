@@ -117,10 +117,28 @@ interface DisplayModel {
   warnings?: Warning[];
 }
 
-/** A single labeled field to display to the user. */
+/**
+ * A single labeled field to display to the user.
+ *
+ * When clear-signing transactions with embedded calldata (nested
+ * transactions), value will be another `DisplayModel` which is
+ * formatted via resolving a descriptor file for the embedded
+ * calldata.
+ */
 interface DisplayField {
   label: string; // e.g. "Spender"
-  value: string; // e.g. "vitalik.eth"
+  value: string | DisplayModel; // e.g. "vitalik.eth"
+
+  /**
+   * The fieldType and format properties can be used to show type-specific
+   * components. For example, for a fieldType of "address" the wallet can
+   * display an address copy button.
+   *
+   * The fieldType corresponds to the underlying Solidity type.
+   * The format corresponds to the specific display format as per ERC-7730.
+   */
+  fieldType: string; // e.g. "address", "integer", "bytes", etc.
+  format: string; // e.g. "addressName", "tokenAmount", "nftName", etc.
 
   /**
    * For example for externally resolved data, wallets should display
