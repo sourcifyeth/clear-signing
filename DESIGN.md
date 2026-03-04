@@ -9,11 +9,11 @@
 This library is a reference implementation intended to be used directly in web-based wallets.
 
 1. **Usable out of the box** — connecting to the GitHub registry requires zero configuration.
-2. **Flexible descriptor sources** — by default the library indexes the GitHub registry to resolve descriptors at runtime, but wallets can provide their own descriptors at build time or at runtime. The registry index itself can also be pre-built and bundled to avoid the initial network round-trip.
-3. **Minimal dependencies** — only `@noble/hashes` for keccak256. No Node.js-only APIs; targets modern browser environments.
-4. **Clear, typed output** — the `DisplayModel` type is the single return value for both calldata and EIP-712 formatting. Wallets consume it directly with no further parsing.
-5. **Graceful degradation** — when no descriptor exists, the library returns a raw fallback preview rather than throwing, so wallets can always show _something_.
-6. **Full ERC-7730 field format coverage** — all field formats defined in the ERC-7730 spec will be implemented.
+2. **Minimal dependencies** — only `@noble/hashes` for keccak256. No Node.js-only APIs; targets modern browser environments.
+3. **Clear, typed output** — the `DisplayModel` type is the single return value for both calldata and EIP-712 formatting. Wallets consume it directly with no further parsing.
+4. **Graceful degradation** — when no descriptor exists, the library returns a raw fallback preview rather than throwing, so wallets can always show _something_.
+5. **Full ERC-7730 field format coverage** — all field formats defined in the ERC-7730 spec will be implemented.
+6. **Flexible descriptor sources** — by default the library indexes the GitHub registry to resolve descriptors at runtime, but wallets can provide their own descriptors at build time or at runtime. The registry index itself can also be pre-built and bundled to avoid the initial network round-trip.
 7. **Transpilable** — the implementation serves as a well-structured source for AI-assisted transpilation into other languages (Rust, Swift, Kotlin, etc.) used by native wallet clients.
 
 ## Usage Flow
