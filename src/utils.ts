@@ -9,6 +9,15 @@ export function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 
+/** Encode an ASCII string to bytes without relying on TextEncoder (React Native compatible). */
+function asciiToBytes(str: string): Uint8Array {
+  const bytes = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i);
+  }
+  return bytes;
+}
+
 /** Convert hex string to bytes. */
 export function hexToBytes(hex: string): Uint8Array {
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -43,7 +52,7 @@ export function toChecksumAddress(bytes: Uint8Array): string {
   }
 
   const lower = bytesToHex(bytes).slice(2).toLowerCase();
-  const hash = keccak256(new TextEncoder().encode(lower));
+  const hash = keccak256(asciiToBytes(lower));
 
   let result = "0x";
   for (let i = 0; i < lower.length; i++) {
@@ -118,7 +127,7 @@ export function parseBigInt(text: string): bigint | undefined {
 
 /** Compute function selector from signature. */
 export function selectorForSignature(signature: string): Uint8Array {
-  const hash = keccak256(new TextEncoder().encode(signature));
+  const hash = keccak256(asciiToBytes(signature));
   return hash.slice(0, 4);
 }
 

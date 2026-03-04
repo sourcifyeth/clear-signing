@@ -40,7 +40,6 @@ interface GitTreeItem {
 
 interface GitTreeResponse {
   tree: GitTreeItem[];
-  truncated: boolean;
 }
 
 /**
@@ -54,14 +53,6 @@ export async function fetchRegistryFilePaths(
 ): Promise<string[]> {
   const url = `${apiBaseUrl(source)}/git/trees/${source.ref}?recursive=1`;
   const data = (await fetchJson(url)) as GitTreeResponse;
-
-  if (data.truncated) {
-    // If truncated, we still proceed with what we have — large repos may need
-    // pagination, but the Ledger registry is well within limits.
-    console.warn(
-      "[clear-signing] GitHub tree response was truncated; some descriptors may be missing.",
-    );
-  }
 
   return data.tree
     .filter((item) => item.type === "blob")
