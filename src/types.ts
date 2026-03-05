@@ -124,7 +124,7 @@ export type ArgumentValue =
   | { type: "raw"; bytes: Uint8Array };
 
 /** Full descriptor structure. */
-export interface Descriptor {
+export interface DescriptorObj {
   context: DescriptorContext;
   metadata: Record<string, unknown>;
   display: DescriptorDisplay;
@@ -239,3 +239,5 @@ export interface GitHubSource {
   repo: string;
   ref: string;
 }
+
+export type Descriptor = Record<string, unknown>;

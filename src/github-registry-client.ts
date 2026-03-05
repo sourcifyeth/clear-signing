@@ -4,7 +4,7 @@
  * Registry: https://github.com/LedgerHQ/clear-signing-erc7730-registry
  */
 
-import { GitHubSource } from "./types";
+import type { GitHubSource } from "./types";
 
 /**
  * Returns the raw content base URL for a GitHub repo/ref.
@@ -74,19 +74,4 @@ export async function fetchRegistryFile(
 ): Promise<unknown> {
   const url = `${rawBaseUrl(source)}/${repoRelativePath}`;
   return fetchJson(url);
-}
-
-/**
- * Resolves a relative include path against a repo-relative base path.
- *
- * e.g. resolveIncludePath("registry/tether/calldata-usdt.json", "../../ercs/calldata-erc20-tokens.json")
- *   => "ercs/calldata-erc20-tokens.json"
- */
-export function resolveIncludePath(
-  repoRelativePath: string,
-  includePath: string,
-): string {
-  return new URL(includePath, `https://x/${repoRelativePath}`).pathname.slice(
-    1,
-  );
 }

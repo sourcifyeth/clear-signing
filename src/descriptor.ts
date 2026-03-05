@@ -7,7 +7,7 @@ import type {
   AbiFunction,
   ArgumentValue,
   DecodedArgument,
-  Descriptor,
+  DescriptorObj,
   DescriptorDisplay,
   DisplayField,
   DisplayFormat,
@@ -199,7 +199,7 @@ function mergeAddressBookEntries(
 /**
  * Build a descriptor from resolved JSON strings.
  */
-export function buildDescriptor(resolved: ResolvedDescriptor): Descriptor {
+export function buildDescriptor(resolved: ResolvedDescriptor): DescriptorObj {
   const descriptorValue = mergeDescriptorIncludes(
     resolved.descriptorJson,
     resolved.includes,
@@ -260,7 +260,7 @@ function mergeInclude(
   }
 }
 
-function parseDescriptor(value: Record<string, unknown>): Descriptor {
+function parseDescriptor(value: Record<string, unknown>): DescriptorObj {
   const context = value.context as Record<string, unknown> | undefined;
   if (!context) {
     throw DescriptorError.parse("missing context");
@@ -308,7 +308,7 @@ function parseDescriptor(value: Record<string, unknown>): Descriptor {
  * Check if descriptor is bound to a specific chain and address.
  */
 export function isDescriptorBoundTo(
-  descriptor: Descriptor,
+  descriptor: DescriptorObj,
   chainId: number,
   address: string,
 ): boolean {
@@ -322,7 +322,7 @@ export function isDescriptorBoundTo(
  * Get function descriptors from a descriptor's ABI.
  */
 export function getFunctionDescriptors(
-  descriptor: Descriptor,
+  descriptor: DescriptorObj,
 ): FunctionDescriptor[] {
   const abi = descriptor.context.contract.abi;
   if (!abi || typeof abi === "string") {
@@ -346,7 +346,7 @@ export function getFunctionDescriptors(
  * Get display format map with normalized signatures.
  */
 export function getFormatMap(
-  descriptor: Descriptor,
+  descriptor: DescriptorObj,
 ): Map<string, DisplayFormat> {
   const map = new Map<string, DisplayFormat>();
   const formats = descriptor.display.formats || {};

@@ -4,7 +4,6 @@
 
 import { Eip712Error } from "./errors";
 import type {
-  DescriptorResolver,
   DisplayField,
   DisplayFormat,
   DisplayItem,
@@ -21,6 +20,7 @@ import {
   hexToBytes,
 } from "./utils";
 import { interpolateTemplate, resolveMetadataValue } from "./engine";
+import type { DescriptorResolver } from "./resolver";
 
 interface TypedDescriptor {
   context?: TypedContext;
