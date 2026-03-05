@@ -154,7 +154,6 @@ export interface ResolvedCall {
 export interface ResolvedTypedDescriptor {
   descriptorJson: string;
   includes: string[];
-  addressBook: Map<string, string>;
 }
 
 /** GitHub registry source for fetching descriptors from the Ledger registry. */
@@ -188,8 +187,55 @@ export interface InlineDescriptorSource {
 /** Descriptor source configuration. */
 export type DescriptorSource = GitHubRegistrySource | InlineDescriptorSource;
 
-/** Options for resolver functions. */
-export interface ResolverOptions {
-  /** Descriptor source. Defaults to the Ledger GitHub registry. */
-  source?: DescriptorSource;
+export interface FormatOptions {
+  /**
+   * Wallets should provide an object with async methods to resolve
+   * external data like ENS names, token metadata, and NFT collection
+   * names. The provided functions may use RPC calls or fetch data
+   * from internal sources. This allows the library to remain
+   * agnostic about how this data is fetched. If absent, the library
+   * will fall back to raw formats for the corresponding fields.
+   */
+  externalDataProvider?: unknown;
+
+  /**
+   * Controls where descriptors are fetched from.
+   * Defaults to the GitHub registry when omitted.
+   * Will also allow to pass descriptors directly.
+   */
+  descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
+
+  /**
+   * For proxy contracts: the resolved implementation address to use for
+   * descriptor lookup. If present the library will use this address to
+   * resolve the descriptor instead of `tx.to`.
+   * This leaves proxy detection up to the user of the library.
+   */
+  resolvedImplementationAddress?: string;
+}
+
+export type GitHubResolverOptions = {
+  type: "github";
+  index?: RegistryIndex; // defaults to a prebuilt GitHub registry index
+  githubSource?: Partial<GitHubSource>; // only used when type is "github", ignored otherwise
+};
+
+export type EmbeddedResolverOptions = {
+  type: "embedded";
+  index: RegistryIndex; // must be provided for embedded resolvers
+  descriptorDirectory: string;
+};
+
+export interface RegistryIndex {
+  /**
+   * Maps CAIP-10 identifiers ("eip155:{chainId}:{address}") to paths.
+   * The type of path depends on the index strategy.
+   */
+  calldataIndex: Record<string, string>;
+  typedDataIndex: Record<string, string>;
+}
+
+export interface GitHubSource {
+  repo: string;
+  ref: string;
 }

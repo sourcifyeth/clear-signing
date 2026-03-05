@@ -27,8 +27,7 @@ export type * from "./types";
 // Re-export errors
 export * from "./errors";
 
-// Re-export lower-level resolver and engine APIs
-export { resolveCall, resolveTyped, clearCache } from "./resolver";
+// Re-export lower-level engine API
 export { formatWithResolvedCall } from "./engine";
 
 // TODO: instead of calldata + value, we should use full transaction objects as parameter for extensibility.

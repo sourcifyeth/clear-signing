@@ -80,19 +80,130 @@ export class DecodedArguments {
 }
 
 /**
+ * Merge descriptor JSON with its include files as specified in ERC-7730 "Organizing files".
+ *
+ * Include values fill in only keys not already present in the descriptor.
+ * For nested objects, merging is applied recursively. Arrays and primitives
+ * use the descriptor's value when a key conflicts.
+ * The `includes` key is removed from the result.
+ */
+export function mergeDescriptorIncludes(
+  descriptorJson: string,
+  includeJsons: string[],
+): Record<string, unknown> {
+  const descriptor = JSON.parse(descriptorJson) as Record<string, unknown>;
+  for (const includeJson of includeJsons) {
+    mergeInclude(
+      descriptor,
+      JSON.parse(includeJson) as Record<string, unknown>,
+    );
+  }
+  delete descriptor.includes;
+  return descriptor;
+}
+
+/**
+ * Build an address book from descriptor metadata, mapping addresses to
+ * human-readable labels as per ERC-7730.
+ *
+ * Covers EIP-712 descriptors: populates from context.eip712.deployments
+ * and metadata.addressBook. Pass `verifyingContract` to ensure the
+ * verifying contract address is always included.
+ */
+export function buildAddressBook(
+  descriptor: Record<string, unknown>,
+  verifyingContract?: string,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  const metadata = descriptor.metadata as Record<string, unknown> | undefined;
+  if (!metadata) return map;
+
+  const label = getMetadataLabel(metadata);
+  if (label) {
+    const context = descriptor.context as Record<string, unknown> | undefined;
+    const eip712 = context?.eip712 as Record<string, unknown> | undefined;
+    const deployments = eip712?.deployments as
+      | Array<Record<string, unknown>>
+      | undefined;
+    if (deployments) {
+      for (const dep of deployments) {
+        const addr = dep.address as string | undefined;
+        if (addr) {
+          map.set(normalizeAddress(addr), label);
+        }
+      }
+    }
+    if (verifyingContract) {
+      const key = normalizeAddress(verifyingContract);
+      if (!map.has(key)) map.set(key, label);
+    }
+  }
+
+  mergeAddressBookEntries(map, metadata.addressBook);
+  return map;
+}
+
+function getMetadataLabel(
+  metadata: Record<string, unknown>,
+): string | undefined {
+  const token = metadata.token as Record<string, unknown> | undefined;
+  if (token) {
+    const name = token.name as string | undefined;
+    const symbol = token.symbol as string | undefined;
+    if (name && symbol) {
+      return name.toLowerCase() === symbol.toLowerCase()
+        ? name
+        : `${name} (${symbol})`;
+    }
+    return name ?? symbol;
+  }
+
+  const info = metadata.info as Record<string, unknown> | undefined;
+  if (info) {
+    const legalName = info.legalName as string | undefined;
+    if (legalName) return legalName;
+    const name = info.name as string | undefined;
+    if (name) return name;
+  }
+
+  const owner = metadata.owner as string | undefined;
+  if (owner) return owner;
+
+  return undefined;
+}
+
+function mergeAddressBookEntries(
+  map: Map<string, string>,
+  value: unknown,
+): void {
+  if (!value || typeof value !== "object") return;
+  const entries = value as Record<string, unknown>;
+  for (const [key, labelValue] of Object.entries(entries)) {
+    if (typeof labelValue === "string") {
+      if (!map.has(normalizeAddress(key))) {
+        map.set(normalizeAddress(key), labelValue);
+      }
+    } else if (typeof labelValue === "object" && labelValue !== null) {
+      const nested = labelValue as Record<string, unknown>;
+      for (const [innerKey, innerLabelValue] of Object.entries(nested)) {
+        if (typeof innerLabelValue === "string") {
+          if (!map.has(normalizeAddress(innerKey))) {
+            map.set(normalizeAddress(innerKey), innerLabelValue);
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
  * Build a descriptor from resolved JSON strings.
  */
 export function buildDescriptor(resolved: ResolvedDescriptor): Descriptor {
-  const descriptorValue = JSON.parse(resolved.descriptorJson);
-
-  // Merge includes
-  for (const includeJson of resolved.includes) {
-    const includeValue = JSON.parse(includeJson);
-    mergeInclude(descriptorValue, includeValue);
-  }
-
-  // Remove includes key
-  delete descriptorValue.includes;
+  const descriptorValue = mergeDescriptorIncludes(
+    resolved.descriptorJson,
+    resolved.includes,
+  );
 
   // Inject ABI if needed
   if (resolved.abiJson && needsAbiInjection(descriptorValue)) {

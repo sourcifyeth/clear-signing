@@ -4,6 +4,7 @@
 
 import { Eip712Error } from "./errors";
 import type {
+  DescriptorResolver,
   DisplayField,
   DisplayFormat,
   DisplayItem,
@@ -11,8 +12,7 @@ import type {
   EffectiveField,
   TypedData,
 } from "./types";
-import { resolveEffectiveField } from "./descriptor";
-import { resolveTyped, mergedDescriptorValue } from "./resolver";
+import { resolveEffectiveField, buildAddressBook } from "./descriptor";
 import { lookupTokenByCaip19 } from "./token-registry";
 import {
   formatAmountWithDecimals,
@@ -44,15 +44,25 @@ interface TypedDisplay {
 /**
  * Format EIP-712 typed data for clear signing display.
  */
-export function formatTypedData(data: TypedData): DisplayModel {
+export async function formatTypedData(
+  data: TypedData,
+  resolver: DescriptorResolver,
+): Promise<DisplayModel> {
   const chainId = extractChainId(data.domain);
   const verifyingContract = extractVerifyingContract(data.domain);
 
-  const resolved = resolveTyped(chainId, verifyingContract);
-  const descriptor = parseDescriptor(
-    resolved.descriptorJson,
-    resolved.includes,
+  const r = resolver;
+  const mergedDescriptor = await r.resolveTypedDataDescriptor(
+    chainId,
+    verifyingContract,
   );
+  if (!mergedDescriptor) {
+    throw Eip712Error.typedData(
+      `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
+    );
+  }
+  const descriptor = parseDescriptor(mergedDescriptor);
+  const addressBook = buildAddressBook(mergedDescriptor, verifyingContract);
   const warnings: string[] = [];
 
   if (descriptor.context) {
@@ -76,7 +86,6 @@ export function formatTypedData(data: TypedData): DisplayModel {
   }
 
   const items: DisplayItem[] = [];
-  const addressBook = resolved.addressBook;
   const renderedValues = new Map<string, string>();
 
   for (const required of format.required) {
@@ -133,22 +142,21 @@ export function formatTypedData(data: TypedData): DisplayModel {
   };
 }
 
-function parseDescriptor(
-  descriptorJson: string,
-  includes: string[],
-): TypedDescriptor {
-  const descriptorValue = mergedDescriptorValue(descriptorJson, includes);
-
+function parseDescriptor(merged: Record<string, unknown>): TypedDescriptor {
   return {
-    context: descriptorValue.context as TypedContext | undefined,
-    metadata: (descriptorValue.metadata as Record<string, unknown>) || {},
+    context: merged.context as TypedContext | undefined,
+    metadata: (merged.metadata as Record<string, unknown>) || {},
     display: {
       definitions:
-        ((descriptorValue.display as Record<string, unknown>)
-          ?.definitions as Record<string, DisplayField>) || {},
+        ((merged.display as Record<string, unknown>)?.definitions as Record<
+          string,
+          DisplayField
+        >) || {},
       formats:
-        ((descriptorValue.display as Record<string, unknown>)
-          ?.formats as Record<string, DisplayFormat>) || {},
+        ((merged.display as Record<string, unknown>)?.formats as Record<
+          string,
+          DisplayFormat
+        >) || {},
     },
   };
 }

@@ -13,4 +13,5 @@ declare class URL {
   constructor(url: string, base?: string);
   toString(): string;
   readonly href: string;
+  readonly pathname: string;
 }
