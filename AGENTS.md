@@ -19,7 +19,7 @@ src/
 ├── descriptor.ts               # Descriptor parsing, ABI decoding, calldata decoding
 ├── engine.ts                   # Display formatting logic for transactions
 ├── eip712.ts                   # Display formatting logic for EIP-712 typed data
-├── resolver.ts                 # Descriptor lookup by chain ID + contract address
+├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
 ├── token-registry.ts           # Token metadata lookup (symbol, decimals, name)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
 ├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
@@ -96,12 +96,8 @@ The `includes` map is optional. ERC-7730 only allows a single include per descri
 
 Pure I/O layer with no caching. Exports:
 
-- `GithubSource` — `{ repo: string; ref: string }` — the resolved (non-optional) source config
 - `fetchRegistryFilePaths(source)` — returns repo-relative paths of all descriptor files
 - `fetchRegistryFile(path, source)` — fetches and parses a single descriptor file
-- `fetchAbsoluteUrl(url)` — fetches an arbitrary absolute URL (used for includes)
-- `resolveIncludeUrl(descriptorUrl, includePath)` — resolves a relative include path
-- `descriptorUrl(path, source)` — constructs the absolute raw URL for a repo-relative path
 - `DEFAULT_REPO` / `DEFAULT_REF` constants live in `github-registry-index.ts`, not here
 
 ### GitHub index module (`github-registry-index.ts`)
@@ -111,6 +107,18 @@ Pure I/O layer with no caching. Exports:
 - `init()` is idempotent (guarded by `built` boolean); called automatically from all lookup methods
 - `lookupCalldataDescriptorUrl(chainId, address)` — returns URL or `undefined`
 - `lookupEip712DescriptorUrl(chainId, address)` — returns URL or `undefined`
+
+## Descriptor Includes & Merging
+
+ERC-7730 descriptors may reference another descriptor file via a top-level `includes` field containing a relative path. `DescriptorResolver` automatically fetches and merges the included file before returning the descriptor.
+
+The merge is implemented in `mergeDescriptors(including, included)` (exported from `resolver.ts`) and follows the EIP-7730 spec:
+
+- **General keys:** the including descriptor's value wins; nested objects are deep-merged recursively.
+- **`display.formats[*].fields` arrays:** merged by `path` value — fields from the including descriptor override matching entries in the included descriptor, and new `path` values are appended.
+- **`includes` key:** dropped from the merged result.
+
+Include path resolution uses basic segment-by-segment string logic (no `path` module, no `URL`), so it works across Node, browsers, and React Native.
 
 ## Important Concepts
 
