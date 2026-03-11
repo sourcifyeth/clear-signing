@@ -4,12 +4,12 @@
 
 import { Eip712Error } from "./errors";
 import type {
-  DisplayField,
+  LegacyDisplayField,
   DisplayFormat,
   DisplayItem,
-  DisplayModel,
+  LegacyDisplayModel,
   EffectiveField,
-  TypedData,
+  LegacyTypedData,
 } from "./types";
 import { resolveEffectiveField, buildAddressBook } from "./descriptor";
 import { lookupTokenByCaip19 } from "./token-registry";
@@ -37,7 +37,7 @@ interface TypedEip712Context {
 }
 
 interface TypedDisplay {
-  definitions: Record<string, DisplayField>;
+  definitions: Record<string, LegacyDisplayField>;
   formats: Record<string, DisplayFormat>;
 }
 
@@ -45,9 +45,9 @@ interface TypedDisplay {
  * Format EIP-712 typed data for clear signing display.
  */
 export async function formatTypedData(
-  data: TypedData,
+  data: LegacyTypedData,
   resolver: DescriptorResolver,
-): Promise<DisplayModel> {
+): Promise<LegacyDisplayModel> {
   const chainId = extractChainId(data.domain);
   const verifyingContract = extractVerifyingContract(data.domain);
 
@@ -150,7 +150,7 @@ function parseDescriptor(merged: Record<string, unknown>): TypedDescriptor {
       definitions:
         ((merged.display as Record<string, unknown>)?.definitions as Record<
           string,
-          DisplayField
+          LegacyDisplayField
         >) || {},
       formats:
         ((merged.display as Record<string, unknown>)?.formats as Record<

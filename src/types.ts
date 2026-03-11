@@ -9,18 +9,17 @@ export interface DisplayItem {
 }
 
 /** Raw fallback preview details when no descriptor matches. */
-export interface RawPreview {
+export interface LegacyRawPreview {
   selector: string;
   args: string[];
 }
 
-/** Display model produced by the clear signing engine. */
-export interface DisplayModel {
+export interface LegacyDisplayModel {
   intent: string;
   interpolatedIntent?: string;
   items: DisplayItem[];
   warnings: string[];
-  raw?: RawPreview;
+  raw?: LegacyRawPreview;
 }
 
 /** Token metadata from the registry. */
@@ -30,8 +29,8 @@ export interface TokenMeta {
   name: string;
 }
 
-/** EIP-712 typed data structure. */
-export interface TypedData {
+/** @deprecated Use TypedData from the new design section instead. */
+export interface LegacyTypedData {
   types: Record<string, TypeMember[]>;
   primaryType: string;
   domain: Record<string, unknown>;
@@ -77,8 +76,7 @@ export interface FunctionInput {
   components?: FunctionInput[];
 }
 
-/** Display field definition from descriptor. */
-export interface DisplayField {
+export interface LegacyDisplayField {
   path?: string;
   label?: string;
   format?: string;
@@ -90,7 +88,7 @@ export interface DisplayField {
 export interface DisplayFormat {
   intent: string;
   interpolatedIntent?: string;
-  fields: DisplayField[];
+  fields: LegacyDisplayField[];
   required: string[];
 }
 
@@ -132,7 +130,7 @@ export interface DescriptorObj {
 
 /** Descriptor display section. */
 export interface DescriptorDisplay {
-  definitions?: Record<string, DisplayField>;
+  definitions?: Record<string, LegacyDisplayField>;
   formats?: Record<string, DisplayFormat>;
 }
 
@@ -187,6 +185,209 @@ export interface InlineDescriptorSource {
 /** Descriptor source configuration. */
 export type DescriptorSource = GitHubRegistrySource | InlineDescriptorSource;
 
+/////////////////////////////
+// NEW TYPES FOR NEW DESIGN
+/////////////////////////////
+
+/** Ethereum transaction to be formatted. */
+export interface Transaction {
+  chainId: number;
+  to: string;
+  /** calldata hex string */
+  data: string;
+  value?: bigint;
+  from?: string;
+}
+
+/** EIP-712 typed data domain. */
+export interface TypedDataDomain {
+  name?: string;
+  version?: string;
+  chainId?: number;
+  verifyingContract?: string;
+  salt?: string;
+}
+
+/** EIP-712 typed data input. */
+export interface TypedData {
+  account: string; // Needed for @.from references
+  types: Record<string, TypeMember[]>;
+  primaryType: string;
+  domain: TypedDataDomain;
+  message: Record<string, unknown>;
+}
+
+/** Non-fatal warning from formatting. */
+export interface Warning {
+  /** machine-readable warning code */
+  code: string;
+  /** human-readable warning message */
+  message: string;
+}
+
+export interface RawPreview {
+  /** function selector, e.g. "0x095ea7b3" */
+  selector: string;
+  /** hex-encoded ABI arguments */
+  args: string[];
+}
+
+/**
+ * A single labeled field to display to the user.
+ *
+ * When clear-signing transactions with embedded calldata (nested
+ * transactions), value will be another `DisplayModel` which is
+ * formatted via resolving a descriptor file for the embedded
+ * calldata.
+ */
+export interface DisplayField {
+  /** Label to show in the UI for this field. */
+  label: string;
+  /** Value to show in the UI for this field */
+  value: string | DisplayModel;
+
+  /**
+   * The fieldType and format properties can be used to show type-specific
+   * components. For example, for a fieldType of "address" the wallet can
+   * display an address copy button.
+   *
+   * The fieldType corresponds to the underlying Solidity type.
+   */
+  fieldType: string;
+  /**
+   * The format corresponds to the specific display format as per ERC-7730.
+   */
+  format: string;
+
+  /**
+   * For example for externally resolved data, wallets should display
+   * a warning when encountering unknown entities.
+   */
+  warning?: Warning;
+
+  /**
+   * For formatted addresses, wallets should also display the raw
+   * value in some form.
+   */
+  rawAddress?: string;
+}
+
+/**
+ * The complete display model produced by the library.
+ *
+ * According to ERC-7730, wallets have two display options:
+ *   1. Show `intent` as an explanation what the contract call does, and
+ *      `fields` as a list of labeled values representing the calldata parameters.
+ *   2. Show `interpolatedIntent` as a short string presentation of intent and fields,
+ *      which already has formatted field values embedded in it — in this case
+ *      `fields` can be omitted or shown as supplementary detail.
+ *
+ * When interpolation fails or is not defined, wallets should fall back to Option 1.
+ */
+export interface DisplayModel {
+  /**
+   * The intent from the resolved descriptor, representing a short
+   * description of the operation, e.g. "Approve token spending".
+   * Two possible forms:
+   *   - A simple human-readable string
+   *   - A list of human-readable key-value pairs
+   */
+  intent?: string | Record<string, string>;
+
+  /**
+   * Ordered list of fields to show to the user,
+   * formatted according to their field format specification.
+   */
+  fields?: DisplayField[];
+
+  /**
+   * Full sentence with formatted field values interpolated in, e.g.
+   * "Approve USDC spending up to 1,000 USDC for Uniswap V3".
+   * Absent when the descriptor does not define an interpolatedIntent,
+   * or when interpolation fails.
+   */
+  interpolatedIntent?: string;
+
+  /**
+   * Additional metadata directly from the resolved descriptor.
+   * Wallets may choose to display these items to provide additional
+   * context about the contract being interacted with.
+   */
+  metadata?: {
+    owner?: string;
+    contractName?: string;
+    info?: { deploymentDate?: string; url?: string };
+  };
+
+  /**
+   * Raw fallback data when no descriptor matched,
+   * or the descriptor was faulty.
+   */
+  raw?: LegacyRawPreview;
+
+  /**
+   * Non-fatal warnings providing additional context, e.g. why
+   * interpolation failed or why a field could not be formatted.
+   */
+  warnings?: Warning[];
+}
+
+/** Result of resolving an address name (ENS or local). */
+export interface AddressNameResult {
+  name: string;
+  /** Whether the resolved address type matches the expected type. */
+  typeMatch: boolean;
+}
+
+/** Result of resolving a token address */
+export interface TokenResult {
+  name: string;
+  symbol: string;
+  decimals: number;
+}
+
+/** Result of resolving an NFT collection name. */
+export interface NftCollectionNameResult {
+  name: string;
+}
+
+/** Wallet-provided async resolvers for external data. */
+export interface ExternalDataProvider {
+  /**
+   * Resolution for addressName formats. The wallet must verify if the
+   * address matches the provided type (e.g., "eoa", "contract", ...)
+   * if able to. If the type does not match, the wallet should indicate
+   * this in the result, such that the library can include a warning
+   * about the resolved field in the DisplayModel.
+   */
+  resolveEnsName?: (
+    address: string,
+    type: string,
+  ) => Promise<AddressNameResult | null>;
+  /**
+   * Resolution for addressName formats. The wallet must verify if the
+   * address matches the provided type (e.g., "eoa", "contract", ...)
+   * if able to. If the type does not match, the wallet should indicate
+   * this in the result, such that the library can include a warning
+   * about the resolved field in the DisplayModel.
+   */
+  resolveLocalName?: (
+    address: string,
+    type: string,
+  ) => Promise<AddressNameResult | null>;
+
+  /** Resolution for tokenAmount formats. */
+  resolveToken?: (
+    chainId: number,
+    tokenAddress: string,
+  ) => Promise<TokenResult | null>;
+
+  /** Resolution for nftName formats. */
+  resolveNftCollectionName?: (
+    collectionAddress: string,
+  ) => Promise<NftCollectionNameResult | null>;
+}
+
 export interface FormatOptions {
   /**
    * Wallets should provide an object with async methods to resolve
@@ -196,7 +397,7 @@ export interface FormatOptions {
    * agnostic about how this data is fetched. If absent, the library
    * will fall back to raw formats for the corresponding fields.
    */
-  externalDataProvider?: unknown;
+  externalDataProvider?: ExternalDataProvider;
 
   /**
    * Controls where descriptors are fetched from.

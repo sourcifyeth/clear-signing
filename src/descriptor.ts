@@ -9,7 +9,7 @@ import type {
   DecodedArgument,
   DescriptorObj,
   DescriptorDisplay,
-  DisplayField,
+  LegacyDisplayField,
   DisplayFormat,
   EffectiveField,
   FunctionDescriptor,
@@ -287,7 +287,7 @@ function parseDescriptor(value: Record<string, unknown>): DescriptorObj {
 
   const display = value.display as Record<string, unknown> | undefined;
   const parsedDisplay: DescriptorDisplay = {
-    definitions: (display?.definitions as Record<string, DisplayField>) || {},
+    definitions: (display?.definitions as Record<string, LegacyDisplayField>) || {},
     formats: (display?.formats as Record<string, DisplayFormat>) || {},
   };
 
@@ -575,8 +575,8 @@ function bytesToBigInt(bytes: Uint8Array): bigint {
  * Resolve effective field after applying definition references.
  */
 export function resolveEffectiveField(
-  field: DisplayField,
-  definitions: Record<string, DisplayField>,
+  field: LegacyDisplayField,
+  definitions: Record<string, LegacyDisplayField>,
   warnings: string[],
 ): EffectiveField | undefined {
   let path = field.path;

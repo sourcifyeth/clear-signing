@@ -203,7 +203,7 @@ interface FormatOptions {
    * Defaults to the GitHub registry when omitted.
    * Will also allow to pass descriptors directly.
    */
-  resolver?: unknown; // to be defined
+  descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
 
   /**
    * For proxy contracts: the resolved implementation address to use for

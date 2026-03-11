@@ -5,12 +5,12 @@
 import { EngineError } from "./errors";
 import type {
   ArgumentValue,
-  DisplayField,
+  LegacyDisplayField,
   DisplayFormat,
   DisplayItem,
-  DisplayModel,
+  LegacyDisplayModel,
   EffectiveField,
-  RawPreview,
+  LegacyRawPreview,
   ResolvedCall,
   TokenMeta,
 } from "./types";
@@ -54,7 +54,7 @@ export function formatWithResolvedCall(
   to: string,
   value: Uint8Array | undefined,
   calldata: Uint8Array,
-): DisplayModel {
+): LegacyDisplayModel {
   const tokenMetadata = resolved.tokenMetadata;
   const descriptor = buildDescriptor(resolved.descriptor);
 
@@ -132,7 +132,7 @@ function applyDisplayFormat(
   chainId: number,
   contractAddress: string,
   addressBook: Map<string, string>,
-  definitions: Record<string, DisplayField>,
+  definitions: Record<string, LegacyDisplayField>,
   tokenMetadata: Map<string, TokenMeta>,
 ): FormatRender {
   const items: DisplayItem[] = [];
@@ -477,7 +477,7 @@ export function resolveMetadataValue(
 function rawPreviewFromCalldata(
   selector: Uint8Array,
   calldata: Uint8Array,
-): RawPreview {
+): LegacyRawPreview {
   const args: string[] = [];
   if (calldata.length > 4) {
     const data = calldata.slice(4);
