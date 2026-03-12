@@ -21,7 +21,11 @@ export class DescriptorResolver {
 
   private pathResolver: PathResolver;
 
-  constructor(options: GitHubResolverOptions | EmbeddedResolverOptions) {
+  constructor(
+    options: GitHubResolverOptions | EmbeddedResolverOptions = {
+      type: "github",
+    },
+  ) {
     switch (options.type) {
       case "github":
         if (options.index) {

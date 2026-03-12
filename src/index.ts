@@ -16,6 +16,7 @@
  * ```
  */
 
+import { DescriptorResolver } from "./resolver";
 import type {
   DisplayModel,
   FormatOptions,
@@ -37,6 +38,9 @@ export async function format(
   tx: Transaction,
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
+  const descriptor = await new DescriptorResolver(
+    opts?.descriptorResolverOptions,
+  ).resolveCalldataDescriptor(tx.chainId, tx.to);
   throw new Error("Not implemented");
 }
 
@@ -48,5 +52,16 @@ export async function formatTypedData(
   typedData: TypedData,
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
+  if (!typedData.domain.chainId || !typedData.domain.verifyingContract) {
+    throw new Error(
+      "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
+    );
+  }
+  const descriptor = await new DescriptorResolver(
+    opts?.descriptorResolverOptions,
+  ).resolveTypedDataDescriptor(
+    typedData.domain.chainId,
+    typedData.domain.verifyingContract,
+  );
   throw new Error("Not implemented");
 }
