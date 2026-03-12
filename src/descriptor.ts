@@ -8,7 +8,7 @@ import type {
   ArgumentValue,
   DecodedArgument,
   DescriptorObj,
-  DescriptorDisplay,
+  LegacyDescriptorDisplay,
   LegacyDisplayField,
   DisplayFormat,
   EffectiveField,
@@ -286,7 +286,7 @@ function parseDescriptor(value: Record<string, unknown>): DescriptorObj {
   }
 
   const display = value.display as Record<string, unknown> | undefined;
-  const parsedDisplay: DescriptorDisplay = {
+  const parsedDisplay: LegacyDescriptorDisplay = {
     definitions: (display?.definitions as Record<string, LegacyDisplayField>) || {},
     formats: (display?.formats as Record<string, DisplayFormat>) || {},
   };

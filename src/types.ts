@@ -44,13 +44,13 @@ export interface TypeMember {
 }
 
 /** Descriptor context structure. */
-export interface DescriptorContext {
+export interface LegacyDescriptorContext {
   $id?: string;
-  contract: DescriptorContract;
+  contract: LegacyDescriptorContract;
 }
 
-/** Contract definition within a descriptor. */
-export interface DescriptorContract {
+/** Legacy contract definition used by the old parsing path. */
+export interface LegacyDescriptorContract {
   deployments: ContractDeployment[];
   abi?: AbiFunction[] | string;
 }
@@ -123,13 +123,13 @@ export type ArgumentValue =
 
 /** Full descriptor structure. */
 export interface DescriptorObj {
-  context: DescriptorContext;
+  context: LegacyDescriptorContext;
   metadata: Record<string, unknown>;
-  display: DescriptorDisplay;
+  display: LegacyDescriptorDisplay;
 }
 
 /** Descriptor display section. */
-export interface DescriptorDisplay {
+export interface LegacyDescriptorDisplay {
   definitions?: Record<string, LegacyDisplayField>;
   formats?: Record<string, DisplayFormat>;
 }
@@ -323,7 +323,7 @@ export interface DisplayModel {
    * Raw fallback data when no descriptor matched,
    * or the descriptor was faulty.
    */
-  raw?: LegacyRawPreview;
+  raw?: RawPreview;
 
   /**
    * Non-fatal warnings providing additional context, e.g. why
@@ -441,4 +441,151 @@ export interface GitHubSource {
   ref: string;
 }
 
-export type Descriptor = Record<string, unknown>;
+export type DescriptorFieldFormatType =
+  | "raw"
+  | "amount"
+  | "tokenAmount"
+  | "nftName"
+  | "date"
+  | "duration"
+  | "unit"
+  | "enum"
+  | "chainId"
+  | "addressName"
+  | "tokenTicker"
+  | "calldata"
+  | "interoperableAddressName";
+
+export type DescriptorAddressType =
+  | "wallet"
+  | "eoa"
+  | "contract"
+  | "token"
+  | "collection";
+
+export type DescriptorAddressSource = "local" | "ens";
+
+export interface DescriptorFieldEncryption {
+  scheme?: string;
+  plaintextType?: string;
+  fallbackLabel?: string;
+}
+
+export interface DescriptorFieldFormatParams {
+  tokenPath?: string;
+  token?: string;
+  nativeCurrencyAddress?: string | string[];
+  threshold?: string | number;
+  message?: string;
+  chainIdPath?: string;
+  chainId?: number;
+  encoding?: "timestamp" | "blockheight";
+  base?: string;
+  decimals?: number;
+  prefix?: boolean;
+  $ref?: string;
+  collectionPath?: string;
+  collection?: string;
+  calleePath?: string;
+  callee?: string;
+  selectorPath?: string;
+  selector?: string;
+  amountPath?: string;
+  amount?: string;
+  spenderPath?: string;
+  spender?: string;
+  types?: DescriptorAddressType[];
+  sources?: DescriptorAddressSource[];
+  senderAddress?: string | string[];
+}
+
+export interface DescriptorFieldFormat {
+  $id?: string;
+  path?: string;
+  value?: unknown;
+  label?: string;
+  format?: DescriptorFieldFormatType;
+  params?: DescriptorFieldFormatParams;
+  visible?: "never" | "always" | "optional" | Record<string, unknown>;
+  separator?: string;
+  encryption?: DescriptorFieldEncryption;
+  $ref?: string;
+}
+
+export interface DescriptorFieldGroup {
+  path?: string;
+  label?: string;
+  fields?: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+  iteration?: "sequential" | "bundled";
+}
+
+export interface DescriptorFormatSpec {
+  $id?: string;
+  intent?: string | Record<string, string>;
+  interpolatedIntent?: string;
+  fields?: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+}
+
+export interface DescriptorDisplay {
+  definitions?: Record<string, DescriptorFieldFormat>;
+  formats?: Record<string, DescriptorFormatSpec>;
+}
+
+export interface DescriptorDeployment {
+  chainId?: number;
+  address?: string;
+}
+
+export interface DescriptorContractFactory {
+  deployEvent?: string;
+  deployments?: DescriptorDeployment[];
+}
+
+export interface DescriptorContractContext {
+  deployments?: DescriptorDeployment[];
+  factory?: DescriptorContractFactory;
+}
+
+export interface DescriptorEip712Context {
+  $id?: string;
+  domain?: Record<string, unknown>;
+  deployments?: DescriptorDeployment[];
+  domainSeparator?: string;
+}
+
+export interface DescriptorContext {
+  $id?: string;
+  contract?: DescriptorContractContext;
+  eip712?: DescriptorEip712Context;
+}
+
+export interface DescriptorMetadataInfo {
+  deploymentDate?: string;
+  url?: string;
+}
+
+export interface DescriptorMetadataToken {
+  name?: string;
+  ticker?: string;
+  decimals?: number;
+}
+
+export interface DescriptorMetadata {
+  owner?: string;
+  contractName?: string;
+  info?: DescriptorMetadataInfo;
+  token?: DescriptorMetadataToken;
+  constants?: Record<string, string | number | boolean>;
+  maps?: Record<string, unknown>;
+  enums?: Record<string, Record<string, string>>;
+}
+
+export interface Descriptor {
+  $schema?: string;
+  includes?: string;
+  context?: DescriptorContext;
+  metadata?: DescriptorMetadata;
+  display?: DescriptorDisplay;
+  // Required for the merge algorithm in resolver.ts to iterate over arbitrary keys.
+  [key: string]: unknown;
+}

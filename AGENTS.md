@@ -240,6 +240,16 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 4. **Address normalization:** Always lowercase for comparisons
 5. **Token registry keys are lowercase** CAIP-19 identifiers
 
+## Descriptor Type — Defensive Programming
+
+All fields in `Descriptor` and its nested types (`DescriptorContext`, `DescriptorMetadata`, `DescriptorDisplay`, etc.) are **optional**. This is intentional:
+
+- Descriptors come from external sources (GitHub registry, user-supplied inline objects) with no runtime schema validation.
+- Making every field optional forces callers to null-check before accessing values, preventing crashes on partial or malformed descriptors.
+- The `[key: string]: unknown` index signature on `Descriptor` allows the merge algorithm in `resolver.ts` to iterate over arbitrary top-level keys while preserving proper types for known fields.
+
+When writing code that reads descriptor fields, always guard: `descriptor.context?.contract?.deployments?.forEach(...)`.
+
 ## Not Yet Implemented (from EIP-7730 spec)
 
 - `duration` format (HH:MM:ss)
