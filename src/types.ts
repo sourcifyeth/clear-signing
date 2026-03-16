@@ -43,61 +43,11 @@ export interface TypeMember {
   type: string;
 }
 
-/** Descriptor context structure. */
-export interface LegacyDescriptorContext {
-  $id?: string;
-  contract: LegacyDescriptorContract;
-}
-
-/** Legacy contract definition used by the old parsing path. */
-export interface LegacyDescriptorContract {
-  deployments: ContractDeployment[];
-  abi?: AbiFunction[] | string;
-}
-
-/** Contract deployment info. */
-export interface ContractDeployment {
-  chainId: number;
-  address: string;
-}
-
-/** ABI function definition. */
-export interface AbiFunction {
-  name: string;
-  type: string;
-  inputs: FunctionInput[];
-}
-
 /** ABI function input parameter. */
 export interface FunctionInput {
   name: string;
   type: string;
-  internalType?: string;
   components?: FunctionInput[];
-}
-
-export interface LegacyDisplayField {
-  path?: string;
-  label?: string;
-  format?: string;
-  params?: Record<string, unknown>;
-  $ref?: string;
-}
-
-/** Display format definition from descriptor. */
-export interface DisplayFormat {
-  intent: string;
-  interpolatedIntent?: string;
-  fields: LegacyDisplayField[];
-  required: string[];
-}
-
-/** Resolved effective field after applying references. */
-export interface EffectiveField {
-  path: string;
-  label: string;
-  format?: string;
-  params: Record<string, unknown>;
 }
 
 /** Function descriptor with computed selector. */
@@ -120,70 +70,6 @@ export type ArgumentValue =
   | { type: "address"; bytes: Uint8Array }
   | { type: "uint"; value: bigint }
   | { type: "raw"; bytes: Uint8Array };
-
-/** Full descriptor structure. */
-export interface DescriptorObj {
-  context: LegacyDescriptorContext;
-  metadata: Record<string, unknown>;
-  display: LegacyDescriptorDisplay;
-}
-
-/** Descriptor display section. */
-export interface LegacyDescriptorDisplay {
-  definitions?: Record<string, LegacyDisplayField>;
-  formats?: Record<string, DisplayFormat>;
-}
-
-/** Resolved descriptor bundle. */
-export interface ResolvedDescriptor {
-  descriptorJson: string;
-  abiJson?: string;
-  includes: string[];
-}
-
-/** Resolved call bundle with token metadata. */
-export interface ResolvedCall {
-  descriptor: ResolvedDescriptor;
-  tokenMetadata: Map<string, TokenMeta>;
-  addressBook: Map<string, string>;
-}
-
-/** Resolved EIP-712 descriptor bundle. */
-export interface ResolvedTypedDescriptor {
-  descriptorJson: string;
-  includes: string[];
-}
-
-/** GitHub registry source for fetching descriptors from the Ledger registry. */
-export interface GitHubRegistrySource {
-  type: "github";
-  /** GitHub repo in "owner/repo" format. Defaults to "LedgerHQ/clear-signing-erc7730-registry". */
-  repo?: string;
-  /** Git ref (branch, tag, commit). Defaults to "master". */
-  ref?: string;
-}
-
-/**
- * Inline source: a single user-provided descriptor object with optional pre-resolved includes.
- *
- * The ERC-7730 standard only allows a single file to be merged via the `includes` field.
- * Since inline descriptors have no base URL to resolve relative paths against, the `includes`
- * map requires the caller to supply the path string (matching the value of `descriptor.includes`)
- * alongside the already-fetched include object.
- */
-export interface InlineDescriptorSource {
-  type: "inline";
-  /** The raw descriptor JSON object. Must have a valid ERC-7730 context. */
-  descriptor: Record<string, unknown>;
-  /**
-   * Pre-resolved include files, keyed by the path string that appears in `descriptor.includes`.
-   * Required because inline descriptors have no base URL for relative path resolution.
-   */
-  includes?: { [path: string]: Record<string, unknown> };
-}
-
-/** Descriptor source configuration. */
-export type DescriptorSource = GitHubRegistrySource | InlineDescriptorSource;
 
 /////////////////////////////
 // NEW TYPES FOR NEW DESIGN

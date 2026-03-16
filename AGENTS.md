@@ -31,9 +31,12 @@ src/
 1. **Transaction formatting:**
 
    ```
-   format(chainId, to, calldata)
-   → resolver.resolveCall() finds descriptor + token metadata
-   → engine.formatWithResolvedCall() decodes calldata and applies display rules
+   format(tx: Transaction, opts?)
+   → DescriptorResolver.resolveCalldataDescriptor() fetches descriptor
+   → engine.formatCalldata(descriptor, tx, addressBook, externalDataProvider)
+       → parseFunctionSignatureKey() derives FunctionDescriptors from display.formats keys
+       → decodeArguments() decodes calldata
+       → applyDisplayFormat() renders each field
    → returns DisplayModel
    ```
 
@@ -127,9 +130,19 @@ Include path resolution uses basic segment-by-segment string logic (no `path` mo
 JSON files that define how to display contract interactions:
 
 - `context.contract.deployments` - Chain/address bindings
-- `context.contract.abi` - Function definitions for calldata decoding
-- `display.formats` - Per-function display rules with field formatting
+- `display.formats` - Per-function display rules with field formatting. **Keys are the full function
+  signatures including parameter names and types**, e.g. `"approve(address spender,uint256 value)"`.
+  These keys are the sole source of function selector computation and calldata decoding — no
+  separate ABI field is needed or used.
 - `metadata` - Constants, token info, address book entries
+
+**`context.contract.abi` is deprecated and removed from the current ERC-7730 spec.** Some old
+descriptor files in `src/assets/` still contain it, but the engine ignores it. Function
+descriptors are derived entirely from `display.formats` keys via `parseFunctionSignatureKey()`
+in `descriptor.ts`.
+
+**`required` and `excluded` arrays on format entries are also legacy** and not part of the current
+spec. Do not add them to `DescriptorFormatSpec`.
 
 ### Field Formats
 
@@ -144,19 +157,36 @@ Uses CAIP-19 identifiers:
 
 ### Path Resolution
 
-- `@.to` - Contract address being called
-- `@value` - Transaction value
-- `$.metadata.*` - Descriptor metadata fields
-- Direct paths like `spender`, `value`, `amount`
+ERC-7730 defines two path namespaces:
+
+- **No prefix** — refers to a calldata argument (by name) or EIP-712 message field (by name)
+- **`@.` prefix** — refers to a container field (transaction or typed data properties)
+- **`$.metadata.*`** — refers to descriptor metadata fields
+
+#### EVM Transaction container paths (`@.` prefix)
+
+| Path | Value |
+|---|---|
+| `@.from` | Sender address (`tx.from`) |
+| `@.value` | Native currency value (`tx.value`) |
+| `@.to` | Destination contract address (`tx.to`) |
+| `@.chainId` | Chain ID (`tx.chainId`) |
+
+#### EIP-712 typed data container paths (`@.` prefix)
+
+| Path | Value |
+|---|---|
+| `@.from` | Signer account address (`typedData.account`) |
+
+Container paths are resolved by `resolveTransactionPath()` and `resolveTypedDataPath()` in `descriptor.ts`.
 
 ## Common Tasks
 
 ### Adding a new contract descriptor
 
-1. Create descriptor JSON in `src/assets/descriptors/`
-2. Add ABI JSON in `src/assets/abis/` (if not inline)
-3. Add entry to `src/assets/index.json` mapping `eip155:{chainId}:{address}` to descriptor path
-4. Import and register in `src/resolver.ts` (descriptorMap, abiMap)
+Descriptors are served from the GitHub registry (`LedgerHQ/clear-signing-erc7730-registry`) and
+resolved at runtime. The `src/assets/` directory contains old PoC descriptors — do not extend it.
+To test with a custom descriptor, use `InlineDescriptorSource` (see `FormatOptions`).
 
 ### Adding a new field format
 

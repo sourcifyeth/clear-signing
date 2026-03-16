@@ -4,14 +4,17 @@
 
 import { Eip712Error } from "./errors";
 import type {
-  LegacyDisplayField,
-  DisplayFormat,
+  DescriptorFieldFormat,
+  DescriptorFormatSpec,
   DisplayItem,
   LegacyDisplayModel,
-  EffectiveField,
   LegacyTypedData,
 } from "./types";
-import { resolveEffectiveField, buildAddressBook } from "./descriptor";
+import {
+  type ResolvedField,
+  resolveField,
+  buildAddressBook,
+} from "./descriptor";
 import { lookupTokenByCaip19 } from "./token-registry";
 import {
   formatAmountWithDecimals,
@@ -37,8 +40,8 @@ interface TypedEip712Context {
 }
 
 interface TypedDisplay {
-  definitions: Record<string, LegacyDisplayField>;
-  formats: Record<string, DisplayFormat>;
+  definitions: Record<string, DescriptorFieldFormat>;
+  formats: Record<string, DescriptorFormatSpec>;
 }
 
 /**
@@ -88,28 +91,22 @@ export async function formatTypedData(
   const items: DisplayItem[] = [];
   const renderedValues = new Map<string, string>();
 
-  for (const required of format.required) {
-    if (getValue(data.message, required) === undefined) {
-      warnings.push(`Missing required field '${required}'`);
-    }
-  }
-
-  for (const field of format.fields) {
-    const effective = resolveEffectiveField(
+  for (const field of format.fields ?? []) {
+    const { resolved: resolved, warnings: fieldWarnings } = resolveField(
       field,
       descriptor.display.definitions,
-      warnings,
     );
-    if (!effective) continue;
+    warnings.push(...fieldWarnings);
+    if (!resolved) continue;
 
-    const value = getValue(data.message, effective.path);
+    const value = getValue(data.message, resolved.path);
     if (value === undefined) {
-      warnings.push(`No value found for field path '${effective.path}'`);
+      warnings.push(`No value found for field path '${resolved.path}'`);
       continue;
     }
 
     const rendered = renderField(
-      effective,
+      resolved,
       value,
       data.message,
       descriptor.metadata,
@@ -117,8 +114,8 @@ export async function formatTypedData(
       addressBook,
       warnings,
     );
-    renderedValues.set(effective.path, rendered);
-    items.push({ label: effective.label, value: rendered });
+    renderedValues.set(resolved.path, rendered);
+    items.push({ label: resolved.label, value: rendered });
   }
 
   let interpolatedIntent: string | undefined;
@@ -135,7 +132,7 @@ export async function formatTypedData(
   }
 
   return {
-    intent: format.intent,
+    intent: typeof format.intent === "string" ? format.intent : "",
     interpolatedIntent,
     items,
     warnings,
@@ -150,19 +147,19 @@ function parseDescriptor(merged: Record<string, unknown>): TypedDescriptor {
       definitions:
         ((merged.display as Record<string, unknown>)?.definitions as Record<
           string,
-          LegacyDisplayField
+          DescriptorFieldFormat
         >) || {},
       formats:
         ((merged.display as Record<string, unknown>)?.formats as Record<
           string,
-          DisplayFormat
+          DescriptorFormatSpec
         >) || {},
     },
   };
 }
 
 function renderField(
-  field: EffectiveField,
+  field: ResolvedField,
   value: unknown,
   message: Record<string, unknown>,
   metadata: Record<string, unknown>,
@@ -182,9 +179,6 @@ function renderField(
       );
     case "date":
       return formatDate(value);
-    case "number":
-      return formatNumber(value);
-    case "address":
     case "addressName":
       return formatAddress(value, addressBook);
     case "enum":
@@ -196,7 +190,7 @@ function renderField(
 }
 
 function formatTokenAmount(
-  field: EffectiveField,
+  field: ResolvedField,
   value: unknown,
   message: Record<string, unknown>,
   metadata: Record<string, unknown>,
@@ -248,7 +242,7 @@ function formatTokenAmount(
 }
 
 function tokenAmountMessage(
-  field: EffectiveField,
+  field: ResolvedField,
   amount: bigint,
   metadata: Record<string, unknown>,
 ): string | undefined {
@@ -295,14 +289,6 @@ function formatDate(value: unknown): string {
   }
 }
 
-function formatNumber(value: unknown): string {
-  if (typeof value === "number") {
-    return value.toString();
-  }
-  const str = valueAsString(value);
-  return str ?? formatRaw(value);
-}
-
 function formatAddress(
   value: unknown,
   addressBook: Map<string, string>,
@@ -335,7 +321,7 @@ function formatAddress(
 }
 
 function formatEnum(
-  field: EffectiveField,
+  field: ResolvedField,
   value: unknown,
   metadata: Record<string, unknown>,
 ): string {

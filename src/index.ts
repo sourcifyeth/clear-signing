@@ -17,6 +17,9 @@
  */
 
 import { DescriptorResolver } from "./resolver";
+import { formatCalldata, rawPreviewFromCalldata } from "./engine";
+import { buildAddressBook } from "./descriptor";
+import { hexToBytes, extractSelector } from "./utils";
 import type {
   DisplayModel,
   FormatOptions,
@@ -41,7 +44,24 @@ export async function format(
   const descriptor = await new DescriptorResolver(
     opts?.descriptorResolverOptions,
   ).resolveCalldataDescriptor(tx.chainId, tx.to);
-  throw new Error("Not implemented");
+
+  if (!descriptor) {
+    const calldata = hexToBytes(tx.data);
+    const selector = extractSelector(calldata);
+    return {
+      raw: rawPreviewFromCalldata(selector, calldata),
+      warnings: [
+        {
+          code: "NO_DESCRIPTOR",
+          message: `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
+        },
+      ],
+    };
+  }
+
+  const addressBook = buildAddressBook(descriptor);
+
+  return formatCalldata(tx, descriptor, addressBook, opts?.externalDataProvider);
 }
 
 /**

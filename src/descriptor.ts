@@ -4,20 +4,21 @@
 
 import { DescriptorError, TokenLookupError } from "./errors";
 import type {
-  AbiFunction,
   ArgumentValue,
   DecodedArgument,
-  DescriptorObj,
-  LegacyDescriptorDisplay,
-  LegacyDisplayField,
-  DisplayFormat,
-  EffectiveField,
+  Descriptor,
+  DescriptorFieldFormat,
+  DescriptorFieldFormatParams,
+  DescriptorFieldFormatType,
+  DescriptorFormatSpec,
   FunctionDescriptor,
   FunctionInput,
-  ResolvedDescriptor,
+  Transaction,
+  TypedData,
 } from "./types";
 import {
   bytesToHex,
+  hexToBytes,
   normalizeAddress,
   normalizeCaip19,
   selectorForSignature,
@@ -54,61 +55,11 @@ export class DecodedArguments {
   getOrdered(): DecodedArgument[] {
     return this.ordered;
   }
-
-  /**
-   * Add the call value as a special @value argument.
-   */
-  withValue(value: Uint8Array | undefined): DecodedArguments {
-    if (value === undefined) return this;
-    if (value.length > 32) {
-      throw DescriptorError.calldata("call value must be at most 32 bytes");
-    }
-
-    const word = new Uint8Array(32);
-    const start = 32 - value.length;
-    word.set(value, start);
-
-    const amount = bytesToBigInt(word);
-    this.push(
-      "@value",
-      this.ordered.length,
-      { type: "uint", value: amount },
-      word,
-    );
-    return this;
-  }
-}
-
-/**
- * Merge descriptor JSON with its include files as specified in ERC-7730 "Organizing files".
- *
- * Include values fill in only keys not already present in the descriptor.
- * For nested objects, merging is applied recursively. Arrays and primitives
- * use the descriptor's value when a key conflicts.
- * The `includes` key is removed from the result.
- */
-export function mergeDescriptorIncludes(
-  descriptorJson: string,
-  includeJsons: string[],
-): Record<string, unknown> {
-  const descriptor = JSON.parse(descriptorJson) as Record<string, unknown>;
-  for (const includeJson of includeJsons) {
-    mergeInclude(
-      descriptor,
-      JSON.parse(includeJson) as Record<string, unknown>,
-    );
-  }
-  delete descriptor.includes;
-  return descriptor;
 }
 
 /**
  * Build an address book from descriptor metadata, mapping addresses to
  * human-readable labels as per ERC-7730.
- *
- * Covers EIP-712 descriptors: populates from context.eip712.deployments
- * and metadata.addressBook. Pass `verifyingContract` to ensure the
- * verifying contract address is always included.
  */
 export function buildAddressBook(
   descriptor: Record<string, unknown>,
@@ -197,206 +148,210 @@ function mergeAddressBookEntries(
 }
 
 /**
- * Build a descriptor from resolved JSON strings.
- */
-export function buildDescriptor(resolved: ResolvedDescriptor): DescriptorObj {
-  const descriptorValue = mergeDescriptorIncludes(
-    resolved.descriptorJson,
-    resolved.includes,
-  );
-
-  // Inject ABI if needed
-  if (resolved.abiJson && needsAbiInjection(descriptorValue)) {
-    const abiValue = JSON.parse(resolved.abiJson);
-    injectAbi(descriptorValue, abiValue);
-  }
-
-  return parseDescriptor(descriptorValue);
-}
-
-function needsAbiInjection(descriptorValue: Record<string, unknown>): boolean {
-  const abi = (descriptorValue.context as Record<string, unknown> | undefined)
-    ?.contract as Record<string, unknown> | undefined;
-  if (!abi) return true;
-  const abiValue = (abi as Record<string, unknown>).abi;
-  if (abiValue === undefined || abiValue === null) return true;
-  if (Array.isArray(abiValue) || typeof abiValue === "object") return false;
-  return true;
-}
-
-function injectAbi(
-  descriptorValue: Record<string, unknown>,
-  abiValue: unknown,
-): void {
-  const context = descriptorValue.context as
-    | Record<string, unknown>
-    | undefined;
-  if (!context) return;
-  const contract = context.contract as Record<string, unknown> | undefined;
-  if (!contract) return;
-  contract.abi = abiValue;
-}
-
-function mergeInclude(
-  target: Record<string, unknown>,
-  include: Record<string, unknown>,
-): void {
-  for (const [key, value] of Object.entries(include)) {
-    if (target[key] === undefined) {
-      target[key] = value;
-    } else if (
-      typeof target[key] === "object" &&
-      target[key] !== null &&
-      !Array.isArray(target[key]) &&
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value)
-    ) {
-      mergeInclude(
-        target[key] as Record<string, unknown>,
-        value as Record<string, unknown>,
-      );
-    }
-  }
-}
-
-function parseDescriptor(value: Record<string, unknown>): DescriptorObj {
-  const context = value.context as Record<string, unknown> | undefined;
-  if (!context) {
-    throw DescriptorError.parse("missing context");
-  }
-
-  const contract = context.contract as Record<string, unknown> | undefined;
-  if (!contract) {
-    throw DescriptorError.parse("missing context.contract");
-  }
-
-  const deployments =
-    (contract.deployments as Array<Record<string, unknown>>) || [];
-  const parsedDeployments = deployments.map((d) => ({
-    chainId: Number(d.chainId),
-    address: String(d.address),
-  }));
-
-  let abi: AbiFunction[] | string | undefined;
-  if (Array.isArray(contract.abi)) {
-    abi = contract.abi as AbiFunction[];
-  } else if (typeof contract.abi === "string") {
-    abi = contract.abi;
-  }
-
-  const display = value.display as Record<string, unknown> | undefined;
-  const parsedDisplay: LegacyDescriptorDisplay = {
-    definitions: (display?.definitions as Record<string, LegacyDisplayField>) || {},
-    formats: (display?.formats as Record<string, DisplayFormat>) || {},
-  };
-
-  return {
-    context: {
-      $id: context.$id as string | undefined,
-      contract: {
-        deployments: parsedDeployments,
-        abi,
-      },
-    },
-    metadata: (value.metadata as Record<string, unknown>) || {},
-    display: parsedDisplay,
-  };
-}
-
-/**
  * Check if descriptor is bound to a specific chain and address.
  */
 export function isDescriptorBoundTo(
-  descriptor: DescriptorObj,
+  descriptor: Descriptor,
   chainId: number,
   address: string,
 ): boolean {
   const normalized = normalizeAddress(address);
-  return descriptor.context.contract.deployments.some(
-    (d) => d.chainId === chainId && normalizeAddress(d.address) === normalized,
+  return (
+    descriptor.context?.contract?.deployments?.some(
+      (d) =>
+        d.chainId === chainId &&
+        typeof d.address === "string" &&
+        normalizeAddress(d.address) === normalized,
+    ) ?? false
   );
 }
 
 /**
- * Get function descriptors from a descriptor's ABI.
+ * Build a map from hex selector (e.g. "0x095ea7b3") to the parsed function descriptor
+ * and its display format spec. Parses display.formats keys as function signatures —
+ * no separate ABI needed.
  */
-export function getFunctionDescriptors(
-  descriptor: DescriptorObj,
-): FunctionDescriptor[] {
-  const abi = descriptor.context.contract.abi;
-  if (!abi || typeof abi === "string") {
-    return [];
+export function getFormatsBySelector(
+  descriptor: Descriptor,
+): Map<string, { fn: FunctionDescriptor; spec: DescriptorFormatSpec }> {
+  const map = new Map<
+    string,
+    { fn: FunctionDescriptor; spec: DescriptorFormatSpec }
+  >();
+  const formats = descriptor.display?.formats;
+  if (!formats) return map;
+
+  for (const [key, spec] of Object.entries(formats)) {
+    const fn = parseFunctionSignatureKey(key);
+    if (!fn) continue;
+    map.set(bytesToHex(fn.selector), { fn, spec });
   }
-
-  return abi
-    .filter((fn) => fn.type === "function")
-    .map((fn) => {
-      const typedSignature = typedSignatureFor(fn);
-      const selector = selectorForSignature(typedSignature);
-      return {
-        inputs: fn.inputs,
-        typedSignature,
-        selector,
-      };
-    });
-}
-
-/**
- * Get display format map with normalized signatures.
- */
-export function getFormatMap(
-  descriptor: DescriptorObj,
-): Map<string, DisplayFormat> {
-  const map = new Map<string, DisplayFormat>();
-  const formats = descriptor.display.formats || {};
-
-  for (const [signature, format] of Object.entries(formats)) {
-    const normalized = normalizeSignatureKey(signature);
-    if (normalized) {
-      map.set(normalized, format);
-    }
-  }
-
   return map;
 }
 
-function normalizeSignatureKey(signature: string): string | undefined {
-  const openParen = signature.indexOf("(");
-  const closeParen = signature.lastIndexOf(")");
-  if (openParen === -1 || closeParen === -1) return undefined;
+/**
+ * Parse a display.formats key as a full function signature into a FunctionDescriptor.
+ *
+ * Per ERC-7730, keys MUST include parameter names and use canonical Solidity types.
+ * Commas MUST NOT be followed by spaces; exactly one space between type and name.
+ *
+ * Examples:
+ *   "deposit()"
+ *   "approve(address spender,uint256 value)"
+ *   "submitOrder((address token,uint256 amount) order,bytes32 salt)"
+ */
+export function parseFunctionSignatureKey(
+  key: string,
+): FunctionDescriptor | undefined {
+  const openParen = key.indexOf("(");
+  if (openParen === -1) return undefined;
 
-  const name = signature.slice(0, openParen).trim();
-  const params = signature.slice(openParen + 1, closeParen);
+  const fnName = key.slice(0, openParen).trim();
+  if (!fnName) return undefined;
 
-  const types: string[] = [];
-  if (params.trim().length > 0) {
-    for (const param of params.split(",")) {
-      const trimmed = param.trim();
-      if (trimmed.length === 0) continue;
-      const ty = trimmed.split(/\s+/)[0];
-      types.push(ty.trim());
+  // Find the matching closing paren for the top-level param list
+  const afterOpen = key.slice(openParen + 1);
+  const closeIdx = findMatchingClose(afterOpen, 0);
+  if (closeIdx === -1) return undefined;
+
+  const paramsStr = afterOpen.slice(0, closeIdx);
+  const inputs = parseParamList(paramsStr);
+
+  const canonical = `${fnName}(${canonicalParamList(inputs)})`;
+  const selector = selectorForSignature(canonical);
+
+  return { inputs, typedSignature: canonical, selector };
+}
+
+/** Find the index of the closing ')' that matches the opening '(' at depth 0. */
+function findMatchingClose(s: string, startDepth: number): number {
+  let depth = startDepth;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") {
+      if (depth === 0) return i;
+      depth--;
     }
   }
-
-  return `${name}(${types.join(",")})`;
+  return -1;
 }
 
-function typedSignatureFor(fn: AbiFunction): string {
-  const params = fn.inputs.map(typeSignatureForInput);
-  return `${fn.name.trim()}(${params.join(",")})`;
-}
-
-function typeSignatureForInput(input: FunctionInput): string {
-  const ty = input.type.trim();
-  if (ty.startsWith("tuple")) {
-    const suffix = ty.slice(5); // Remove 'tuple' prefix
-    const nested = (input.components || [])
-      .map(typeSignatureForInput)
-      .join(",");
-    return `(${nested})${suffix}`;
+/** Split a top-level parameter list string by commas, respecting nested parens. */
+function splitTopLevel(paramsStr: string): string[] {
+  if (paramsStr.trim() === "") return [];
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of paramsStr) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
   }
-  return ty;
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function parseParamList(paramsStr: string): FunctionInput[] {
+  return splitTopLevel(paramsStr).map(parseParam);
+}
+
+/**
+ * Parse a single parameter string like:
+ *   "address"            → {type:"address", name:""}
+ *   "address spender"    → {type:"address", name:"spender"}
+ *   "uint256[]"          → {type:"uint256[]", name:""}
+ *   "(address src,uint256 amt) desc"  → {type:"tuple", name:"desc", components:[...]}
+ *   "(address src,uint256 amt)[] orders" → {type:"tuple[]", name:"orders", components:[...]}
+ */
+function parseParam(param: string): FunctionInput {
+  param = param.trim();
+
+  if (param.startsWith("(")) {
+    // Tuple: find matching close, then check for array suffix and optional name
+    const closeIdx = findMatchingClose(param.slice(1), 0);
+    if (closeIdx === -1) return { name: "", type: "tuple" };
+
+    const inner = param.slice(1, closeIdx + 1);
+    const components = parseParamList(inner);
+
+    const rest = param.slice(closeIdx + 2).trim(); // after ")"
+    const { arraySuffix, name } = extractSuffixAndName(rest);
+
+    return { type: `tuple${arraySuffix}`, name, components };
+  }
+
+  // Non-tuple: "type" or "type name" or "type[] name"
+  const { arraySuffix, base, name } = extractBaseArrayName(param);
+  return { type: `${base}${arraySuffix}`, name };
+}
+
+/**
+ * From a string like "[] orders" or "orders" or "" extract array suffix and name.
+ * Used after the closing ) of a tuple.
+ */
+function extractSuffixAndName(rest: string): {
+  arraySuffix: string;
+  name: string;
+} {
+  // Collect leading array brackets: [], [3], etc.
+  let arraySuffix = "";
+  let i = 0;
+  while (i < rest.length && rest[i] === "[") {
+    const closeB = rest.indexOf("]", i);
+    if (closeB === -1) break;
+    arraySuffix += rest.slice(i, closeB + 1);
+    i = closeB + 1;
+  }
+  const name = rest.slice(i).trim();
+  return { arraySuffix, name };
+}
+
+/**
+ * From a non-tuple param string like "address", "address spender", "uint256[]",
+ * "uint256[] values" — extract base type, array suffix, and name.
+ */
+function extractBaseArrayName(param: string): {
+  base: string;
+  arraySuffix: string;
+  name: string;
+} {
+  // Split by whitespace
+  const parts = param.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { base: "", arraySuffix: "", name: "" };
+
+  // Check if last token could be an identifier name (purely alphanumeric/underscore, not a type)
+  const last = parts[parts.length - 1];
+  const rest = parts.slice(0, -1).join("");
+
+  const looksLikeName = /^[a-zA-Z_]\w*$/.test(last) && parts.length > 1;
+
+  const typeStr = looksLikeName ? rest : parts.join("");
+  const name = looksLikeName ? last : "";
+
+  // Separate base type from trailing array suffixes like "[]", "[3]"
+  const arrayMatch = typeStr.match(/^(.*?)(\[[\d,\s]*\](?:\[[\d,\s]*\])*)$/);
+  if (arrayMatch) {
+    return { base: arrayMatch[1], arraySuffix: arrayMatch[2], name };
+  }
+  return { base: typeStr, arraySuffix: "", name };
+}
+
+/** Build canonical (selector-compatible) param list — types only, no names. */
+function canonicalParamList(inputs: FunctionInput[]): string {
+  return inputs.map(canonicalParam).join(",");
+}
+
+function canonicalParam(input: FunctionInput): string {
+  if (input.type.startsWith("tuple")) {
+    const suffix = input.type.slice(5); // array suffix after "tuple", e.g. "[]"
+    return `(${canonicalParamList(input.components ?? [])})${suffix}`;
+  }
+  return input.type;
 }
 
 /**
@@ -494,7 +449,7 @@ function decodeInput(
   }
 
   const word = calldata.slice(start, end);
-  const value = decodeWord(input.type, input.internalType, word);
+  const value = decodeWord(input.type, word);
   const name = argumentName(prefix, input);
 
   return {
@@ -526,12 +481,8 @@ function argumentName(
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
-function decodeWord(
-  kind: string,
-  internalType: string | undefined,
-  word: Uint8Array,
-): ArgumentValue {
-  if (internalTypeIsAddress(internalType, kind) || kind === "address") {
+function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
+  if (kind === "address") {
     const bytes = word.slice(12);
     return { type: "address", bytes };
   }
@@ -543,26 +494,6 @@ function decodeWord(
   return { type: "raw", bytes: word };
 }
 
-function internalTypeIsAddress(
-  internalType: string | undefined,
-  kind: string,
-): boolean {
-  if (!internalType) return false;
-  const normalized = internalType.trim();
-  if (normalized.length === 0) return false;
-  if (normalized.toLowerCase() === "address") return true;
-
-  // Check if last segment is "address"
-  const segments = normalized.split(/[.\s:]/);
-  const lastSegment = segments[segments.length - 1];
-  if (lastSegment?.toLowerCase() === "address") return true;
-
-  // Special case: "Address" internal type with uint kind
-  if (normalized === "Address" && kind.startsWith("uint")) return true;
-
-  return false;
-}
-
 function bytesToBigInt(bytes: Uint8Array): bigint {
   let result = 0n;
   for (const byte of bytes) {
@@ -571,18 +502,26 @@ function bytesToBigInt(bytes: Uint8Array): bigint {
   return result;
 }
 
+/** Resolved effective field after applying references. */
+export interface ResolvedField {
+  path: string;
+  label: string;
+  format?: DescriptorFieldFormatType;
+  params: DescriptorFieldFormatParams;
+}
+
 /**
  * Resolve effective field after applying definition references.
  */
-export function resolveEffectiveField(
-  field: LegacyDisplayField,
-  definitions: Record<string, LegacyDisplayField>,
-  warnings: string[],
-): EffectiveField | undefined {
+export function resolveField(
+  field: DescriptorFieldFormat,
+  definitions: Record<string, DescriptorFieldFormat>,
+): { resolved: ResolvedField | undefined; warnings: string[] } {
+  const warnings: string[] = [];
   let path = field.path;
   let label = field.label;
   let format = field.format;
-  let params = { ...(field.params || {}) };
+  let params: DescriptorFieldFormatParams = field.params ?? {};
 
   if (field.$ref) {
     const name = extractDefinitionName(field.$ref);
@@ -592,7 +531,7 @@ export function resolveEffectiveField(
         if (path === undefined) path = def.path;
         if (label === undefined) label = def.label;
         if (format === undefined) format = def.format;
-        params = mergeParams(def.params || {}, params);
+        params = mergeParams(def.params ?? {}, params);
       } else {
         warnings.push(`Unknown display definition reference '${field.$ref}'`);
       }
@@ -601,13 +540,11 @@ export function resolveEffectiveField(
     }
   }
 
-  if (path === undefined) return undefined;
+  if (path === undefined) return { resolved: undefined, warnings };
 
   return {
-    path,
-    label: label ?? path,
-    format,
-    params,
+    resolved: { path, label: label ?? path, format, params },
+    warnings,
   };
 }
 
@@ -619,14 +556,60 @@ function extractDefinitionName(reference: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Resolves an ERC-7730 container path for an EVM transaction.
+ * Handles @.from, @.value, @.to, @.chainId as per the spec.
+ */
+export function resolveTransactionPath(
+  path: string,
+  tx: Transaction,
+): ArgumentValue | undefined {
+  switch (path) {
+    case "@.from":
+      if (!tx.from) return undefined;
+      return { type: "address", bytes: hexToBytes(tx.from) };
+    case "@.value":
+      if (tx.value === undefined) return undefined;
+      return { type: "uint", value: tx.value };
+    case "@.to":
+      return { type: "address", bytes: hexToBytes(tx.to) };
+    case "@.chainId":
+      return { type: "uint", value: BigInt(tx.chainId) };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Resolves an ERC-7730 container path for EIP-712 typed data.
+ * @.from → signer account, @.to → verifyingContract, @.chainId → domain.chainId.
+ */
+export function resolveTypedDataPath(
+  path: string,
+  typedData: TypedData,
+): ArgumentValue | undefined {
+  switch (path) {
+    case "@.from":
+      return { type: "address", bytes: hexToBytes(typedData.account) };
+    case "@.to":
+      if (!typedData.domain.verifyingContract) return undefined;
+      return { type: "address", bytes: hexToBytes(typedData.domain.verifyingContract) };
+    case "@.chainId":
+      if (typedData.domain.chainId === undefined) return undefined;
+      return { type: "uint", value: BigInt(typedData.domain.chainId) };
+    default:
+      return undefined;
+  }
+}
+
 function mergeParams(
-  base: Record<string, unknown>,
-  overlay: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged = { ...base };
+  base: DescriptorFieldFormatParams,
+  overlay: DescriptorFieldFormatParams,
+): DescriptorFieldFormatParams {
+  const merged: DescriptorFieldFormatParams = { ...base };
   for (const [key, value] of Object.entries(overlay)) {
     if (value !== null && value !== undefined) {
-      merged[key] = value;
+      (merged as Record<string, unknown>)[key] = value;
     }
   }
   return merged;
@@ -636,7 +619,7 @@ function mergeParams(
  * Determine token lookup key from field parameters.
  */
 export function determineTokenKey(
-  field: EffectiveField,
+  field: ResolvedField,
   decoded: DecodedArguments,
   chainId: number,
   contractAddress: string,

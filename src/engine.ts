@@ -2,173 +2,216 @@
  * Presentation engine for clear signing previews.
  */
 
-import { EngineError } from "./errors";
 import type {
   ArgumentValue,
-  LegacyDisplayField,
-  DisplayFormat,
-  DisplayItem,
-  LegacyDisplayModel,
-  EffectiveField,
-  LegacyRawPreview,
-  ResolvedCall,
+  Descriptor,
+  DescriptorFieldFormat,
+  DescriptorFieldGroup,
+  DescriptorFormatSpec,
+  DescriptorMetadata,
+  DisplayField,
+  DisplayModel,
+  ExternalDataProvider,
+  RawPreview,
   TokenMeta,
+  Transaction,
+  Warning,
 } from "./types";
 import type { DecodedArguments } from "./descriptor";
 import {
-  buildDescriptor,
   decodeArguments,
   defaultValueString,
   determineTokenKey,
-  displayLabel,
-  getFormatMap,
-  getFunctionDescriptors,
+  type ResolvedField,
+  getFormatsBySelector,
   isDescriptorBoundTo,
-  rawWordHex,
-  resolveEffectiveField,
+  resolveField,
+  resolveTransactionPath,
 } from "./descriptor";
 import {
-  bytesEqual,
   bytesToHex,
   extractSelector,
   formatAmountWithDecimals,
   formatSelectorHex,
+  hexToBytes,
   nativeTokenKey,
   parseBigInt,
   toChecksumAddress,
 } from "./utils";
+import { lookupTokenByCaip19 } from "./token-registry";
 
-interface FormatRender {
-  items: DisplayItem[];
-  warnings: string[];
-  interpolatedIntent?: string;
+function warn(code: string, message: string): Warning {
+  return { code, message };
+}
+
+function fieldTypeFromArgValue(value: ArgumentValue): string {
+  switch (value.type) {
+    case "address":
+      return "address";
+    case "uint":
+      return "uint256";
+    case "raw":
+      return "bytes";
+  }
+}
+
+function isFieldGroup(
+  field: DescriptorFieldFormat | DescriptorFieldGroup,
+): field is DescriptorFieldGroup {
+  return Array.isArray((field as DescriptorFieldGroup).fields);
 }
 
 /**
- * Decodes calldata using a previously resolved descriptor bundle and returns
- * a human-readable preview.
+ * Decodes calldata using a resolved descriptor and returns a human-readable
+ * DisplayModel using the new design types.
  */
-export function formatWithResolvedCall(
-  resolved: ResolvedCall,
-  chainId: number,
-  to: string,
-  value: Uint8Array | undefined,
-  calldata: Uint8Array,
-): LegacyDisplayModel {
-  const tokenMetadata = resolved.tokenMetadata;
-  const descriptor = buildDescriptor(resolved.descriptor);
+export async function formatCalldata(
+  tx: Transaction,
+  descriptor: Descriptor,
+  addressBook: Map<string, string>,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<DisplayModel> {
+  const warnings: Warning[] = [];
+  const calldata = hexToBytes(tx.data);
+  const selector = extractSelector(calldata);
 
-  const warnings: string[] = [];
-
-  if (!isDescriptorBoundTo(descriptor, chainId, to)) {
+  if (!isDescriptorBoundTo(descriptor, tx.chainId, tx.to)) {
     warnings.push(
-      `Descriptor deployment mismatch for chain ${chainId} and address ${to}`,
+      warn(
+        "DEPLOYMENT_MISMATCH",
+        `Descriptor is not bound to chain ${tx.chainId} and address ${tx.to}`,
+      ),
     );
+    return {
+      raw: rawPreviewFromCalldata(selector, calldata),
+      warnings,
+    };
   }
 
-  const selector = extractSelector(calldata);
+  const formatsBySelector = getFormatsBySelector(descriptor);
   const selectorHex = formatSelectorHex(selector);
+  const match = formatsBySelector.get(selectorHex);
 
-  const functions = getFunctionDescriptors(descriptor);
-  const displayFormats = getFormatMap(descriptor);
-  const addressBook = resolved.addressBook;
-
-  const fn = functions.find((f) => bytesEqual(f.selector, selector));
-
-  if (!fn) {
-    warnings.push(`No ABI match for selector ${selectorHex}`);
+  if (!match) {
+    warnings.push(
+      warn("NO_FORMAT_MATCH", `No format match for selector ${selectorHex}`),
+    );
     return {
-      intent: "Unknown transaction",
-      items: [],
       warnings,
       raw: rawPreviewFromCalldata(selector, calldata),
     };
   }
 
-  const decoded = decodeArguments(fn, calldata).withValue(value);
+  const { fn, spec: format } = match;
+  const decoded = decodeArguments(fn, calldata);
 
-  const format = displayFormats.get(fn.typedSignature);
-  if (format) {
-    const render = applyDisplayFormat(
-      format,
-      decoded,
-      descriptor.metadata,
-      chainId,
-      to,
-      addressBook,
-      descriptor.display.definitions || {},
-      tokenMetadata,
-    );
-    warnings.push(...render.warnings);
-    return {
-      intent: format.intent,
-      interpolatedIntent: render.interpolatedIntent,
-      items: render.items,
-      warnings,
-    };
-  }
-
-  warnings.push(`No display format defined for signature ${fn.typedSignature}`);
-  const items = decoded.getOrdered().map((arg) => ({
-    label: displayLabel(arg),
-    value: defaultValueString(arg.value),
-  }));
-
+  const render = await applyDisplayFormat(
+    tx,
+    descriptor,
+    format,
+    decoded,
+    addressBook,
+    externalDataProvider,
+  );
+  warnings.push(...render.warnings);
+  const meta = descriptor.metadata;
   return {
-    intent: "Transaction",
-    items,
-    warnings,
-    raw: {
-      selector: selectorHex,
-      args: decoded.getOrdered().map(rawWordHex),
-    },
+    intent: format.intent,
+    interpolatedIntent: render.interpolatedIntent,
+    fields: render.fields,
+    metadata: meta
+      ? {
+          owner: meta.owner,
+          contractName: meta.contractName,
+          info: meta.info,
+        }
+      : undefined,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
-function applyDisplayFormat(
-  format: DisplayFormat,
+interface ApplyFormatResult {
+  fields: DisplayField[];
+  warnings: Warning[];
+  interpolatedIntent?: string;
+}
+
+async function applyDisplayFormat(
+  tx: Transaction,
+  descriptor: Descriptor,
+  format: DescriptorFormatSpec,
   decoded: DecodedArguments,
-  metadata: Record<string, unknown>,
-  chainId: number,
-  contractAddress: string,
   addressBook: Map<string, string>,
-  definitions: Record<string, LegacyDisplayField>,
-  tokenMetadata: Map<string, TokenMeta>,
-): FormatRender {
-  const items: DisplayItem[] = [];
-  const warnings: string[] = [];
+  externalDataProvider?: ExternalDataProvider,
+): Promise<ApplyFormatResult> {
+  const metadata = descriptor.metadata;
+  const definitions = descriptor.display?.definitions ?? {};
+  const fields: DisplayField[] = [];
+  const warnings: Warning[] = [];
   const renderedValues = new Map<string, string>();
 
-  for (const required of format.required) {
-    if (decoded.get(required) === undefined) {
-      warnings.push(`Missing required argument '${required}'`);
-    }
-  }
-
-  for (const field of format.fields) {
-    const effective = resolveEffectiveField(field, definitions, warnings);
-    if (!effective) continue;
-
-    const value = decoded.get(effective.path);
-    if (value) {
-      const rendered = renderField(
-        effective,
-        value,
-        decoded,
-        metadata,
-        chainId,
-        contractAddress,
-        addressBook,
-        tokenMetadata,
+  for (const fieldSpec of format.fields ?? []) {
+    if (isFieldGroup(fieldSpec)) {
+      // Groups (nested field arrays) are not yet implemented — skip with warning
+      warnings.push(
+        warn("UNSUPPORTED_FIELD_GROUP", "Field groups are not yet supported"),
       );
-      items.push({
-        label: effective.label,
-        value: rendered,
-      });
-      renderedValues.set(effective.path, rendered);
-    } else {
-      warnings.push(`No value found for field path '${effective.path}'`);
+      continue;
     }
+
+    // Resolve $ref to a concrete field definition
+    const { resolved, warnings: fieldWarnings } = resolveField(
+      fieldSpec,
+      definitions,
+    );
+    warnings.push(...fieldWarnings.map((msg) => warn("FIELD_RESOLUTION", msg)));
+    if (!resolved) continue;
+
+    // @. → container field; $. → descriptor file value; #. → structured data root; bare → relative
+    let argValue: ArgumentValue | undefined;
+    if (resolved.path.startsWith("@.")) {
+      argValue = resolveTransactionPath(resolved.path, tx);
+    } else if (resolved.path.startsWith("$.")) {
+      argValue = metadataValueToArgumentValue(resolveMetadataValue(descriptor.metadata, resolved.path));
+    } else {
+      const key = resolved.path.startsWith("#.") ? resolved.path.slice(2) : resolved.path;
+      argValue = decoded.get(key);
+    }
+    if (!argValue) {
+      warnings.push(
+        warn(
+          "MISSING_FIELD_VALUE",
+          `No value found for field path '${resolved.path}'`,
+        ),
+      );
+      continue;
+    }
+
+    const { rendered, warning: fieldWarning } = await renderField(
+      resolved,
+      argValue,
+      decoded,
+      metadata,
+      tx.chainId,
+      tx.to,
+      addressBook,
+      externalDataProvider,
+    );
+
+    const displayField: DisplayField = {
+      label: resolved.label,
+      value: rendered,
+      fieldType: fieldTypeFromArgValue(argValue),
+      format: resolved.format ?? "raw",
+      warning: fieldWarning,
+    };
+
+    if (argValue.type === "address") {
+      displayField.rawAddress = toChecksumAddress(argValue.bytes);
+    }
+
+    fields.push(displayField);
+    renderedValues.set(resolved.path, rendered);
   }
 
   let interpolatedIntent: string | undefined;
@@ -178,13 +221,13 @@ function applyDisplayFormat(
       renderedValues,
     );
     if (result.error) {
-      warnings.push(result.error);
+      warnings.push(warn("INTERPOLATION_ERROR", result.error));
     } else {
       interpolatedIntent = result.value;
     }
   }
 
-  return { items, warnings, interpolatedIntent };
+  return { fields, warnings, interpolatedIntent };
 }
 
 /**
@@ -233,40 +276,42 @@ export function interpolateTemplate(
   return { value: output };
 }
 
-function renderField(
-  field: EffectiveField,
+async function renderField(
+  field: ResolvedField,
   value: ArgumentValue,
   decoded: DecodedArguments,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
   chainId: number,
   contractAddress: string,
   addressBook: Map<string, string>,
-  tokenMetadata: Map<string, TokenMeta>,
-): string {
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{ rendered: string; warning?: Warning }> {
   switch (field.format) {
     case "date":
-      return formatDate(value);
+      return { rendered: formatDate(value) };
     case "tokenAmount":
-      return formatTokenAmount(
+      return await formatTokenAmount(
         field,
         value,
         decoded,
         metadata,
         chainId,
         contractAddress,
-        tokenMetadata,
+        externalDataProvider,
       );
     case "amount":
-      return formatNativeAmount(value, chainId, tokenMetadata);
-    case "address":
+      return { rendered: formatNativeAmount(value, chainId) };
     case "addressName":
-      return formatAddress(value, addressBook);
+      return await formatAddressName(
+        value,
+        addressBook,
+        field,
+        externalDataProvider,
+      );
     case "enum":
-      return formatEnum(field, value, metadata);
-    case "number":
-      return formatNumber(value);
+      return { rendered: formatEnum(field, value, metadata) };
     default:
-      return defaultValueString(value);
+      return { rendered: formatAddress(value, addressBook) };
   }
 }
 
@@ -290,47 +335,71 @@ function formatDate(value: ArgumentValue): string {
   }
 }
 
-function formatTokenAmount(
-  field: EffectiveField,
+async function formatTokenAmount(
+  field: ResolvedField,
   value: ArgumentValue,
   decoded: DecodedArguments,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
   chainId: number,
   contractAddress: string,
-  tokenMetadata: Map<string, TokenMeta>,
-): string {
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{ rendered: string; warning?: Warning }> {
   if (value.type !== "uint") {
-    return defaultValueString(value);
+    return { rendered: defaultValueString(value) };
   }
 
   const amount = value.value;
 
   try {
-    const tokenMeta = lookupTokenMeta(
+    const caip19Key = determineTokenKey(
       field,
       decoded,
       chainId,
       contractAddress,
-      tokenMetadata,
     );
+
+    let tokenMeta: TokenMeta | undefined;
+
+    // Try external provider first
+    if (externalDataProvider?.resolveToken) {
+      const erc20Match = caip19Key.match(/^eip155:\d+\/erc20:(.+)$/);
+      if (erc20Match) {
+        const result = await externalDataProvider.resolveToken(
+          chainId,
+          erc20Match[1],
+        );
+        if (result) tokenMeta = result;
+      }
+    }
+
+    // Fall back to embedded token registry
+    if (!tokenMeta) {
+      tokenMeta = lookupTokenByCaip19(caip19Key) ?? undefined;
+    }
+
+    if (!tokenMeta) {
+      return {
+        rendered: defaultValueString(value),
+        warning: warn(
+          "TOKEN_NOT_FOUND",
+          "Token metadata could not be resolved",
+        ),
+      };
+    }
 
     const message = tokenAmountMessage(field, amount, metadata);
     if (message) {
-      return `${message} ${tokenMeta.symbol}`;
+      return { rendered: `${message} ${tokenMeta.symbol}` };
     }
 
     const formatted = formatAmountWithDecimals(amount, tokenMeta.decimals);
-    return `${formatted} ${tokenMeta.symbol}`;
+    return { rendered: `${formatted} ${tokenMeta.symbol}` };
   } catch {
-    return defaultValueString(value);
+    return { rendered: defaultValueString(value) };
   }
 }
 
-function formatNativeAmount(
-  value: ArgumentValue,
-  chainId: number,
-  tokenMetadata: Map<string, TokenMeta>,
-): string {
+function formatNativeAmount(value: ArgumentValue, chainId: number): string {
   if (value.type !== "uint") {
     return defaultValueString(value);
   }
@@ -339,7 +408,7 @@ function formatNativeAmount(
   const key = nativeTokenKey(chainId);
 
   if (key) {
-    const meta = tokenMetadata.get(key);
+    const meta = lookupTokenByCaip19(key);
     if (meta) {
       const formatted = formatAmountWithDecimals(amount, meta.decimals);
       return `${formatted} ${meta.symbol}`;
@@ -360,26 +429,81 @@ function formatAddress(
 
   const checksum = toChecksumAddress(value.bytes);
   const normalized = checksum.toLowerCase();
-
-  const label = addressBook.get(normalized);
-  if (label) {
-    return label;
-  }
-
-  return checksum;
+  return addressBook.get(normalized) ?? checksum;
 }
 
-function formatNumber(value: ArgumentValue): string {
-  if (value.type !== "uint") {
-    return defaultValueString(value);
+async function formatAddressName(
+  value: ArgumentValue,
+  addressBook: Map<string, string>,
+  field: ResolvedField,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{ rendered: string; warning?: Warning }> {
+  if (value.type !== "address") {
+    return { rendered: defaultValueString(value) };
   }
-  return value.value.toString();
+
+  const checksum = toChecksumAddress(value.bytes);
+  const normalized = checksum.toLowerCase();
+
+  // Descriptor address book is trusted — no warning
+  const bookLabel = addressBook.get(normalized);
+  if (bookLabel) {
+    return { rendered: bookLabel };
+  }
+
+  const types = field.params.types;
+  const sources = field.params.sources;
+  const expectedType = types?.[0] ?? "";
+
+  // Try local wallet names
+  if (sources?.includes("local") && externalDataProvider?.resolveLocalName) {
+    const result = await externalDataProvider.resolveLocalName(
+      normalized,
+      expectedType,
+    );
+    if (result) {
+      return {
+        rendered: result.name,
+        warning: result.typeMatch
+          ? undefined
+          : warn(
+              "ADDRESS_TYPE_MISMATCH",
+              `Resolved address type does not match expected type '${expectedType}'`,
+            ),
+      };
+    }
+  }
+
+  // Try ENS
+  if (sources?.includes("ens") && externalDataProvider?.resolveEnsName) {
+    const result = await externalDataProvider.resolveEnsName(
+      normalized,
+      expectedType,
+    );
+    if (result) {
+      return {
+        rendered: result.name,
+        warning: result.typeMatch
+          ? undefined
+          : warn(
+              "ADDRESS_TYPE_MISMATCH",
+              `Resolved address type does not match expected type '${expectedType}'`,
+            ),
+      };
+    }
+  }
+
+  // Raw address fallback — resolution was expected but failed
+  return {
+    rendered: checksum,
+    warning: warn("ADDRESS_NOT_RESOLVED", "Address name could not be resolved"),
+  };
 }
 
 function formatEnum(
-  field: EffectiveField,
+  field: ResolvedField,
   value: ArgumentValue,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
 ): string {
   if (value.type !== "uint") {
     return defaultValueString(value);
@@ -404,9 +528,9 @@ function formatEnum(
 }
 
 function tokenAmountMessage(
-  field: EffectiveField,
+  field: ResolvedField,
   amount: bigint,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
 ): string | undefined {
   const thresholdSpec = field.params.threshold;
   const message = field.params.message;
@@ -434,26 +558,11 @@ function tokenAmountMessage(
   return amount >= threshold ? message : undefined;
 }
 
-function lookupTokenMeta(
-  field: EffectiveField,
-  decoded: DecodedArguments,
-  chainId: number,
-  contractAddress: string,
-  tokenMetadata: Map<string, TokenMeta>,
-): TokenMeta {
-  const key = determineTokenKey(field, decoded, chainId, contractAddress);
-  const meta = tokenMetadata.get(key);
-  if (!meta) {
-    throw EngineError.tokenRegistry(`token registry missing entry for ${key}`);
-  }
-  return meta;
-}
-
 /**
  * Resolve a metadata value by JSON path.
  */
 export function resolveMetadataValue(
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
   pointer: string,
 ): unknown {
   const prefix = "$.metadata.";
@@ -474,10 +583,39 @@ export function resolveMetadataValue(
   return current;
 }
 
-function rawPreviewFromCalldata(
+/**
+ * Convert a metadata constant value to an ArgumentValue for display.
+ */
+function metadataValueToArgumentValue(
+  value: unknown,
+): ArgumentValue | undefined {
+  if (typeof value === "number") {
+    return { type: "uint", value: BigInt(value) };
+  }
+  if (typeof value === "boolean") {
+    return { type: "uint", value: value ? 1n : 0n };
+  }
+  if (typeof value === "string") {
+    const n = parseBigInt(value);
+    if (n !== undefined) return { type: "uint", value: n };
+    if (value.startsWith("0x") && value.length === 42) {
+      return { type: "address", bytes: hexToBytes(value) };
+    }
+    if (value.startsWith("0x")) {
+      try {
+        return { type: "raw", bytes: hexToBytes(value) };
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  return undefined;
+}
+
+export function rawPreviewFromCalldata(
   selector: Uint8Array,
   calldata: Uint8Array,
-): LegacyRawPreview {
+): RawPreview {
   const args: string[] = [];
   if (calldata.length > 4) {
     const data = calldata.slice(4);
