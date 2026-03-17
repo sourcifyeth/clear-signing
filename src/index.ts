@@ -19,7 +19,6 @@
 import { DescriptorResolver } from "./resolver";
 import { formatCalldata, rawPreviewFromCalldata } from "./engine";
 import { formatEip712 } from "./eip712";
-import { buildAddressBook } from "./descriptor";
 import { hexToBytes, extractSelector } from "./utils";
 import type {
   DisplayModel,
@@ -60,9 +59,7 @@ export async function format(
     };
   }
 
-  const addressBook = buildAddressBook(descriptor);
-
-  return formatCalldata(tx, descriptor, addressBook, opts?.externalDataProvider);
+  return formatCalldata(tx, descriptor, opts?.externalDataProvider);
 }
 
 /**
@@ -96,11 +93,5 @@ export async function formatTypedData(
     };
   }
 
-  const addressBook = buildAddressBook(descriptor, verifyingContract);
-  return formatEip712(
-    typedData,
-    descriptor,
-    addressBook,
-    opts?.externalDataProvider,
-  );
+  return formatEip712(typedData, descriptor, opts?.externalDataProvider);
 }

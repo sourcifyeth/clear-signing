@@ -73,15 +73,10 @@ export function tokenAmountMessage(
  */
 export async function formatAddressName(
   checksumAddress: string,
-  addressBook: Map<string, string>,
   field: ResolvedField,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{ rendered: string; warning?: Warning }> {
   const normalized = checksumAddress.toLowerCase();
-
-  // Descriptor address book is trusted — no warning
-  const bookLabel = addressBook.get(normalized);
-  if (bookLabel) return { rendered: bookLabel };
 
   const types = field.params.types;
   const sources = field.params.sources;

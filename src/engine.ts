@@ -72,7 +72,6 @@ function isFieldGroup(
 export async function formatCalldata(
   tx: Transaction,
   descriptor: Descriptor,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<DisplayModel> {
   const warnings: Warning[] = [];
@@ -114,7 +113,6 @@ export async function formatCalldata(
     descriptor,
     format,
     decoded,
-    addressBook,
     externalDataProvider,
   );
   warnings.push(...render.warnings);
@@ -139,7 +137,6 @@ async function applyDisplayFormat(
   descriptor: Descriptor,
   format: DescriptorFormatSpec,
   decoded: DecodedArguments,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{
   fields: DisplayField[];
@@ -200,7 +197,6 @@ async function applyDisplayFormat(
       metadata,
       tx.chainId,
       tx.to,
-      addressBook,
       externalDataProvider,
     );
 
@@ -243,7 +239,6 @@ async function renderField(
   metadata: DescriptorMetadata | undefined,
   chainId: number,
   contractAddress: string,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{ rendered: string; warning?: Warning }> {
   switch (field.format) {
@@ -262,16 +257,11 @@ async function renderField(
     case "amount":
       return { rendered: formatNativeAmount(value, chainId) };
     case "addressName":
-      return await formatAddressName(
-        value,
-        addressBook,
-        field,
-        externalDataProvider,
-      );
+      return await formatAddressName(value, field, externalDataProvider);
     case "enum":
       return { rendered: formatEnum(field, value, metadata) };
     default:
-      return { rendered: formatAddress(value, addressBook) };
+      return { rendered: formatAddress(value) };
   }
 }
 
@@ -340,28 +330,19 @@ function nativeSymbol(chainId: number): string {
   }
 }
 
-function formatAddress(
-  value: ArgumentValue,
-  addressBook: Map<string, string>,
-): string {
-  if (value.type !== "address") {
-    return defaultValueString(value);
-  }
-
-  const checksum = toChecksumAddress(value.bytes);
-  const normalized = checksum.toLowerCase();
-  return addressBook.get(normalized) ?? checksum;
+function formatAddress(value: ArgumentValue): string {
+  if (value.type !== "address") return defaultValueString(value);
+  return toChecksumAddress(value.bytes);
 }
 
 async function formatAddressName(
   value: ArgumentValue,
-  addressBook: Map<string, string>,
   field: ResolvedField,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{ rendered: string; warning?: Warning }> {
   if (value.type !== "address") return { rendered: defaultValueString(value) };
   const checksum = toChecksumAddress(value.bytes);
-  return sharedFormatAddressName(checksum, addressBook, field, externalDataProvider);
+  return sharedFormatAddressName(checksum, field, externalDataProvider);
 }
 
 function formatEnum(

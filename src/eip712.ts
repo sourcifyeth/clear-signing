@@ -55,7 +55,6 @@ function isFieldGroup(
 export async function formatEip712(
   typedData: TypedData,
   descriptor: Descriptor,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<DisplayModel> {
   const warnings: Warning[] = [];
@@ -88,7 +87,6 @@ export async function formatEip712(
     typedData,
     descriptor,
     format,
-    addressBook,
     externalDataProvider,
   );
   warnings.push(...render.warnings);
@@ -109,7 +107,6 @@ async function applyDisplayFormat(
   typedData: TypedData,
   descriptor: Descriptor,
   format: DescriptorFormatSpec,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{
   fields: DisplayField[];
@@ -168,7 +165,6 @@ async function applyDisplayFormat(
       typedData.message,
       descriptor.metadata,
       chainId ?? 1,
-      addressBook,
       externalDataProvider,
     );
 
@@ -365,7 +361,6 @@ async function renderField(
   message: Record<string, unknown>,
   metadata: DescriptorMetadata | undefined,
   chainId: number,
-  addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{ rendered: string; warning?: Warning }> {
   switch (field.format) {
@@ -385,7 +380,7 @@ async function renderField(
       if (!address) return { rendered: formatRaw(value) };
       try {
         const checksum = toChecksumAddress(hexToBytes(address));
-        return await formatAddressName(checksum, addressBook, field, externalDataProvider);
+        return await formatAddressName(checksum, field, externalDataProvider);
       } catch {
         return { rendered: formatRaw(value) };
       }
