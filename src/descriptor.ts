@@ -4,13 +4,12 @@
 
 import { DescriptorError, TokenLookupError } from "./errors";
 import type {
-  ArgumentValue,
-  DecodedArgument,
   Descriptor,
   DescriptorFieldFormat,
   DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DescriptorFormatSpec,
+  DescriptorMetadata,
   FunctionDescriptor,
   FunctionInput,
   Transaction,
@@ -24,6 +23,21 @@ import {
   selectorForSignature,
   tokenKeyFromErc20,
 } from "./utils";
+
+/** Argument value union type. */
+export type ArgumentValue =
+  | { type: "address"; bytes: Uint8Array }
+  | { type: "uint"; value: bigint }
+  | { type: "bool"; value: boolean }
+  | { type: "raw"; bytes: Uint8Array };
+
+/** Decoded argument value. */
+export interface DecodedArgument {
+  index: number;
+  name?: string;
+  value: ArgumentValue;
+  word: Uint8Array;
+}
 
 /**
  * Collection of decoded arguments with name-based lookup.
@@ -148,9 +162,9 @@ function mergeAddressBookEntries(
 }
 
 /**
- * Check if descriptor is bound to a specific chain and address.
+ * Check if a calldata descriptor is bound to a specific chain and address.
  */
-export function isDescriptorBoundTo(
+export function isCalldataDescriptorBoundTo(
   descriptor: Descriptor,
   chainId: number,
   address: string,
@@ -158,6 +172,25 @@ export function isDescriptorBoundTo(
   const normalized = normalizeAddress(address);
   return (
     descriptor.context?.contract?.deployments?.some(
+      (d) =>
+        d.chainId === chainId &&
+        typeof d.address === "string" &&
+        normalizeAddress(d.address) === normalized,
+    ) ?? false
+  );
+}
+
+/**
+ * Check if an EIP-712 descriptor is bound to a specific chain and verifying contract.
+ */
+export function isEip712DescriptorBoundTo(
+  descriptor: Descriptor,
+  chainId: number,
+  address: string,
+): boolean {
+  const normalized = normalizeAddress(address);
+  return (
+    descriptor.context?.eip712?.deployments?.some(
       (d) =>
         d.chainId === chainId &&
         typeof d.address === "string" &&
@@ -593,7 +626,10 @@ export function resolveTypedDataPath(
       return { type: "address", bytes: hexToBytes(typedData.account) };
     case "@.to":
       if (!typedData.domain.verifyingContract) return undefined;
-      return { type: "address", bytes: hexToBytes(typedData.domain.verifyingContract) };
+      return {
+        type: "address",
+        bytes: hexToBytes(typedData.domain.verifyingContract),
+      };
     case "@.chainId":
       if (typedData.domain.chainId === undefined) return undefined;
       return { type: "uint", value: BigInt(typedData.domain.chainId) };
@@ -670,6 +706,8 @@ export function defaultValueString(value: ArgumentValue): string {
       return bytesToHex(value.bytes);
     case "uint":
       return value.value.toString();
+    case "bool":
+      return value.value.toString();
     case "raw":
       return bytesToHex(value.bytes);
   }
@@ -680,4 +718,75 @@ export function defaultValueString(value: ArgumentValue): string {
  */
 export function rawWordHex(arg: DecodedArgument): string {
   return bytesToHex(arg.word);
+}
+
+/**
+ * Resolve a metadata value by dot-path pointer (e.g. "$.metadata.enums.OrderType").
+ */
+export function resolveMetadataValue(
+  metadata: DescriptorMetadata | undefined,
+  pointer: string,
+): unknown {
+  const prefix = "$.metadata.";
+  if (!pointer.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const rest = pointer.slice(prefix.length);
+  let current: unknown = metadata;
+
+  for (const segment of rest.split(".")) {
+    if (current === null || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current;
+}
+
+/**
+ * Interpolate {placeholder} tokens in a template string from a values map.
+ */
+export function interpolateTemplate(
+  template: string,
+  values: Map<string, string>,
+): { value?: string; error?: string } {
+  let output = "";
+  let i = 0;
+
+  while (i < template.length) {
+    const ch = template[i];
+    if (ch === "{") {
+      let placeholder = "";
+      i++;
+      let closed = false;
+      while (i < template.length) {
+        if (template[i] === "}") {
+          closed = true;
+          i++;
+          break;
+        }
+        placeholder += template[i];
+        i++;
+      }
+      if (!closed) {
+        return { error: "Unclosed placeholder in interpolated intent" };
+      }
+      const key = placeholder.trim();
+      if (key.length === 0) {
+        return { error: "Empty placeholder in interpolated intent" };
+      }
+      const value = values.get(key);
+      if (value === undefined) {
+        return { error: `Missing interpolated value for '${key}'` };
+      }
+      output += value;
+    } else {
+      output += ch;
+      i++;
+    }
+  }
+
+  return { value: output };
 }

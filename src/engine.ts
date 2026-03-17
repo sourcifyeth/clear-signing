@@ -3,7 +3,6 @@
  */
 
 import type {
-  ArgumentValue,
   Descriptor,
   DescriptorFieldFormat,
   DescriptorFieldGroup,
@@ -11,21 +10,24 @@ import type {
   DescriptorMetadata,
   DisplayField,
   DisplayModel,
+  FieldType,
   ExternalDataProvider,
-  RawPreview,
+  RawCalldataFallback,
   TokenMeta,
   Transaction,
   Warning,
 } from "./types";
-import type { DecodedArguments } from "./descriptor";
+import type { DecodedArguments, ArgumentValue } from "./descriptor";
 import {
   decodeArguments,
   defaultValueString,
   determineTokenKey,
   type ResolvedField,
   getFormatsBySelector,
-  isDescriptorBoundTo,
+  interpolateTemplate,
+  isCalldataDescriptorBoundTo,
   resolveField,
+  resolveMetadataValue,
   resolveTransactionPath,
 } from "./descriptor";
 import {
@@ -37,19 +39,18 @@ import {
   nativeTokenKey,
   parseBigInt,
   toChecksumAddress,
+  warn,
 } from "./utils";
 import { lookupTokenByCaip19 } from "./token-registry";
 
-function warn(code: string, message: string): Warning {
-  return { code, message };
-}
-
-function fieldTypeFromArgValue(value: ArgumentValue): string {
+function fieldTypeFromArgValue(value: ArgumentValue): FieldType {
   switch (value.type) {
     case "address":
       return "address";
     case "uint":
-      return "uint256";
+      return "uint";
+    case "bool":
+      return "bool";
     case "raw":
       return "bytes";
   }
@@ -75,7 +76,7 @@ export async function formatCalldata(
   const calldata = hexToBytes(tx.data);
   const selector = extractSelector(calldata);
 
-  if (!isDescriptorBoundTo(descriptor, tx.chainId, tx.to)) {
+  if (!isCalldataDescriptorBoundTo(descriptor, tx.chainId, tx.to)) {
     warnings.push(
       warn(
         "DEPLOYMENT_MISMATCH",
@@ -83,7 +84,7 @@ export async function formatCalldata(
       ),
     );
     return {
-      raw: rawPreviewFromCalldata(selector, calldata),
+      rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
       warnings,
     };
   }
@@ -98,7 +99,7 @@ export async function formatCalldata(
     );
     return {
       warnings,
-      raw: rawPreviewFromCalldata(selector, calldata),
+      rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
     };
   }
 
@@ -130,12 +131,6 @@ export async function formatCalldata(
   };
 }
 
-interface ApplyFormatResult {
-  fields: DisplayField[];
-  warnings: Warning[];
-  interpolatedIntent?: string;
-}
-
 async function applyDisplayFormat(
   tx: Transaction,
   descriptor: Descriptor,
@@ -143,7 +138,11 @@ async function applyDisplayFormat(
   decoded: DecodedArguments,
   addressBook: Map<string, string>,
   externalDataProvider?: ExternalDataProvider,
-): Promise<ApplyFormatResult> {
+): Promise<{
+  fields: DisplayField[];
+  warnings: Warning[];
+  interpolatedIntent?: string;
+}> {
   const metadata = descriptor.metadata;
   const definitions = descriptor.display?.definitions ?? {};
   const fields: DisplayField[] = [];
@@ -172,9 +171,13 @@ async function applyDisplayFormat(
     if (resolved.path.startsWith("@.")) {
       argValue = resolveTransactionPath(resolved.path, tx);
     } else if (resolved.path.startsWith("$.")) {
-      argValue = metadataValueToArgumentValue(resolveMetadataValue(descriptor.metadata, resolved.path));
+      argValue = metadataValueToArgumentValue(
+        resolveMetadataValue(descriptor.metadata, resolved.path),
+      );
     } else {
-      const key = resolved.path.startsWith("#.") ? resolved.path.slice(2) : resolved.path;
+      const key = resolved.path.startsWith("#.")
+        ? resolved.path.slice(2)
+        : resolved.path;
       argValue = decoded.get(key);
     }
     if (!argValue) {
@@ -228,52 +231,6 @@ async function applyDisplayFormat(
   }
 
   return { fields, warnings, interpolatedIntent };
-}
-
-/**
- * Interpolate placeholders in a template string.
- */
-export function interpolateTemplate(
-  template: string,
-  values: Map<string, string>,
-): { value?: string; error?: string } {
-  let output = "";
-  let i = 0;
-
-  while (i < template.length) {
-    const ch = template[i];
-    if (ch === "{") {
-      let placeholder = "";
-      i++;
-      let closed = false;
-      while (i < template.length) {
-        if (template[i] === "}") {
-          closed = true;
-          i++;
-          break;
-        }
-        placeholder += template[i];
-        i++;
-      }
-      if (!closed) {
-        return { error: "Unclosed placeholder in interpolated intent" };
-      }
-      const key = placeholder.trim();
-      if (key.length === 0) {
-        return { error: "Empty placeholder in interpolated intent" };
-      }
-      const value = values.get(key);
-      if (value === undefined) {
-        return { error: `Missing interpolated value for '${key}'` };
-      }
-      output += value;
-    } else {
-      output += ch;
-      i++;
-    }
-  }
-
-  return { value: output };
 }
 
 async function renderField(
@@ -559,31 +516,6 @@ function tokenAmountMessage(
 }
 
 /**
- * Resolve a metadata value by JSON path.
- */
-export function resolveMetadataValue(
-  metadata: DescriptorMetadata | undefined,
-  pointer: string,
-): unknown {
-  const prefix = "$.metadata.";
-  if (!pointer.startsWith(prefix)) {
-    return undefined;
-  }
-
-  const rest = pointer.slice(prefix.length);
-  let current: unknown = metadata;
-
-  for (const segment of rest.split(".")) {
-    if (current === null || typeof current !== "object") {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-
-  return current;
-}
-
-/**
  * Convert a metadata constant value to an ArgumentValue for display.
  */
 function metadataValueToArgumentValue(
@@ -593,7 +525,7 @@ function metadataValueToArgumentValue(
     return { type: "uint", value: BigInt(value) };
   }
   if (typeof value === "boolean") {
-    return { type: "uint", value: value ? 1n : 0n };
+    return { type: "bool", value };
   }
   if (typeof value === "string") {
     const n = parseBigInt(value);
@@ -615,7 +547,7 @@ function metadataValueToArgumentValue(
 export function rawPreviewFromCalldata(
   selector: Uint8Array,
   calldata: Uint8Array,
-): RawPreview {
+): RawCalldataFallback {
   const args: string[] = [];
   if (calldata.length > 4) {
     const data = calldata.slice(4);

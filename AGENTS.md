@@ -42,9 +42,12 @@ src/
 
 2. **EIP-712 formatting:**
    ```
-   formatTypedData(typedData)
-   → resolver.resolveTyped() finds descriptor by verifyingContract
-   → eip712.formatTypedData() applies display rules to message fields
+   formatTypedData(typedData, opts?)
+   → DescriptorResolver.resolveTypedDataDescriptor() fetches descriptor by (chainId, verifyingContract)
+   → eip712.formatTypedData(typedData, descriptor, addressBook, externalDataProvider)
+       → findFormatSpec() matches display.formats key to primaryType via encodeType
+       → iterates format.fields, resolves paths in typedData.message
+       → renderField() formats each value
    → returns DisplayModel
    ```
 
@@ -143,6 +146,22 @@ in `descriptor.ts`.
 
 **`required` and `excluded` arrays on format entries are also legacy** and not part of the current
 spec. Do not add them to `DescriptorFormatSpec`.
+
+### EIP-712 Descriptor Keys (current spec vs old files)
+
+Old descriptor files in `src/assets/` use **bare primary type names** as `display.formats` keys
+(e.g. `"PermitSingle"`, `"Order"`) and carry inline type definitions in `context.eip712.schemas`.
+
+**Current ERC-7730 spec:**
+- `display.formats` keys are the **full EIP-712 `encodeType` string**, e.g.
+  `"PermitSingle(PermitDetails details,address spender,uint256 sigDeadline)PermitDetails(address token,uint160 amount,uint48 expiration,uint48 nonce)"`.
+  The wallet validates by computing `keccak256(encodeType(primaryType))` and matching against the key.
+- `context.eip712.schemas` is **deprecated** (kept for backward compat, will be removed).
+  Do not add `schemas` to new descriptors.
+- `context.eip712.deployments` and `context.eip712.domain` are the correct binding mechanisms.
+
+`eip712.ts` supports both formats: it first tries to match via computed `encodeType`, then falls
+back to bare primary type name, so old and new descriptors both work.
 
 ### Field Formats
 

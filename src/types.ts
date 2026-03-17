@@ -2,45 +2,11 @@
  * Core type definitions for the clear signing library.
  */
 
-/** Minimal display item for the clear signing preview. */
-export interface DisplayItem {
-  label: string;
-  value: string;
-}
-
-/** Raw fallback preview details when no descriptor matches. */
-export interface LegacyRawPreview {
-  selector: string;
-  args: string[];
-}
-
-export interface LegacyDisplayModel {
-  intent: string;
-  interpolatedIntent?: string;
-  items: DisplayItem[];
-  warnings: string[];
-  raw?: LegacyRawPreview;
-}
-
 /** Token metadata from the registry. */
 export interface TokenMeta {
   symbol: string;
   decimals: number;
   name: string;
-}
-
-/** @deprecated Use TypedData from the new design section instead. */
-export interface LegacyTypedData {
-  types: Record<string, TypeMember[]>;
-  primaryType: string;
-  domain: Record<string, unknown>;
-  message: Record<string, unknown>;
-}
-
-/** EIP-712 type member definition. */
-export interface TypeMember {
-  name: string;
-  type: string;
 }
 
 /** ABI function input parameter. */
@@ -57,20 +23,6 @@ export interface FunctionDescriptor {
   selector: Uint8Array;
 }
 
-/** Decoded argument value. */
-export interface DecodedArgument {
-  index: number;
-  name?: string;
-  value: ArgumentValue;
-  word: Uint8Array;
-}
-
-/** Argument value union type. */
-export type ArgumentValue =
-  | { type: "address"; bytes: Uint8Array }
-  | { type: "uint"; value: bigint }
-  | { type: "raw"; bytes: Uint8Array };
-
 /////////////////////////////
 // NEW TYPES FOR NEW DESIGN
 /////////////////////////////
@@ -84,6 +36,30 @@ export interface Transaction {
   value?: bigint;
   from?: string;
 }
+
+/** EIP-712 type member definition. */
+export interface TypeMember {
+  name: string;
+  type: string;
+}
+
+/**
+ * ERC-7730 field type category — the base Solidity type that determines
+ * which display formats can be applied:
+ *   - address → addressName, tokenTicker, interoperableAddressName, raw
+ *   - uint/int → amount, tokenAmount, nftName, date, duration, unit, enum, chainId, raw
+ *   - bytes   → calldata, raw
+ *   - string  → raw
+ *   - bool    → raw
+ * Struct and array reference types have no ERC-7730 format mapping.
+ */
+export type FieldType =
+  | "address"
+  | "bool"
+  | "string"
+  | "bytes"
+  | "uint"
+  | "int";
 
 /** EIP-712 typed data domain. */
 export interface TypedDataDomain {
@@ -111,7 +87,7 @@ export interface Warning {
   message: string;
 }
 
-export interface RawPreview {
+export interface RawCalldataFallback {
   /** function selector, e.g. "0x095ea7b3" */
   selector: string;
   /** hex-encoded ABI arguments */
@@ -139,7 +115,7 @@ export interface DisplayField {
    *
    * The fieldType corresponds to the underlying Solidity type.
    */
-  fieldType: string;
+  fieldType: FieldType;
   /**
    * The format corresponds to the specific display format as per ERC-7730.
    */
@@ -206,10 +182,10 @@ export interface DisplayModel {
   };
 
   /**
-   * Raw fallback data when no descriptor matched,
-   * or the descriptor was faulty.
+   * Raw calldata fallback when no descriptor matched or the descriptor was faulty.
+   * Only present for calldata formatting — not applicable to EIP-712 typed data.
    */
-  raw?: RawPreview;
+  rawCalldataFallback?: RawCalldataFallback;
 
   /**
    * Non-fatal warnings providing additional context, e.g. why

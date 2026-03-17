@@ -3,6 +3,13 @@
  */
 
 import { keccak_256 } from "@noble/hashes/sha3";
+import type { Warning } from "./types";
+
+/** Create a Warning object. */
+export function warn(code: string, message: string): Warning {
+  return { code, message };
+}
+
 
 /** Compute keccak256 hash of input data. */
 export function keccak256(data: Uint8Array): Uint8Array {

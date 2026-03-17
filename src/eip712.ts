@@ -2,120 +2,210 @@
  * EIP-712 typed data formatting for clear signing.
  */
 
-import { Eip712Error } from "./errors";
 import type {
+  Descriptor,
   DescriptorFieldFormat,
+  DescriptorFieldGroup,
   DescriptorFormatSpec,
-  DisplayItem,
-  LegacyDisplayModel,
-  LegacyTypedData,
+  DescriptorMetadata,
+  DisplayField,
+  DisplayModel,
+  FieldType,
+  ExternalDataProvider,
+  TokenMeta,
+  TypedData,
+  TypeMember,
+  Warning,
 } from "./types";
 import {
   type ResolvedField,
   resolveField,
-  buildAddressBook,
+  interpolateTemplate,
+  isEip712DescriptorBoundTo,
+  resolveMetadataValue,
+  resolveTypedDataPath,
+  type ArgumentValue,
 } from "./descriptor";
 import { lookupTokenByCaip19 } from "./token-registry";
 import {
+  bytesToHex,
   formatAmountWithDecimals,
+  hexToBytes,
   parseBigInt,
   toChecksumAddress,
-  hexToBytes,
+  warn,
 } from "./utils";
-import { interpolateTemplate, resolveMetadataValue } from "./engine";
-import type { DescriptorResolver } from "./resolver";
 
-interface TypedDescriptor {
-  context?: TypedContext;
-  metadata: Record<string, unknown>;
-  display: TypedDisplay;
-}
-
-interface TypedContext {
-  eip712: TypedEip712Context;
-}
-
-interface TypedEip712Context {
-  deployments: Array<{ chainId: number; address: string }>;
-}
-
-interface TypedDisplay {
-  definitions: Record<string, DescriptorFieldFormat>;
-  formats: Record<string, DescriptorFormatSpec>;
+function isFieldGroup(
+  field: DescriptorFieldFormat | DescriptorFieldGroup,
+): field is DescriptorFieldGroup {
+  return Array.isArray((field as DescriptorFieldGroup).fields);
 }
 
 /**
  * Format EIP-712 typed data for clear signing display.
+ *
+ * Per ERC-7730 (current spec), display.formats keys are the full encodeType
+ * string from EIP-712 (e.g. "Mail(Person from,Person to,string contents)Person(...)").
+ * Old descriptor files use bare primary type names — both are supported.
  */
-export async function formatTypedData(
-  data: LegacyTypedData,
-  resolver: DescriptorResolver,
-): Promise<LegacyDisplayModel> {
-  const chainId = extractChainId(data.domain);
-  const verifyingContract = extractVerifyingContract(data.domain);
+export async function formatEip712(
+  typedData: TypedData,
+  descriptor: Descriptor,
+  addressBook: Map<string, string>,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<DisplayModel> {
+  const warnings: Warning[] = [];
+  const { chainId, verifyingContract } = typedData.domain;
 
-  const r = resolver;
-  const mergedDescriptor = await r.resolveTypedDataDescriptor(
-    chainId,
-    verifyingContract,
-  );
-  if (!mergedDescriptor) {
-    throw Eip712Error.typedData(
-      `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
-    );
-  }
-  const descriptor = parseDescriptor(mergedDescriptor);
-  const addressBook = buildAddressBook(mergedDescriptor, verifyingContract);
-  const warnings: string[] = [];
-
-  if (descriptor.context) {
-    const hasDeployment = descriptor.context.eip712.deployments.some(
-      (d) =>
-        d.chainId === chainId &&
-        d.address.toLowerCase() === verifyingContract.toLowerCase(),
-    );
-    if (!hasDeployment) {
+  if (chainId !== undefined && verifyingContract !== undefined) {
+    if (!isEip712DescriptorBoundTo(descriptor, chainId, verifyingContract)) {
       warnings.push(
-        `Descriptor deployment mismatch for chain ${chainId} and address ${verifyingContract}`,
+        warn(
+          "DEPLOYMENT_MISMATCH",
+          `Descriptor is not bound to chain ${chainId} and address ${verifyingContract}`,
+        ),
       );
+      return { warnings };
     }
   }
 
-  const format = descriptor.display.formats[data.primaryType];
+  const format = findFormatSpec(descriptor, typedData);
   if (!format) {
-    throw Eip712Error.typedData(
-      `No display format for primary type ${data.primaryType}`,
+    warnings.push(
+      warn(
+        "NO_FORMAT_MATCH",
+        `No display format found for primary type '${typedData.primaryType}'`,
+      ),
     );
+    return { warnings };
   }
 
-  const items: DisplayItem[] = [];
+  const render = await applyDisplayFormat(
+    typedData,
+    descriptor,
+    format,
+    addressBook,
+    externalDataProvider,
+  );
+  warnings.push(...render.warnings);
+
+  const meta = descriptor.metadata;
+  return {
+    intent: format.intent,
+    interpolatedIntent: render.interpolatedIntent,
+    fields: render.fields.length > 0 ? render.fields : undefined,
+    metadata: meta
+      ? { owner: meta.owner, contractName: meta.contractName, info: meta.info }
+      : undefined,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+}
+
+async function applyDisplayFormat(
+  typedData: TypedData,
+  descriptor: Descriptor,
+  format: DescriptorFormatSpec,
+  addressBook: Map<string, string>,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{
+  fields: DisplayField[];
+  warnings: Warning[];
+  interpolatedIntent?: string;
+}> {
+  const { chainId } = typedData.domain;
+  const definitions = descriptor.display?.definitions ?? {};
+  const fields: DisplayField[] = [];
+  const warnings: Warning[] = [];
   const renderedValues = new Map<string, string>();
 
-  for (const field of format.fields ?? []) {
-    const { resolved: resolved, warnings: fieldWarnings } = resolveField(
-      field,
-      descriptor.display.definitions,
-    );
-    warnings.push(...fieldWarnings);
-    if (!resolved) continue;
-
-    const value = getValue(data.message, resolved.path);
-    if (value === undefined) {
-      warnings.push(`No value found for field path '${resolved.path}'`);
+  for (const fieldSpec of format.fields ?? []) {
+    if (isFieldGroup(fieldSpec)) {
+      warnings.push(
+        warn("UNSUPPORTED_FIELD_GROUP", "Field groups are not yet supported"),
+      );
       continue;
     }
 
-    const rendered = renderField(
-      resolved,
-      value,
-      data.message,
-      descriptor.metadata,
-      chainId,
-      addressBook,
-      warnings,
+    // Resolve $ref to a concrete field definition
+    const { resolved, warnings: fieldWarnings } = resolveField(
+      fieldSpec,
+      definitions,
     );
+    warnings.push(...fieldWarnings.map((msg) => warn("FIELD_RESOLUTION", msg)));
+    if (!resolved) continue;
+
+    // @. → container field; $. → descriptor file value; #. → structured data root; bare → relative
+    let rawValue: unknown;
+    if (resolved.path.startsWith("@.")) {
+      const av = resolveTypedDataPath(resolved.path, typedData);
+      rawValue = av !== undefined ? argumentValueToRaw(av) : undefined;
+    } else if (resolved.path.startsWith("$.")) {
+      rawValue = resolveMetadataValue(descriptor.metadata, resolved.path);
+    } else {
+      const key = resolved.path.startsWith("#.")
+        ? resolved.path.slice(2)
+        : resolved.path;
+      rawValue = getMessageValue(typedData.message, key);
+    }
+
+    if (rawValue === undefined) {
+      warnings.push(
+        warn(
+          "MISSING_FIELD_VALUE",
+          `No value found for field path '${resolved.path}'`,
+        ),
+      );
+      continue;
+    }
+
+    const { rendered, warning: fieldWarning } = await renderField(
+      resolved,
+      rawValue,
+      typedData.message,
+      descriptor.metadata,
+      chainId ?? 1,
+      addressBook,
+      externalDataProvider,
+    );
+
+    const bareKey = resolved.path.startsWith("#.")
+      ? resolved.path.slice(2)
+      : resolved.path;
+    const fieldType = resolveFieldType(
+      bareKey,
+      typedData.primaryType,
+      typedData.types,
+    );
+    if (!fieldType) {
+      warnings.push(
+        warn(
+          "UNRESOLVABLE_FIELD_TYPE",
+          `Cannot determine ERC-7730 field type for path '${resolved.path}'`,
+        ),
+      );
+      continue;
+    }
+
+    const displayField: DisplayField = {
+      label: resolved.label,
+      value: rendered,
+      fieldType,
+      format: resolved.format ?? "raw",
+      warning: fieldWarning,
+    };
+
+    const address = extractAddressValue(rawValue);
+    if (address) {
+      try {
+        displayField.rawAddress = toChecksumAddress(hexToBytes(address));
+      } catch {
+        // ignore malformed addresses
+      }
+    }
+
+    fields.push(displayField);
     renderedValues.set(resolved.path, rendered);
-    items.push({ label: resolved.label, value: rendered });
   }
 
   let interpolatedIntent: string | undefined;
@@ -125,130 +215,242 @@ export async function formatTypedData(
       renderedValues,
     );
     if (result.error) {
-      warnings.push(result.error);
+      warnings.push(warn("INTERPOLATION_ERROR", result.error));
     } else {
       interpolatedIntent = result.value;
     }
   }
 
-  return {
-    intent: typeof format.intent === "string" ? format.intent : "",
-    interpolatedIntent,
-    items,
-    warnings,
-  };
+  return { fields, warnings, interpolatedIntent };
 }
 
-function parseDescriptor(merged: Record<string, unknown>): TypedDescriptor {
-  return {
-    context: merged.context as TypedContext | undefined,
-    metadata: (merged.metadata as Record<string, unknown>) || {},
-    display: {
-      definitions:
-        ((merged.display as Record<string, unknown>)?.definitions as Record<
-          string,
-          DescriptorFieldFormat
-        >) || {},
-      formats:
-        ((merged.display as Record<string, unknown>)?.formats as Record<
-          string,
-          DescriptorFormatSpec
-        >) || {},
-    },
-  };
+/**
+ * Locate the DescriptorFormatSpec for the incoming message's primary type.
+ *
+ * Per ERC-7730, display.formats keys are the full encodeType string from EIP-712
+ * (e.g. "Mail(Person from,Person to,string contents)Person(...)").
+ */
+function findFormatSpec(
+  descriptor: Descriptor,
+  typedData: TypedData,
+): DescriptorFormatSpec | undefined {
+  const formats = descriptor.display?.formats;
+  if (!formats) return undefined;
+
+  const encodeTypeStr = computeEncodeType(
+    typedData.primaryType,
+    typedData.types,
+  );
+  if (!encodeTypeStr) return undefined;
+
+  return formats[encodeTypeStr];
 }
 
-function renderField(
+/**
+ * Compute the EIP-712 encodeType string for a given primary type.
+ *
+ * encodeType(T) = "TypeName(field0Type field0Name,...)" followed by all
+ * referenced struct types sorted alphabetically (EIP-712 spec).
+ */
+function computeEncodeType(
+  primaryType: string,
+  types: Record<string, TypeMember[]>,
+): string | undefined {
+  if (!(primaryType in types)) return undefined;
+
+  const referenced = new Set<string>();
+  collectReferencedTypes(primaryType, types, referenced);
+  referenced.delete(primaryType);
+
+  return [primaryType, ...Array.from(referenced).sort()]
+    .map((typeName) => {
+      const members = types[typeName] ?? [];
+      return `${typeName}(${members.map((m) => `${m.type} ${m.name}`).join(",")})`;
+    })
+    .join("");
+}
+
+function collectReferencedTypes(
+  typeName: string,
+  types: Record<string, TypeMember[]>,
+  result: Set<string>,
+): void {
+  if (result.has(typeName)) return;
+  result.add(typeName);
+  for (const member of types[typeName] ?? []) {
+    // Strip array brackets to get the base struct name
+    const baseType = member.type.replace(/(\[.*?\])+$/, "");
+    if (baseType in types) {
+      collectReferencedTypes(baseType, types, result);
+    }
+  }
+}
+
+/**
+ * Navigate a dot-path in an EIP-712 message object.
+ */
+function getMessageValue(
+  message: Record<string, unknown>,
+  path: string,
+): unknown {
+  let current: unknown = message;
+  for (const segment of path.split(".")) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/**
+ * Convert an ArgumentValue (from @. container path resolution) to a raw JS
+ * value compatible with the EIP-712 renderers.
+ */
+function argumentValueToRaw(av: ArgumentValue): unknown {
+  switch (av.type) {
+    case "address":
+      return toChecksumAddress(av.bytes);
+    case "uint":
+      return av.value.toString();
+    case "bool":
+      return av.value.toString();
+    case "raw":
+      return bytesToHex(av.bytes);
+  }
+}
+
+/**
+ * Walk the EIP-712 type tree to resolve the leaf Solidity type at a dot-path.
+ * Returns undefined for struct/array reference types and unresolvable paths.
+ */
+function resolveFieldType(
+  path: string,
+  primaryType: string,
+  types: Record<string, TypeMember[]>,
+): FieldType | undefined {
+  const segments = path.split(".");
+  let currentType = primaryType;
+  for (let i = 0; i < segments.length; i++) {
+    const members = types[currentType];
+    if (!members) return undefined;
+    const member = members.find((m) => m.name === segments[i]);
+    if (!member) return undefined;
+    if (i === segments.length - 1) {
+      const baseType = member.type.replace(/(\[.*?\])+$/, "");
+      // Struct references and arrays have no ERC-7730 format category
+      if (baseType in types) return undefined;
+      return toFieldType(baseType);
+    }
+    currentType = member.type.replace(/(\[.*?\])+$/, "");
+  }
+  return undefined;
+}
+
+/** Map an EIP-712 concrete type to its ERC-7730 FieldType category. */
+function toFieldType(type: string): FieldType | undefined {
+  if (type === "address") return "address";
+  if (type === "bool") return "bool";
+  if (type === "string") return "string";
+  if (type === "bytes" || /^bytes\d+$/.test(type)) return "bytes";
+  if (/^uint\d*$/.test(type)) return "uint";
+  if (/^int\d*$/.test(type)) return "int";
+  return undefined;
+}
+
+async function renderField(
   field: ResolvedField,
   value: unknown,
   message: Record<string, unknown>,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
   chainId: number,
   addressBook: Map<string, string>,
-  warnings: string[],
-): string {
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{ rendered: string; warning?: Warning }> {
   switch (field.format) {
     case "tokenAmount":
-      return formatTokenAmount(
+      return await formatTokenAmount(
         field,
         value,
         message,
         metadata,
         chainId,
-        warnings,
+        externalDataProvider,
       );
     case "date":
-      return formatDate(value);
+      return { rendered: formatDate(value) };
     case "addressName":
-      return formatAddress(value, addressBook);
+      return { rendered: formatAddress(value, addressBook) };
     case "enum":
-      return formatEnum(field, value, metadata);
-    case "raw":
+      return { rendered: formatEnum(field, value, metadata) };
     default:
-      return formatRaw(value);
+      return { rendered: formatRaw(value) };
   }
 }
 
-function formatTokenAmount(
+async function formatTokenAmount(
   field: ResolvedField,
   value: unknown,
   message: Record<string, unknown>,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
   chainId: number,
-  warnings: string[],
-): string {
+  externalDataProvider?: ExternalDataProvider,
+): Promise<{ rendered: string; warning?: Warning }> {
   const amount = parseBigIntFromValue(value);
-  if (amount === undefined) {
-    return formatRaw(value);
-  }
+  if (amount === undefined) return { rendered: formatRaw(value) };
 
   const tokenPath = field.params.tokenPath;
-  if (typeof tokenPath !== "string") {
-    return formatRaw(value);
-  }
+  if (typeof tokenPath !== "string") return { rendered: formatRaw(value) };
 
-  const tokenValue = getValue(message, tokenPath);
-  if (tokenValue === undefined) {
-    warnings.push(
-      `token path '${tokenPath}' not found for field '${field.path}'`,
-    );
-    return formatRaw(value);
-  }
-
+  const tokenValue = getMessageValue(message, tokenPath);
   const tokenAddress = extractAddressValue(tokenValue);
-  if (tokenAddress === undefined) {
-    warnings.push(
-      `token path '${tokenPath}' is not an address for field '${field.path}'`,
-    );
-    return formatRaw(value);
+  if (!tokenAddress) {
+    return {
+      rendered: formatRaw(value),
+      warning: warn(
+        "TOKEN_NOT_FOUND",
+        `Token path '${tokenPath}' did not resolve to an address`,
+      ),
+    };
   }
 
-  const caip19 = `eip155:${chainId}/erc20:${tokenAddress.toLowerCase()}`;
-  const meta = lookupTokenByCaip19(caip19);
-  if (!meta) {
-    warnings.push(
-      `Token registry missing entry for chain ${chainId} and address ${tokenAddress}`,
+  const caip19 = `eip155:${chainId}/erc20:${tokenAddress}`;
+  let tokenMeta: TokenMeta | undefined;
+
+  if (externalDataProvider?.resolveToken) {
+    const result = await externalDataProvider.resolveToken(
+      chainId,
+      tokenAddress,
     );
-    return formatRaw(value);
+    if (result) tokenMeta = result;
+  }
+  if (!tokenMeta) {
+    tokenMeta = lookupTokenByCaip19(caip19) ?? undefined;
+  }
+
+  if (!tokenMeta) {
+    return {
+      rendered: formatRaw(value),
+      warning: warn(
+        "TOKEN_NOT_FOUND",
+        `Token metadata could not be resolved for ${tokenAddress}`,
+      ),
+    };
   }
 
   const message2 = tokenAmountMessage(field, amount, metadata);
-  if (message2) {
-    return `${message2} ${meta.symbol}`;
-  }
+  if (message2) return { rendered: `${message2} ${tokenMeta.symbol}` };
 
-  const formatted = formatAmountWithDecimals(amount, meta.decimals);
-  return `${formatted} ${meta.symbol}`;
+  return {
+    rendered: `${formatAmountWithDecimals(amount, tokenMeta.decimals)} ${tokenMeta.symbol}`,
+  };
 }
 
 function tokenAmountMessage(
   field: ResolvedField,
   amount: bigint,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
 ): string | undefined {
   const thresholdSpec = field.params.threshold;
   const message = field.params.message;
-
   if (typeof thresholdSpec !== "string" || typeof message !== "string") {
     return undefined;
   }
@@ -256,27 +458,20 @@ function tokenAmountMessage(
   let threshold: bigint | undefined;
   if (thresholdSpec.startsWith("$.")) {
     const value = resolveMetadataValue(metadata, thresholdSpec);
-    threshold = parseBigIntFromValue(value);
+    if (typeof value === "string") threshold = parseBigInt(value);
+    else if (typeof value === "number") threshold = BigInt(value);
   } else {
     threshold = parseBigInt(thresholdSpec);
   }
 
-  if (threshold === undefined) {
-    return undefined;
-  }
-
-  return amount >= threshold ? message : undefined;
+  return threshold !== undefined && amount >= threshold ? message : undefined;
 }
 
 function formatDate(value: unknown): string {
-  const amount = parseBigIntFromValue(value);
-  if (amount === undefined) {
-    return formatRaw(value);
-  }
-
+  const ts = parseBigIntFromValue(value);
+  if (ts === undefined) return formatRaw(value);
   try {
-    const seconds = Number(amount);
-    const date = new Date(seconds * 1000);
+    const date = new Date(Number(ts) * 1000);
     const year = date.getUTCFullYear();
     const month = String(date.getUTCMonth() + 1).padStart(2, "0");
     const day = String(date.getUTCDate()).padStart(2, "0");
@@ -293,28 +488,13 @@ function formatAddress(
   value: unknown,
   addressBook: Map<string, string>,
 ): string {
-  const address = valueAsString(value);
-  if (address === undefined) {
-    return formatRaw(value);
-  }
-
-  const cleaned = address.trim();
+  const address = extractAddressValue(value);
+  if (!address) return formatRaw(value);
   try {
-    const bytes = hexToBytes(
-      cleaned.startsWith("0x") ? cleaned.slice(2) : cleaned,
-    );
-    if (bytes.length !== 20) {
-      return address;
-    }
+    const bytes = hexToBytes(address);
+    if (bytes.length !== 20) return address;
     const checksum = toChecksumAddress(bytes);
-    const normalized = cleaned.toLowerCase();
-
-    const label = addressBook.get(normalized);
-    if (label) {
-      return label;
-    }
-
-    return checksum;
+    return addressBook.get(address) ?? checksum;
   } catch {
     return address;
   }
@@ -323,26 +503,19 @@ function formatAddress(
 function formatEnum(
   field: ResolvedField,
   value: unknown,
-  metadata: Record<string, unknown>,
+  metadata: DescriptorMetadata | undefined,
 ): string {
   const reference = field.params.$ref;
-  if (typeof reference !== "string") {
-    return formatRaw(value);
-  }
+  if (typeof reference !== "string") return formatRaw(value);
 
   const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") {
-    return formatRaw(value);
-  }
+  if (!enumMap || typeof enumMap !== "object") return formatRaw(value);
 
-  const text = valueAsString(value);
-  if (text !== undefined) {
-    const label = (enumMap as Record<string, unknown>)[text];
-    if (typeof label === "string") {
-      return label;
-    }
+  const key = valueAsString(value);
+  if (key !== undefined) {
+    const label = (enumMap as Record<string, unknown>)[key];
+    if (typeof label === "string") return label;
   }
-
   return formatRaw(value);
 }
 
@@ -353,74 +526,17 @@ function formatRaw(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function extractChainId(domain: Record<string, unknown>): number {
-  const chainValue = domain.chainId;
-  if (chainValue === undefined) {
-    throw Eip712Error.typedData("typed data domain missing chainId");
-  }
-
-  if (typeof chainValue === "number") {
-    return chainValue;
-  }
-
-  if (typeof chainValue === "string") {
-    const value = parseBigInt(chainValue);
-    if (value === undefined) {
-      throw Eip712Error.typedData("chainId is not a valid integer");
-    }
-    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw Eip712Error.typedData("chainId out of range");
-    }
-    return Number(value);
-  }
-
-  throw Eip712Error.typedData("chainId must be a number or string");
-}
-
-function extractVerifyingContract(domain: Record<string, unknown>): string {
-  const value = domain.verifyingContract;
-  if (typeof value !== "string") {
-    throw Eip712Error.typedData("typed data domain missing verifyingContract");
-  }
-  return value.toLowerCase();
-}
-
-function getValue(root: Record<string, unknown>, path: string): unknown {
-  let current: unknown = root;
-  let trimmed = path.trim();
-  if (trimmed.startsWith("@.")) {
-    trimmed = trimmed.slice(2);
-  }
-  if (trimmed.length === 0) {
-    return current;
-  }
-
-  for (const segment of trimmed.split(".")) {
-    if (current === null || typeof current !== "object") {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-
-  return current;
-}
-
 function parseBigIntFromValue(value: unknown): bigint | undefined {
-  if (typeof value === "string") {
-    return parseBigInt(value);
-  }
-  if (typeof value === "number") {
-    return BigInt(value);
-  }
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return BigInt(value);
+  if (typeof value === "string") return parseBigInt(value);
   return undefined;
 }
 
 function extractAddressValue(value: unknown): string | undefined {
   const text = valueAsString(value);
-  if (text === undefined) return undefined;
-  if (text.startsWith("0x") && text.length === 42) {
-    return text.toLowerCase();
-  }
+  if (!text) return undefined;
+  if (text.startsWith("0x") && text.length === 42) return text.toLowerCase();
   return undefined;
 }
 

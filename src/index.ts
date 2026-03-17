@@ -18,6 +18,7 @@
 
 import { DescriptorResolver } from "./resolver";
 import { formatCalldata, rawPreviewFromCalldata } from "./engine";
+import { formatEip712 } from "./eip712";
 import { buildAddressBook } from "./descriptor";
 import { hexToBytes, extractSelector } from "./utils";
 import type {
@@ -49,7 +50,7 @@ export async function format(
     const calldata = hexToBytes(tx.data);
     const selector = extractSelector(calldata);
     return {
-      raw: rawPreviewFromCalldata(selector, calldata),
+      rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
       warnings: [
         {
           code: "NO_DESCRIPTOR",
@@ -72,16 +73,34 @@ export async function formatTypedData(
   typedData: TypedData,
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
-  if (!typedData.domain.chainId || !typedData.domain.verifyingContract) {
+  const { chainId, verifyingContract } = typedData.domain;
+
+  if (!chainId || !verifyingContract) {
     throw new Error(
       "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
     );
   }
+
   const descriptor = await new DescriptorResolver(
     opts?.descriptorResolverOptions,
-  ).resolveTypedDataDescriptor(
-    typedData.domain.chainId,
-    typedData.domain.verifyingContract,
+  ).resolveTypedDataDescriptor(chainId, verifyingContract);
+
+  if (!descriptor) {
+    return {
+      warnings: [
+        {
+          code: "NO_DESCRIPTOR",
+          message: `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
+        },
+      ],
+    };
+  }
+
+  const addressBook = buildAddressBook(descriptor, verifyingContract);
+  return formatEip712(
+    typedData,
+    descriptor,
+    addressBook,
+    opts?.externalDataProvider,
   );
-  throw new Error("Not implemented");
 }
