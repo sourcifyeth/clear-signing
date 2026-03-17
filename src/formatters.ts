@@ -44,7 +44,7 @@ export function renderTokenAmount(
  * Check whether a token amount meets or exceeds a threshold and return the
  * configured message string if so.
  */
-export function tokenAmountMessage(
+function tokenAmountMessage(
   field: ResolvedField,
   amount: bigint,
   metadata: DescriptorMetadata | undefined,

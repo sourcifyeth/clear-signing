@@ -30,9 +30,6 @@ import type {
 // Re-export types
 export type * from "./types";
 
-// Re-export errors
-export * from "./errors";
-
 /**
  * Resolves the descriptor for a transaction and returns a DisplayModel
  * with human-readable information.

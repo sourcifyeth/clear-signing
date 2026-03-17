@@ -138,14 +138,6 @@ export function selectorForSignature(signature: string): Uint8Array {
   return hash.slice(0, 4);
 }
 
-/** Compare two byte arrays for equality. */
-export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
 
 /** Normalize CAIP-19 identifier to lowercase. */
 export function normalizeCaip19(input: string): string {
@@ -163,16 +155,6 @@ export function formatSelectorHex(selector: Uint8Array): string {
   return bytesToHex(selector);
 }
 
-/** Encode a bigint as a 32-byte big-endian Uint8Array. */
-export function bigintToBytes32(value: bigint): Uint8Array {
-  const bytes = new Uint8Array(32);
-  let v = value;
-  for (let i = 31; i >= 0; i--) {
-    bytes[i] = Number(v & 0xffn);
-    v >>= 8n;
-  }
-  return bytes;
-}
 
 /** Extract 4-byte selector from calldata. */
 export function extractSelector(calldata: Uint8Array): Uint8Array {

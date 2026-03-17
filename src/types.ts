@@ -10,9 +10,8 @@ export interface FunctionInput {
 }
 
 /** Function descriptor with computed selector. */
-export interface FunctionDescriptor {
+export interface ParsedFunctionSignature {
   inputs: FunctionInput[];
-  typedSignature: string;
   selector: Uint8Array;
 }
 

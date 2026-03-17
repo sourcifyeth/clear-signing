@@ -2,7 +2,6 @@
  * Descriptor parsing and calldata decoding for clear signing.
  */
 
-import { DescriptorError, TokenLookupError } from "./errors";
 import type {
   Descriptor,
   DescriptorFieldFormat,
@@ -10,7 +9,7 @@ import type {
   DescriptorFieldFormatType,
   DescriptorFormatSpec,
   DescriptorMetadata,
-  FunctionDescriptor,
+  ParsedFunctionSignature,
   FunctionInput,
   Transaction,
   TypedData,
@@ -116,10 +115,10 @@ export function isEip712DescriptorBoundTo(
  */
 export function getFormatsBySelector(
   descriptor: Descriptor,
-): Map<string, { fn: FunctionDescriptor; spec: DescriptorFormatSpec }> {
+): Map<string, { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }> {
   const map = new Map<
     string,
-    { fn: FunctionDescriptor; spec: DescriptorFormatSpec }
+    { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }
   >();
   const formats = descriptor.display?.formats;
   if (!formats) return map;
@@ -145,7 +144,7 @@ export function getFormatsBySelector(
  */
 export function parseFunctionSignatureKey(
   key: string,
-): FunctionDescriptor | undefined {
+): ParsedFunctionSignature | undefined {
   const openParen = key.indexOf("(");
   if (openParen === -1) return undefined;
 
@@ -163,7 +162,7 @@ export function parseFunctionSignatureKey(
   const canonical = `${fnName}(${canonicalParamList(inputs)})`;
   const selector = selectorForSignature(canonical);
 
-  return { inputs, typedSignature: canonical, selector };
+  return { inputs, selector };
 }
 
 /** Find the index of the closing ')' that matches the opening '(' at depth 0. */
@@ -301,7 +300,7 @@ function canonicalParam(input: FunctionInput): string {
  * Decode calldata arguments according to function descriptor.
  */
 export function decodeArguments(
-  fn: FunctionDescriptor,
+  fn: ParsedFunctionSignature,
   calldata: Uint8Array,
 ): DecodedArguments {
   const totalWords = fn.inputs.reduce(
@@ -311,7 +310,7 @@ export function decodeArguments(
   const expectedLen = 4 + totalWords * 32;
 
   if (calldata.length < expectedLen) {
-    throw DescriptorError.calldata(
+    throw new Error(
       `calldata length ${calldata.length} too small for ${totalWords} arguments`,
     );
   }
@@ -386,7 +385,7 @@ function decodeInput(
   const end = start + 32;
 
   if (end > calldata.length) {
-    throw DescriptorError.calldata(
+    throw new Error(
       `calldata length ${calldata.length} too small while decoding argument '${input.name}'`,
     );
   }
@@ -584,11 +583,15 @@ export function determineTokenKey(
     } else {
       const tokenValue = decoded.get(tokenPath);
       if (!tokenValue) {
-        throw TokenLookupError.missingPath(tokenPath, field.path);
+        throw new Error(
+          `token path '${tokenPath}' not found for field '${field.path}'`,
+        );
       }
 
       if (tokenValue.type !== "address") {
-        throw TokenLookupError.notAddress(tokenPath, field.path);
+        throw new Error(
+          `token path '${tokenPath}' is not an address for field '${field.path}'`,
+        );
       }
 
       address = normalizeAddress(bytesToHex(tokenValue.bytes));
@@ -597,14 +600,7 @@ export function determineTokenKey(
     return tokenKeyFromErc20(chainId, address);
   }
 
-  throw TokenLookupError.missingToken(field.path);
-}
-
-/**
- * Get display label for a decoded argument.
- */
-export function displayLabel(arg: DecodedArgument): string {
-  return arg.name && arg.name.length > 0 ? arg.name : `arg${arg.index}`;
+  throw new Error(`display field '${field.path}' missing token configuration`);
 }
 
 /**
@@ -621,13 +617,6 @@ export function defaultValueString(value: ArgumentValue): string {
     case "raw":
       return bytesToHex(value.bytes);
   }
-}
-
-/**
- * Get raw word hex for a decoded argument.
- */
-export function rawWordHex(arg: DecodedArgument): string {
-  return bytesToHex(arg.word);
 }
 
 /**
