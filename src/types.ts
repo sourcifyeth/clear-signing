@@ -50,10 +50,24 @@ export interface TypedData {
   message: Record<string, unknown>;
 }
 
+/** Machine-readable warning code. */
+export type WarningCode =
+  | "NO_DESCRIPTOR"
+  | "DEPLOYMENT_MISMATCH"
+  | "NO_FORMAT_MATCH"
+  | "UNSUPPORTED_FIELD_GROUP"
+  | "FIELD_RESOLUTION"
+  | "MISSING_FIELD_VALUE"
+  | "UNRESOLVABLE_FIELD_TYPE"
+  | "INTERPOLATION_ERROR"
+  | "TOKEN_NOT_FOUND"
+  | "ADDRESS_NOT_RESOLVED"
+  | "ADDRESS_TYPE_MISMATCH";
+
 /** Non-fatal warning from formatting. */
 export interface Warning {
   /** machine-readable warning code */
-  code: string;
+  code: WarningCode;
   /** human-readable warning message */
   message: string;
 }

@@ -3,10 +3,10 @@
  */
 
 import { keccak_256 } from "@noble/hashes/sha3";
-import type { Warning } from "./types";
+import type { Warning, WarningCode } from "./types";
 
 /** Create a Warning object. */
-export function warn(code: string, message: string): Warning {
+export function warn(code: WarningCode, message: string): Warning {
   return { code, message };
 }
 
