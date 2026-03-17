@@ -152,35 +152,10 @@ export function normalizeCaip19(input: string): string {
   return input.trim().toLowerCase();
 }
 
-/** Create token lookup key from CAIP-19. */
-export function tokenKeyFromCaip19(caip19: string): string {
-  return normalizeCaip19(caip19);
-}
-
 /** Create token lookup key for ERC20 token. */
 export function tokenKeyFromErc20(chainId: number, address: string): string {
   const normalized = normalizeAddress(address);
   return `eip155:${chainId}/erc20:${normalized}`;
-}
-
-/** Get native token CAIP-19 key for a chain. */
-export function nativeTokenKey(chainId: number): string | undefined {
-  const slip44 = nativeSlip44Code(chainId);
-  if (slip44 === undefined) return undefined;
-  return `eip155:${chainId}/slip44:${slip44}`;
-}
-
-/** Get SLIP-44 code for native token on a chain. */
-function nativeSlip44Code(chainId: number): number | undefined {
-  switch (chainId) {
-    case 1: // Ethereum mainnet
-    case 10: // Optimism
-    case 42161: // Arbitrum
-    case 8453: // Base
-      return 60; // ETH
-    default:
-      return undefined;
-  }
 }
 
 /** Format selector bytes as hex string. */

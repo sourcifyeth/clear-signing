@@ -12,7 +12,6 @@ import type {
   DisplayModel,
   FieldType,
   ExternalDataProvider,
-  TokenMeta,
   TypedData,
   TypeMember,
   Warning,
@@ -26,15 +25,19 @@ import {
   resolveTypedDataPath,
   type ArgumentValue,
 } from "./descriptor";
-import { lookupTokenByCaip19 } from "./token-registry";
 import {
   bytesToHex,
-  formatAmountWithDecimals,
   hexToBytes,
   parseBigInt,
   toChecksumAddress,
   warn,
 } from "./utils";
+import {
+  formatAddressName,
+  formatTimestamp,
+  renderTokenAmount,
+  resolveEnumLabel,
+} from "./formatters";
 
 function isFieldGroup(
   field: DescriptorFieldFormat | DescriptorFieldGroup,
@@ -377,8 +380,16 @@ async function renderField(
       );
     case "date":
       return { rendered: formatDate(value) };
-    case "addressName":
-      return { rendered: formatAddress(value, addressBook) };
+    case "addressName": {
+      const address = extractAddressValue(value);
+      if (!address) return { rendered: formatRaw(value) };
+      try {
+        const checksum = toChecksumAddress(hexToBytes(address));
+        return await formatAddressName(checksum, addressBook, field, externalDataProvider);
+      } catch {
+        return { rendered: formatRaw(value) };
+      }
+    }
     case "enum":
       return { rendered: formatEnum(field, value, metadata) };
     default:
@@ -412,21 +423,8 @@ async function formatTokenAmount(
     };
   }
 
-  const caip19 = `eip155:${chainId}/erc20:${tokenAddress}`;
-  let tokenMeta: TokenMeta | undefined;
-
-  if (externalDataProvider?.resolveToken) {
-    const result = await externalDataProvider.resolveToken(
-      chainId,
-      tokenAddress,
-    );
-    if (result) tokenMeta = result;
-  }
-  if (!tokenMeta) {
-    tokenMeta = lookupTokenByCaip19(caip19) ?? undefined;
-  }
-
-  if (!tokenMeta) {
+  const token = await externalDataProvider?.resolveToken?.(chainId, tokenAddress) ?? null;
+  if (!token) {
     return {
       rendered: formatRaw(value),
       warning: warn(
@@ -436,67 +434,16 @@ async function formatTokenAmount(
     };
   }
 
-  const message2 = tokenAmountMessage(field, amount, metadata);
-  if (message2) return { rendered: `${message2} ${tokenMeta.symbol}` };
-
-  return {
-    rendered: `${formatAmountWithDecimals(amount, tokenMeta.decimals)} ${tokenMeta.symbol}`,
-  };
-}
-
-function tokenAmountMessage(
-  field: ResolvedField,
-  amount: bigint,
-  metadata: DescriptorMetadata | undefined,
-): string | undefined {
-  const thresholdSpec = field.params.threshold;
-  const message = field.params.message;
-  if (typeof thresholdSpec !== "string" || typeof message !== "string") {
-    return undefined;
-  }
-
-  let threshold: bigint | undefined;
-  if (thresholdSpec.startsWith("$.")) {
-    const value = resolveMetadataValue(metadata, thresholdSpec);
-    if (typeof value === "string") threshold = parseBigInt(value);
-    else if (typeof value === "number") threshold = BigInt(value);
-  } else {
-    threshold = parseBigInt(thresholdSpec);
-  }
-
-  return threshold !== undefined && amount >= threshold ? message : undefined;
+  return { rendered: renderTokenAmount(amount, token, field, metadata) };
 }
 
 function formatDate(value: unknown): string {
   const ts = parseBigIntFromValue(value);
   if (ts === undefined) return formatRaw(value);
   try {
-    const date = new Date(Number(ts) * 1000);
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
-    const hours = String(date.getUTCHours()).padStart(2, "0");
-    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-    const secs = String(date.getUTCSeconds()).padStart(2, "0");
-    return `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`;
+    return formatTimestamp(ts);
   } catch {
     return formatRaw(value);
-  }
-}
-
-function formatAddress(
-  value: unknown,
-  addressBook: Map<string, string>,
-): string {
-  const address = extractAddressValue(value);
-  if (!address) return formatRaw(value);
-  try {
-    const bytes = hexToBytes(address);
-    if (bytes.length !== 20) return address;
-    const checksum = toChecksumAddress(bytes);
-    return addressBook.get(address) ?? checksum;
-  } catch {
-    return address;
   }
 }
 
@@ -505,18 +452,9 @@ function formatEnum(
   value: unknown,
   metadata: DescriptorMetadata | undefined,
 ): string {
-  const reference = field.params.$ref;
-  if (typeof reference !== "string") return formatRaw(value);
-
-  const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") return formatRaw(value);
-
   const key = valueAsString(value);
-  if (key !== undefined) {
-    const label = (enumMap as Record<string, unknown>)[key];
-    if (typeof label === "string") return label;
-  }
-  return formatRaw(value);
+  if (key === undefined) return formatRaw(value);
+  return resolveEnumLabel(field, key, metadata) ?? formatRaw(value);
 }
 
 function formatRaw(value: unknown): string {

@@ -2,13 +2,6 @@
  * Core type definitions for the clear signing library.
  */
 
-/** Token metadata from the registry. */
-export interface TokenMeta {
-  symbol: string;
-  decimals: number;
-  name: string;
-}
-
 /** ABI function input parameter. */
 export interface FunctionInput {
   name: string;

@@ -13,7 +13,6 @@ import type {
   FieldType,
   ExternalDataProvider,
   RawCalldataFallback,
-  TokenMeta,
   Transaction,
   Warning,
 } from "./types";
@@ -36,12 +35,16 @@ import {
   formatAmountWithDecimals,
   formatSelectorHex,
   hexToBytes,
-  nativeTokenKey,
   parseBigInt,
   toChecksumAddress,
   warn,
 } from "./utils";
-import { lookupTokenByCaip19 } from "./token-registry";
+import {
+  formatAddressName as sharedFormatAddressName,
+  formatTimestamp,
+  renderTokenAmount,
+  resolveEnumLabel,
+} from "./formatters";
 
 function fieldTypeFromArgValue(value: ArgumentValue): FieldType {
   switch (value.type) {
@@ -273,20 +276,9 @@ async function renderField(
 }
 
 function formatDate(value: ArgumentValue): string {
-  if (value.type !== "uint") {
-    return defaultValueString(value);
-  }
-
+  if (value.type !== "uint") return defaultValueString(value);
   try {
-    const seconds = Number(value.value);
-    const date = new Date(seconds * 1000);
-    const year = date.getUTCFullYear();
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(date.getUTCDate()).padStart(2, "0");
-    const hours = String(date.getUTCHours()).padStart(2, "0");
-    const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-    const secs = String(date.getUTCSeconds()).padStart(2, "0");
-    return `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`;
+    return formatTimestamp(value.value);
   } catch {
     return defaultValueString(value);
   }
@@ -308,49 +300,19 @@ async function formatTokenAmount(
   const amount = value.value;
 
   try {
-    const caip19Key = determineTokenKey(
-      field,
-      decoded,
-      chainId,
-      contractAddress,
-    );
+    const caip19Key = determineTokenKey(field, decoded, chainId, contractAddress);
+    const erc20Match = caip19Key.match(/^eip155:\d+\/erc20:(.+)$/);
+    if (!erc20Match) return { rendered: defaultValueString(value) };
 
-    let tokenMeta: TokenMeta | undefined;
-
-    // Try external provider first
-    if (externalDataProvider?.resolveToken) {
-      const erc20Match = caip19Key.match(/^eip155:\d+\/erc20:(.+)$/);
-      if (erc20Match) {
-        const result = await externalDataProvider.resolveToken(
-          chainId,
-          erc20Match[1],
-        );
-        if (result) tokenMeta = result;
-      }
-    }
-
-    // Fall back to embedded token registry
-    if (!tokenMeta) {
-      tokenMeta = lookupTokenByCaip19(caip19Key) ?? undefined;
-    }
-
-    if (!tokenMeta) {
+    const token = await externalDataProvider?.resolveToken?.(chainId, erc20Match[1]) ?? null;
+    if (!token) {
       return {
         rendered: defaultValueString(value),
-        warning: warn(
-          "TOKEN_NOT_FOUND",
-          "Token metadata could not be resolved",
-        ),
+        warning: warn("TOKEN_NOT_FOUND", "Token metadata could not be resolved"),
       };
     }
 
-    const message = tokenAmountMessage(field, amount, metadata);
-    if (message) {
-      return { rendered: `${message} ${tokenMeta.symbol}` };
-    }
-
-    const formatted = formatAmountWithDecimals(amount, tokenMeta.decimals);
-    return { rendered: `${formatted} ${tokenMeta.symbol}` };
+    return { rendered: renderTokenAmount(amount, token, field, metadata) };
   } catch {
     return { rendered: defaultValueString(value) };
   }
@@ -361,19 +323,21 @@ function formatNativeAmount(value: ArgumentValue, chainId: number): string {
     return defaultValueString(value);
   }
 
-  const amount = value.value;
-  const key = nativeTokenKey(chainId);
+  const formatted = formatAmountWithDecimals(value.value, 18);
+  const symbol = nativeSymbol(chainId);
+  return `${formatted} ${symbol}`;
+}
 
-  if (key) {
-    const meta = lookupTokenByCaip19(key);
-    if (meta) {
-      const formatted = formatAmountWithDecimals(amount, meta.decimals);
-      return `${formatted} ${meta.symbol}`;
-    }
+function nativeSymbol(chainId: number): string {
+  switch (chainId) {
+    case 1:    // Ethereum mainnet
+    case 10:   // Optimism
+    case 42161: // Arbitrum
+    case 8453: // Base
+      return "ETH";
+    default:
+      return "NATIVE";
   }
-
-  const formatted = formatAmountWithDecimals(amount, 18);
-  return `${formatted} NATIVE`;
 }
 
 function formatAddress(
@@ -395,66 +359,9 @@ async function formatAddressName(
   field: ResolvedField,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<{ rendered: string; warning?: Warning }> {
-  if (value.type !== "address") {
-    return { rendered: defaultValueString(value) };
-  }
-
+  if (value.type !== "address") return { rendered: defaultValueString(value) };
   const checksum = toChecksumAddress(value.bytes);
-  const normalized = checksum.toLowerCase();
-
-  // Descriptor address book is trusted — no warning
-  const bookLabel = addressBook.get(normalized);
-  if (bookLabel) {
-    return { rendered: bookLabel };
-  }
-
-  const types = field.params.types;
-  const sources = field.params.sources;
-  const expectedType = types?.[0] ?? "";
-
-  // Try local wallet names
-  if (sources?.includes("local") && externalDataProvider?.resolveLocalName) {
-    const result = await externalDataProvider.resolveLocalName(
-      normalized,
-      expectedType,
-    );
-    if (result) {
-      return {
-        rendered: result.name,
-        warning: result.typeMatch
-          ? undefined
-          : warn(
-              "ADDRESS_TYPE_MISMATCH",
-              `Resolved address type does not match expected type '${expectedType}'`,
-            ),
-      };
-    }
-  }
-
-  // Try ENS
-  if (sources?.includes("ens") && externalDataProvider?.resolveEnsName) {
-    const result = await externalDataProvider.resolveEnsName(
-      normalized,
-      expectedType,
-    );
-    if (result) {
-      return {
-        rendered: result.name,
-        warning: result.typeMatch
-          ? undefined
-          : warn(
-              "ADDRESS_TYPE_MISMATCH",
-              `Resolved address type does not match expected type '${expectedType}'`,
-            ),
-      };
-    }
-  }
-
-  // Raw address fallback — resolution was expected but failed
-  return {
-    rendered: checksum,
-    warning: warn("ADDRESS_NOT_RESOLVED", "Address name could not be resolved"),
-  };
+  return sharedFormatAddressName(checksum, addressBook, field, externalDataProvider);
 }
 
 function formatEnum(
@@ -462,57 +369,8 @@ function formatEnum(
   value: ArgumentValue,
   metadata: DescriptorMetadata | undefined,
 ): string {
-  if (value.type !== "uint") {
-    return defaultValueString(value);
-  }
-
-  const reference = field.params.$ref;
-  if (typeof reference !== "string") {
-    return defaultValueString(value);
-  }
-
-  const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") {
-    return defaultValueString(value);
-  }
-
-  const label = (enumMap as Record<string, unknown>)[value.value.toString()];
-  if (typeof label === "string") {
-    return label;
-  }
-
-  return value.value.toString();
-}
-
-function tokenAmountMessage(
-  field: ResolvedField,
-  amount: bigint,
-  metadata: DescriptorMetadata | undefined,
-): string | undefined {
-  const thresholdSpec = field.params.threshold;
-  const message = field.params.message;
-
-  if (typeof thresholdSpec !== "string" || typeof message !== "string") {
-    return undefined;
-  }
-
-  let threshold: bigint | undefined;
-  if (thresholdSpec.startsWith("$.")) {
-    const value = resolveMetadataValue(metadata, thresholdSpec);
-    if (typeof value === "string") {
-      threshold = parseBigInt(value);
-    } else if (typeof value === "number") {
-      threshold = BigInt(value);
-    }
-  } else {
-    threshold = parseBigInt(thresholdSpec);
-  }
-
-  if (threshold === undefined) {
-    return undefined;
-  }
-
-  return amount >= threshold ? message : undefined;
+  if (value.type !== "uint") return defaultValueString(value);
+  return resolveEnumLabel(field, value.value.toString(), metadata) ?? value.value.toString();
 }
 
 /**
