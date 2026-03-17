@@ -6,24 +6,20 @@ This file provides context for AI coding assistants working on this codebase.
 
 This is a TypeScript implementation of [ERC-7730](https://eips.ethereum.org/EIPS/eip-7730) - Structured Data Clear Signing Format. It transforms Ethereum transaction calldata and EIP-712 typed data into human-readable display models for wallet clear signing UIs.
 
-**Origin:** Direct port of the Rust implementation at [reown-com/yttrium](https://github.com/reown-com/yttrium/tree/main/crates/yttrium/src/clear_signing).
-
 ## Architecture
 
 ```
 src/
-├── index.ts                    # Public API: format(), formatWithValue(), formatTypedData()
+├── index.ts                    # Public API: format(), formatTypedData()
 ├── types.ts                    # TypeScript interfaces and types
-├── errors.ts                   # Error classes: DescriptorError, EngineError, ResolverError, Eip712Error
-├── utils.ts                    # Crypto & formatting: keccak256, checksums, hex conversion
+├── utils.ts                    # Crypto & formatting utilities
 ├── descriptor.ts               # Descriptor parsing, ABI decoding, calldata decoding
-├── engine.ts                   # Display formatting logic for transactions
+├── formatters.ts               # Shared field formatting logic (used by engine + eip712)
+├── engine.ts                   # Display formatting logic for transactions (calldata)
 ├── eip712.ts                   # Display formatting logic for EIP-712 typed data
 ├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
-├── token-registry.ts           # Token metadata lookup (symbol, decimals, name)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
-├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
-└── assets/                     # Embedded JSON data (descriptors, ABIs, token registry)
+└── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
 ```
 
 ## Key Data Flow
@@ -33,8 +29,8 @@ src/
    ```
    format(tx: Transaction, opts?)
    → DescriptorResolver.resolveCalldataDescriptor() fetches descriptor
-   → engine.formatCalldata(descriptor, tx, addressBook, externalDataProvider)
-       → parseFunctionSignatureKey() derives FunctionDescriptors from display.formats keys
+   → engine.formatCalldata(tx, descriptor, externalDataProvider?)
+       → getFormatsBySelector() builds selector→format map from display.formats keys
        → decodeArguments() decodes calldata
        → applyDisplayFormat() renders each field
    → returns DisplayModel
@@ -44,7 +40,7 @@ src/
    ```
    formatTypedData(typedData, opts?)
    → DescriptorResolver.resolveTypedDataDescriptor() fetches descriptor by (chainId, verifyingContract)
-   → eip712.formatTypedData(typedData, descriptor, addressBook, externalDataProvider)
+   → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
        → findFormatSpec() matches display.formats key to primaryType via encodeType
        → iterates format.fields, resolves paths in typedData.message
        → renderField() formats each value
@@ -53,50 +49,48 @@ src/
 
 ## Descriptor Sources
 
-The resolver accepts a `DescriptorSource` union to control where descriptors come from:
+The resolver accepts `GitHubResolverOptions` or `EmbeddedResolverOptions` to control where descriptors come from.
 
-### `GitHubRegistrySource`
+### `GitHubResolverOptions`
 
-Fetches descriptors lazily from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) via the GitHub API. This is the default when no source is specified.
+Fetches descriptors lazily from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) via the GitHub API. This is the default when no options are specified.
 
 ```typescript
-const source: GitHubRegistrySource = {
-  type: "github",
-  repo: "LedgerHQ/clear-signing-erc7730-registry", // optional, default
-  ref: "master",                                     // optional, default
+const opts: FormatOptions = {
+  descriptorResolverOptions: {
+    type: "github",
+    repo: "LedgerHQ/clear-signing-erc7730-registry", // optional, default
+    ref: "master",                                     // optional, default
+    index: myPrebuiltIndex,                            // optional: skip GitHub API call
+  },
 };
 ```
 
 **How it works:**
 
-1. `GitHubRegistryIndex.init()` calls the GitHub Git Trees API once to get all file paths.
-2. It fetches every `calldata-*.json` and `eip712-*.json` descriptor in parallel.
-3. Each descriptor is indexed by CAIP-10 key (`eip155:{chainId}:{address}`) into two maps:
-   - `calldataIndexCache` — keyed by `context.contract.deployments[].{chainId, address}`
-   - `eip712IndexCache` — keyed by `context.eip712.deployments[].{chainId, address}`
-4. Lookups return the absolute raw URL; the resolver then fetches and parses the descriptor on demand.
+1. `github-registry-index.ts` fetches the GitHub Git Trees API once and indexes all `calldata-*.json` and `eip712-*.json` descriptor files.
+2. Each descriptor is indexed by CAIP-10 key (`eip155:{chainId}:{address}`) into two maps:
+   - `calldataIndex` — keyed by `context.contract.deployments[].{chainId, address}`
+   - `typedDataIndex` — keyed by `context.eip712.deployments[].{chainId, address}`
+3. Lookups return a repo-relative path; the `GitHubPathResolver` fetches and parses the descriptor.
 
 **Known limitation — EIP-712 indexing:**
 
-ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index. Additionally, only one descriptor file per `(chainId, verifyingContract)` pair can be indexed — the first one encountered wins.
+ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index. Additionally, only one descriptor per `(chainId, verifyingContract)` pair can be indexed — the first one encountered wins.
 
-### `InlineDescriptorSource`
+### `EmbeddedResolverOptions`
 
-Provides a descriptor directly in memory, bypassing all network I/O. Intended for testing and self-contained integrations.
+Loads descriptors from a local directory using dynamic `import()`. Useful for bundled/offline builds.
 
 ```typescript
-const source: InlineDescriptorSource = {
-  type: "inline",
-  descriptor: { /* EIP-7730 descriptor object */ },
-  // ERC-7730 allows one include file per descriptor; the path key must
-  // match the value of descriptor.includes so the resolver can find it.
-  includes: {
-    "../../ercs/calldata-erc20-tokens.json": { /* included descriptor */ },
+const opts: FormatOptions = {
+  descriptorResolverOptions: {
+    type: "embedded",
+    index: myIndex,               // RegistryIndex with CAIP-10 → path mappings
+    descriptorDirectory: "./descriptors",
   },
 };
 ```
-
-The `includes` map is optional. ERC-7730 only allows a single include per descriptor, but the path key is required here to match the `includes` field value inside the descriptor JSON.
 
 ### GitHub client module (`github-registry-client.ts`)
 
@@ -104,15 +98,12 @@ Pure I/O layer with no caching. Exports:
 
 - `fetchRegistryFilePaths(source)` — returns repo-relative paths of all descriptor files
 - `fetchRegistryFile(path, source)` — fetches and parses a single descriptor file
-- `DEFAULT_REPO` / `DEFAULT_REF` constants live in `github-registry-index.ts`, not here
+- `DEFAULT_REPO` / `DEFAULT_REF` constants live in `github-registry-index.ts`
 
 ### GitHub index module (`github-registry-index.ts`)
 
-- `GitHubRegistryIndex` class — one instance per `(repo, ref)` combination, created via `getIndex()` in resolver
-- Constructor takes `GitHubRegistrySource | undefined`; defaults are applied from `DEFAULT_REPO` / `DEFAULT_REF`
-- `init()` is idempotent (guarded by `built` boolean); called automatically from all lookup methods
-- `lookupCalldataDescriptorUrl(chainId, address)` — returns URL or `undefined`
-- `lookupEip712DescriptorUrl(chainId, address)` — returns URL or `undefined`
+- `createGitHubRegistryIndex(source?)` — async factory; fetches all descriptors and builds a `RegistryIndex`
+- `DEFAULT_REPO` / `DEFAULT_REF` — default registry constants used by `DescriptorResolver`
 
 ## Descriptor Includes & Merging
 
@@ -124,7 +115,7 @@ The merge is implemented in `mergeDescriptors(including, included)` (exported fr
 - **`display.formats[*].fields` arrays:** merged by `path` value — fields from the including descriptor override matching entries in the included descriptor, and new `path` values are appended.
 - **`includes` key:** dropped from the merged result.
 
-Include path resolution uses basic segment-by-segment string logic (no `path` module, no `URL`), so it works across Node, browsers, and React Native.
+Include path resolution uses `new URL(relative, base)` in the resolver.
 
 ## Important Concepts
 
@@ -132,55 +123,62 @@ Include path resolution uses basic segment-by-segment string logic (no `path` mo
 
 JSON files that define how to display contract interactions:
 
-- `context.contract.deployments` - Chain/address bindings
-- `display.formats` - Per-function display rules with field formatting. **Keys are the full function
-  signatures including parameter names and types**, e.g. `"approve(address spender,uint256 value)"`.
+- `context.contract.deployments` — chain/address bindings
+- `display.formats` — per-function display rules with field formatting. **Keys are the full function
+  signatures including parameter names**, e.g. `"approve(address spender,uint256 value)"`.
   These keys are the sole source of function selector computation and calldata decoding — no
   separate ABI field is needed or used.
-- `metadata` - Constants, token info, address book entries
+- `metadata` — constants, owner info, etc.
 
-**`context.contract.abi` is deprecated and removed from the current ERC-7730 spec.** Some old
-descriptor files in `src/assets/` still contain it, but the engine ignores it. Function
-descriptors are derived entirely from `display.formats` keys via `parseFunctionSignatureKey()`
-in `descriptor.ts`.
+**`context.contract.abi` is deprecated and removed from the current ERC-7730 spec.** The engine
+ignores it. Function descriptors are derived entirely from `display.formats` keys via
+`parseFunctionSignatureKey()` in `descriptor.ts`.
 
 **`required` and `excluded` arrays on format entries are also legacy** and not part of the current
 spec. Do not add them to `DescriptorFormatSpec`.
 
-### EIP-712 Descriptor Keys (current spec vs old files)
+**Function signature key rules (from spec):**
+- Keys MUST include parameter names: `"transfer(address to,uint256 value)"` not `"transfer(address,uint256)"`
+- Commas MUST NOT be followed by spaces
+- Exactly one space between type and parameter name
+- Only canonical Solidity types (`uint256`, not `uint`)
 
-Old descriptor files in `src/assets/` use **bare primary type names** as `display.formats` keys
-(e.g. `"PermitSingle"`, `"Order"`) and carry inline type definitions in `context.eip712.schemas`.
+### EIP-712 Descriptor Keys
 
 **Current ERC-7730 spec:**
 - `display.formats` keys are the **full EIP-712 `encodeType` string**, e.g.
   `"PermitSingle(PermitDetails details,address spender,uint256 sigDeadline)PermitDetails(address token,uint160 amount,uint48 expiration,uint48 nonce)"`.
-  The wallet validates by computing `keccak256(encodeType(primaryType))` and matching against the key.
-- `context.eip712.schemas` is **deprecated** (kept for backward compat, will be removed).
-  Do not add `schemas` to new descriptors.
+- `context.eip712.schemas` is **deprecated** — do not add to new descriptors.
 - `context.eip712.deployments` and `context.eip712.domain` are the correct binding mechanisms.
 
-`eip712.ts` supports both formats: it first tries to match via computed `encodeType`, then falls
-back to bare primary type name, so old and new descriptors both work.
+`eip712.ts` supports both formats: tries `encodeType` match first, falls back to bare primary type name.
 
 ### Field Formats
 
-Supported: `tokenAmount`, `amount`, `date`, `address`, `addressName`, `enum`, `number`, `raw`
+Supported: `tokenAmount`, `amount`, `date`, `addressName`, `enum`, `raw`
 
-### Token Lookup
+Not yet implemented: `duration`, `unit`, `nftName`, `chainId`, `calldata`, `interoperableAddressName`
 
-Uses CAIP-19 identifiers:
+### Token Resolution
 
-- ERC-20: `eip155:{chainId}/erc20:{address}`
-- Native: `eip155:{chainId}/slip44:60` (ETH)
+Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `TOKEN_NOT_FOUND` warning and falls back to the raw value.
+
+### Address Name Resolution
+
+Address names are resolved via `ExternalDataProvider.resolveLocalName` and/or `resolveEnsName`. Which sources are consulted is controlled by `field.params.sources` in the descriptor (`"local"`, `"ens"`). When resolution fails, the library returns the checksum address with an `ADDRESS_NOT_RESOLVED` warning.
+
+There is no built-in address book. All name resolution is delegated to the wallet.
 
 ### Path Resolution
 
-ERC-7730 defines two path namespaces:
+ERC-7730 defines multiple path prefixes:
 
-- **No prefix** — refers to a calldata argument (by name) or EIP-712 message field (by name)
-- **`@.` prefix** — refers to a container field (transaction or typed data properties)
-- **`$.metadata.*`** — refers to descriptor metadata fields
+| Prefix | Meaning |
+|--------|---------|
+| _(none)_ | Calldata argument name / EIP-712 message field name |
+| `#.` | Absolute structured data root (equivalent to bare name) |
+| `@.` | Container path (transaction or typed data metadata) |
+| `$.metadata.*` | Descriptor metadata field |
 
 #### EVM Transaction container paths (`@.` prefix)
 
@@ -196,29 +194,36 @@ ERC-7730 defines two path namespaces:
 | Path | Value |
 |---|---|
 | `@.from` | Signer account address (`typedData.account`) |
+| `@.to` | Verifying contract (`typedData.domain.verifyingContract`) |
+| `@.chainId` | Domain chain ID (`typedData.domain.chainId`) |
 
 Container paths are resolved by `resolveTransactionPath()` and `resolveTypedDataPath()` in `descriptor.ts`.
 
+### Warnings
+
+Non-fatal warnings are returned in the `DisplayModel.warnings` array and on individual `DisplayField.warning`. All warning codes are the `WarningCode` string literal union defined in `types.ts`. Use the `warn(code, message)` helper from `utils.ts` to create them. **Never use out-parameters for warnings — always return them in the result object.**
+
 ## Common Tasks
-
-### Adding a new contract descriptor
-
-Descriptors are served from the GitHub registry (`LedgerHQ/clear-signing-erc7730-registry`) and
-resolved at runtime. The `src/assets/` directory contains old PoC descriptors — do not extend it.
-To test with a custom descriptor, use `InlineDescriptorSource` (see `FormatOptions`).
 
 ### Adding a new field format
 
 1. Add format handler in `src/engine.ts` → `renderField()` switch
 2. Add corresponding handler in `src/eip712.ts` → `renderField()` switch
-3. Update types if needed
+3. Add shared formatting logic to `src/formatters.ts` if reusable between both
+4. Add the new `WarningCode` value to `types.ts` if the format can emit new warnings
 
-### Adding token metadata
+### Testing with a custom descriptor
 
-Add entry to `src/assets/tokens-min.json` with CAIP-19 key:
+Use `GitHubResolverOptions` with a manually built `RegistryIndex` and mock `fetch` in tests:
 
-```json
-"eip155:1/erc20:0x...": { "symbol": "TOKEN", "decimals": 18, "name": "Token Name" }
+```typescript
+const index: RegistryIndex = {
+  calldataIndex: { "eip155:1:0xcontract...": "path/to/descriptor.json" },
+  typedDataIndex: {},
+};
+const opts: FormatOptions = {
+  descriptorResolverOptions: { type: "github", index },
+};
 ```
 
 ## Testing
@@ -228,14 +233,9 @@ npm test              # Run all tests
 npm run test:watch    # Watch mode
 ```
 
-Tests are in `test/index.test.ts`. Key test patterns:
-
-- Hex conversion utilities
-- ERC-20 approve formatting (USDT)
-- Max approval threshold ("All" message)
-- Unknown contract handling
-- Unknown function selector (raw preview fallback)
-- WETH deposit with ETH value
+Tests live in `test/`. Current test files:
+- `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
+- `test/erc7730-test-cases.spec.ts` — ERC-7730 spec test cases (in progress)
 
 ## Build
 
@@ -248,7 +248,7 @@ Output is ESM with TypeScript declarations.
 
 ## Dependencies
 
-- `@noble/hashes` - Keccak256 (browser + Node compatible)
+- `@noble/hashes` — Keccak256 (browser + Node compatible)
 - `typescript` (dev)
 - `vitest` (dev)
 
@@ -256,11 +256,28 @@ Output is ESM with TypeScript declarations.
 
 ### Error handling
 
+All errors use plain `new Error(message)`. No custom error classes.
+
+### Warnings
+
 ```typescript
-throw DescriptorError.parse("message"); // Descriptor JSON issues
-throw DescriptorError.calldata("message"); // Calldata decoding issues
-throw EngineError.tokenRegistry("message"); // Missing token metadata
-throw ResolverError.notFound(key); // No descriptor for contract
+import { warn } from "./utils";
+// warn() returns a Warning with a typed WarningCode
+const w = warn("TOKEN_NOT_FOUND", "Token could not be resolved");
+```
+
+All `WarningCode` values are defined as a string literal union in `types.ts`.
+
+### Functions that produce warnings
+
+**Pattern:** return warnings in the result object, never via out-parameters.
+
+```typescript
+function resolveField(field, defs): { resolved: ResolvedField | undefined; warnings: string[] } {
+  // ...
+}
+const { resolved, warnings } = resolveField(fieldSpec, definitions);
+warnings.push(...warnings.map((msg) => warn("FIELD_RESOLUTION", msg)));
 ```
 
 ### Byte manipulation
@@ -287,7 +304,6 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 2. **All imports need `.js` extension** (ESM requirement)
 3. **Selector matching is case-sensitive** on function names
 4. **Address normalization:** Always lowercase for comparisons
-5. **Token registry keys are lowercase** CAIP-19 identifiers
 
 ## Descriptor Type — Defensive Programming
 
@@ -307,4 +323,5 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 - `chainId` format (ID to chain name)
 - `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
-- Full path syntax with `#` prefix for structured data root
+- Array/slice path selectors (`array.[0]`, `array.[start:end]`)
+- Pre-built registry index (GitHub index is not yet wired up; currently returns empty index)
