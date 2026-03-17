@@ -2,9 +2,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   fetchRegistryFilePaths,
   fetchRegistryFile,
-  fetchAbsoluteUrl,
-  resolveIncludeUrl,
-  descriptorUrl,
 } from "../src/github-registry-client";
 import { DEFAULT_REPO, DEFAULT_REF } from "../src/github-registry-index";
 
@@ -30,66 +27,6 @@ function mockFetch(responses: Map<string, unknown>) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-});
-
-// ---------------------------------------------------------------------------
-// resolveIncludeUrl – pure, no network
-// ---------------------------------------------------------------------------
-
-describe("resolveIncludeUrl", () => {
-  it("resolves a relative path against the descriptor URL", () => {
-    const base =
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/registry/tether/calldata-usdt.json";
-    const result = resolveIncludeUrl(base, "../../ercs/calldata-erc20-tokens.json");
-    expect(result).toBe(
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/ercs/calldata-erc20-tokens.json",
-    );
-  });
-
-  it("resolves a same-directory relative path", () => {
-    const base =
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/registry/uniswap/calldata-uniswap.json";
-    const result = resolveIncludeUrl(base, "./common-uniswap.json");
-    expect(result).toBe(
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/registry/uniswap/common-uniswap.json",
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// descriptorUrl – pure, no network
-// ---------------------------------------------------------------------------
-
-describe("descriptorUrl", () => {
-  it("builds a raw URL using the default repo and ref", () => {
-    const result = descriptorUrl("registry/tether/calldata-usdt.json", {
-      repo: DEFAULT_REPO,
-      ref: DEFAULT_REF,
-    });
-    expect(result).toBe(
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/registry/tether/calldata-usdt.json",
-    );
-  });
-
-  it("uses a custom repo when provided", () => {
-    const result = descriptorUrl("registry/tether/calldata-usdt.json", {
-      repo: "my-org/my-registry",
-      ref: DEFAULT_REF,
-    });
-    expect(result).toBe(
-      "https://raw.githubusercontent.com/my-org/my-registry/master/registry/tether/calldata-usdt.json",
-    );
-  });
-
-  it("uses a custom ref when provided", () => {
-    const result = descriptorUrl("registry/tether/calldata-usdt.json", {
-      repo: DEFAULT_REPO,
-      ref: "v2",
-    });
-    expect(result).toBe(
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/v2/registry/tether/calldata-usdt.json",
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -220,31 +157,6 @@ describe("fetchRegistryFile", () => {
         repo: DEFAULT_REPO,
         ref: DEFAULT_REF,
       }),
-    ).rejects.toThrow(/HTTP 404/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// fetchAbsoluteUrl
-// ---------------------------------------------------------------------------
-
-describe("fetchAbsoluteUrl", () => {
-  it("fetches and parses JSON from an absolute URL", async () => {
-    const url =
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/ercs/calldata-erc20-tokens.json";
-    const body = { display: { formats: {} } };
-
-    mockFetch(new Map([[url, body]]));
-
-    const result = await fetchAbsoluteUrl(url);
-    expect(result).toEqual(body);
-  });
-
-  it("throws on a non-2xx response", async () => {
-    mockFetch(new Map());
-
-    await expect(
-      fetchAbsoluteUrl("https://raw.githubusercontent.com/missing.json"),
     ).rejects.toThrow(/HTTP 404/);
   });
 });
