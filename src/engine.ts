@@ -1,5 +1,5 @@
 /**
- * Presentation engine for clear signing previews.
+ * Presentation engine for clear signing calldata.
  */
 
 import type {
@@ -52,6 +52,8 @@ function fieldTypeFromArgValue(value: ArgumentValue): FieldType {
       return "address";
     case "uint":
       return "uint";
+    case "int":
+      return "int";
     case "bool":
       return "bool";
     case "raw":
@@ -290,15 +292,25 @@ async function formatTokenAmount(
   const amount = value.value;
 
   try {
-    const caip19Key = determineTokenKey(field, decoded, chainId, contractAddress);
+    const caip19Key = determineTokenKey(
+      field,
+      decoded,
+      chainId,
+      contractAddress,
+    );
     const erc20Match = caip19Key.match(/^eip155:\d+\/erc20:(.+)$/);
     if (!erc20Match) return { rendered: defaultValueString(value) };
 
-    const token = await externalDataProvider?.resolveToken?.(chainId, erc20Match[1]) ?? null;
+    const token =
+      (await externalDataProvider?.resolveToken?.(chainId, erc20Match[1])) ??
+      null;
     if (!token) {
       return {
         rendered: defaultValueString(value),
-        warning: warn("TOKEN_NOT_FOUND", "Token metadata could not be resolved"),
+        warning: warn(
+          "TOKEN_NOT_FOUND",
+          "Token metadata could not be resolved",
+        ),
       };
     }
 
@@ -320,8 +332,8 @@ function formatNativeAmount(value: ArgumentValue, chainId: number): string {
 
 function nativeSymbol(chainId: number): string {
   switch (chainId) {
-    case 1:    // Ethereum mainnet
-    case 10:   // Optimism
+    case 1: // Ethereum mainnet
+    case 10: // Optimism
     case 42161: // Arbitrum
     case 8453: // Base
       return "ETH";
@@ -351,7 +363,10 @@ function formatEnum(
   metadata: DescriptorMetadata | undefined,
 ): string {
   if (value.type !== "uint") return defaultValueString(value);
-  return resolveEnumLabel(field, value.value.toString(), metadata) ?? value.value.toString();
+  return (
+    resolveEnumLabel(field, value.value.toString(), metadata) ??
+    value.value.toString()
+  );
 }
 
 /**

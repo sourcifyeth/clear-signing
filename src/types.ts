@@ -1,24 +1,3 @@
-/**
- * Core type definitions for the clear signing library.
- */
-
-/** ABI function input parameter. */
-export interface FunctionInput {
-  name: string;
-  type: string;
-  components?: FunctionInput[];
-}
-
-/** Function descriptor with computed selector. */
-export interface ParsedFunctionSignature {
-  inputs: FunctionInput[];
-  selector: Uint8Array;
-}
-
-/////////////////////////////
-// NEW TYPES FOR NEW DESIGN
-/////////////////////////////
-
 /** Ethereum transaction to be formatted. */
 export interface Transaction {
   chainId: number;

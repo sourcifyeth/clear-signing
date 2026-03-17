@@ -309,6 +309,7 @@ function argumentValueToRaw(av: ArgumentValue): unknown {
     case "address":
       return toChecksumAddress(av.bytes);
     case "uint":
+    case "int":
       return av.value.toString();
     case "bool":
       return av.value.toString();

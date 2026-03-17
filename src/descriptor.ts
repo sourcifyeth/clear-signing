@@ -9,12 +9,11 @@ import type {
   DescriptorFieldFormatType,
   DescriptorFormatSpec,
   DescriptorMetadata,
-  ParsedFunctionSignature,
-  FunctionInput,
   Transaction,
   TypedData,
 } from "./types";
 import {
+  bytesToBigInt,
   bytesToHex,
   hexToBytes,
   normalizeAddress,
@@ -22,53 +21,6 @@ import {
   selectorForSignature,
   tokenKeyFromErc20,
 } from "./utils";
-
-/** Argument value union type. */
-export type ArgumentValue =
-  | { type: "address"; bytes: Uint8Array }
-  | { type: "uint"; value: bigint }
-  | { type: "bool"; value: boolean }
-  | { type: "raw"; bytes: Uint8Array };
-
-/** Decoded argument value. */
-export interface DecodedArgument {
-  index: number;
-  name?: string;
-  value: ArgumentValue;
-  word: Uint8Array;
-}
-
-/**
- * Collection of decoded arguments with name-based lookup.
- */
-export class DecodedArguments {
-  private ordered: DecodedArgument[] = [];
-  private indexByName = new Map<string, number>();
-
-  push(
-    name: string | undefined,
-    index: number,
-    value: ArgumentValue,
-    word: Uint8Array,
-  ): void {
-    const entryIndex = this.ordered.length;
-    if (name !== undefined) {
-      this.indexByName.set(name, entryIndex);
-    }
-    this.indexByName.set(`arg${index}`, entryIndex);
-    this.ordered.push({ index, name, value, word });
-  }
-
-  get(key: string): ArgumentValue | undefined {
-    const idx = this.indexByName.get(key);
-    if (idx === undefined) return undefined;
-    return this.ordered[idx]?.value;
-  }
-
-  getOrdered(): DecodedArgument[] {
-    return this.ordered;
-  }
-}
 
 /**
  * Check if a calldata descriptor is bound to a specific chain and address.
@@ -108,31 +60,21 @@ export function isEip712DescriptorBoundTo(
   );
 }
 
-/**
- * Build a map from hex selector (e.g. "0x095ea7b3") to the parsed function descriptor
- * and its display format spec. Parses display.formats keys as function signatures —
- * no separate ABI needed.
- */
-export function getFormatsBySelector(
-  descriptor: Descriptor,
-): Map<string, { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }> {
-  const map = new Map<
-    string,
-    { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }
-  >();
-  const formats = descriptor.display?.formats;
-  if (!formats) return map;
+/** ABI function input parameter. */
+export interface FunctionInput {
+  name: string;
+  type: string;
+  components?: FunctionInput[];
+}
 
-  for (const [key, spec] of Object.entries(formats)) {
-    const fn = parseFunctionSignatureKey(key);
-    if (!fn) continue;
-    map.set(bytesToHex(fn.selector), { fn, spec });
-  }
-  return map;
+/** Parsed function signature with computed selector. */
+export interface ParsedFunctionSignature {
+  inputs: FunctionInput[];
+  selector: Uint8Array;
 }
 
 /**
- * Parse a display.formats key as a full function signature into a FunctionDescriptor.
+ * Parse a display.formats key as a full function signature into a ParsedFunctionSignature.
  *
  * Per ERC-7730, keys MUST include parameter names and use canonical Solidity types.
  * Commas MUST NOT be followed by spaces; exactly one space between type and name.
@@ -297,6 +239,94 @@ function canonicalParam(input: FunctionInput): string {
 }
 
 /**
+ * Build a map from hex selector (e.g. "0x095ea7b3") to the parsed function descriptor
+ * and its display format spec. Parses display.formats keys as function signatures —
+ * no separate ABI needed.
+ */
+export function getFormatsBySelector(
+  descriptor: Descriptor,
+): Map<string, { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }> {
+  const map = new Map<
+    string,
+    { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }
+  >();
+  const formats = descriptor.display?.formats;
+  if (!formats) return map;
+
+  for (const [key, spec] of Object.entries(formats)) {
+    const fn = parseFunctionSignatureKey(key);
+    if (!fn) continue;
+    map.set(bytesToHex(fn.selector), { fn, spec });
+  }
+  return map;
+}
+
+/** Argument value union type. */
+export type ArgumentValue =
+  | { type: "address"; bytes: Uint8Array }
+  | { type: "uint"; value: bigint }
+  | { type: "int"; value: bigint }
+  | { type: "bool"; value: boolean }
+  | { type: "raw"; bytes: Uint8Array };
+
+/** Decoded argument value. */
+export interface DecodedArgument {
+  index: number;
+  name?: string;
+  value: ArgumentValue;
+  word: Uint8Array;
+}
+
+/**
+ * Collection of decoded arguments with name-based lookup.
+ */
+export class DecodedArguments {
+  private ordered: DecodedArgument[] = [];
+  private indexByName = new Map<string, number>();
+
+  push(
+    name: string | undefined,
+    index: number,
+    value: ArgumentValue,
+    word: Uint8Array,
+  ): void {
+    const entryIndex = this.ordered.length;
+    if (name !== undefined) {
+      this.indexByName.set(name, entryIndex);
+    }
+    this.indexByName.set(`arg${index}`, entryIndex);
+    this.ordered.push({ index, name, value, word });
+  }
+
+  get(key: string): ArgumentValue | undefined {
+    const idx = this.indexByName.get(key);
+    if (idx === undefined) return undefined;
+    return this.ordered[idx]?.value;
+  }
+
+  getOrdered(): DecodedArgument[] {
+    return this.ordered;
+  }
+}
+
+/**
+ * Get default string representation of an argument value.
+ */
+export function defaultValueString(value: ArgumentValue): string {
+  switch (value.type) {
+    case "address":
+      return bytesToHex(value.bytes);
+    case "uint":
+    case "int":
+      return value.value.toString();
+    case "bool":
+      return value.value.toString();
+    case "raw":
+      return bytesToHex(value.bytes);
+  }
+}
+
+/**
  * Decode calldata arguments according to function descriptor.
  */
 export function decodeArguments(
@@ -425,24 +455,28 @@ function argumentName(
 
 function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
   if (kind === "address") {
-    const bytes = word.slice(12);
-    return { type: "address", bytes };
+    return { type: "address", bytes: word.slice(12) };
   }
 
   if (kind.startsWith("uint")) {
     return { type: "uint", value: bytesToBigInt(word) };
   }
 
+  if (kind.startsWith("int")) {
+    const bits = kind === "int" ? 256 : parseInt(kind.slice(3), 10);
+    const unsigned = bytesToBigInt(word);
+    const signBit = 1n << BigInt(bits - 1);
+    const value = unsigned & signBit ? unsigned - (1n << BigInt(bits)) : unsigned;
+    return { type: "int", value };
+  }
+
+  if (kind === "bool") {
+    return { type: "bool", value: word[31] !== 0 };
+  }
+
   return { type: "raw", bytes: word };
 }
 
-function bytesToBigInt(bytes: Uint8Array): bigint {
-  let result = 0n;
-  for (const byte of bytes) {
-    result = (result << 8n) | BigInt(byte);
-  }
-  return result;
-}
 
 /** Resolved effective field after applying references. */
 export interface ResolvedField {
@@ -498,6 +532,19 @@ function extractDefinitionName(reference: string): string | undefined {
   return undefined;
 }
 
+function mergeParams(
+  base: DescriptorFieldFormatParams,
+  overlay: DescriptorFieldFormatParams,
+): DescriptorFieldFormatParams {
+  const merged: DescriptorFieldFormatParams = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value !== null && value !== undefined) {
+      (merged as Record<string, unknown>)[key] = value;
+    }
+  }
+  return merged;
+}
+
 /**
  * Resolves an ERC-7730 container path for an EVM transaction.
  * Handles @.from, @.value, @.to, @.chainId as per the spec.
@@ -547,19 +594,6 @@ export function resolveTypedDataPath(
   }
 }
 
-function mergeParams(
-  base: DescriptorFieldFormatParams,
-  overlay: DescriptorFieldFormatParams,
-): DescriptorFieldFormatParams {
-  const merged: DescriptorFieldFormatParams = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    if (value !== null && value !== undefined) {
-      (merged as Record<string, unknown>)[key] = value;
-    }
-  }
-  return merged;
-}
-
 /**
  * Determine token lookup key from field parameters.
  */
@@ -601,22 +635,6 @@ export function determineTokenKey(
   }
 
   throw new Error(`display field '${field.path}' missing token configuration`);
-}
-
-/**
- * Get default string representation of an argument value.
- */
-export function defaultValueString(value: ArgumentValue): string {
-  switch (value.type) {
-    case "address":
-      return bytesToHex(value.bytes);
-    case "uint":
-      return value.value.toString();
-    case "bool":
-      return value.value.toString();
-    case "raw":
-      return bytesToHex(value.bytes);
-  }
 }
 
 /**
