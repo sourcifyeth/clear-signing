@@ -116,8 +116,8 @@ class EmbeddedPathResolver implements PathResolver {
 
   async resolvePath(path: string): Promise<Descriptor> {
     const fullPath = `${this.descriptorDirectory}/${path}`;
-    const descriptor = (await import(fullPath)) as Descriptor;
-    return descriptor;
+    const mod = await import(fullPath);
+    return (mod.default ?? mod) as Descriptor;
   }
 }
 

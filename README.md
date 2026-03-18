@@ -20,7 +20,8 @@ const result = await format(
   {
     chainId: 1,
     to: "0xdAC17F958D2ee523a2206206994597C13D831ec7", // USDT
-    data: "0xa9059cbb" +
+    data:
+      "0xa9059cbb" +
       "000000000000000000000000ab5801a7d398351b8be11c439e05c5b3259aec9" + // to
       "00000000000000000000000000000000000000000000000000000000000f4240", // value
   },
@@ -34,8 +35,8 @@ const result = await format(
   },
 );
 
-console.log(result.intent);             // "Send"
-console.log(result.fields);            // [{ label: "To", value: "0xAb5..." }, { label: "Amount", value: "1 USDT" }]
+console.log(result.intent); // "Send"
+console.log(result.fields); // [{ label: "To", value: "0xAb5..." }, { label: "Amount", value: "1 USDT" }]
 console.log(result.interpolatedIntent); // "Send 1 USDT to 0xAb5..."
 ```
 
@@ -49,16 +50,16 @@ Resolves the descriptor for a transaction and returns a `DisplayModel` with huma
 async function format(
   tx: Transaction,
   opts?: FormatOptions,
-): Promise<DisplayModel>
+): Promise<DisplayModel>;
 ```
 
 ```typescript
 interface Transaction {
   chainId: number;
-  to: string;       // contract address
-  data: string;     // calldata as hex string
-  value?: bigint;   // native value in wei
-  from?: string;    // sender address
+  to: string; // contract address
+  data: string; // calldata as hex string
+  value?: bigint; // native value in wei
+  from?: string; // sender address
 }
 ```
 
@@ -70,7 +71,7 @@ Resolves the descriptor for an EIP-712 message and returns a `DisplayModel`.
 async function formatTypedData(
   typedData: TypedData,
   opts?: FormatOptions,
-): Promise<DisplayModel>
+): Promise<DisplayModel>;
 ```
 
 ### `FormatOptions`
@@ -104,20 +105,31 @@ The library delegates all external data resolution to the wallet. None of the me
 ```typescript
 interface ExternalDataProvider {
   /** Resolve ENS name for an address. */
-  resolveEnsName?: (address: string, type: string) => Promise<AddressNameResult | null>;
+  resolveEnsName?: (
+    address: string,
+    type: string,
+  ) => Promise<AddressNameResult | null>;
 
   /** Resolve a locally known name for an address (e.g. from contacts). */
-  resolveLocalName?: (address: string, type: string) => Promise<AddressNameResult | null>;
+  resolveLocalName?: (
+    address: string,
+    type: string,
+  ) => Promise<AddressNameResult | null>;
 
   /** Resolve token metadata (symbol, decimals) for a contract address. */
-  resolveToken?: (chainId: number, tokenAddress: string) => Promise<TokenResult | null>;
+  resolveToken?: (
+    chainId: number,
+    tokenAddress: string,
+  ) => Promise<TokenResult | null>;
 
   /** Resolve NFT collection name for a contract address. */
-  resolveNftCollectionName?: (collectionAddress: string) => Promise<NftCollectionNameResult | null>;
+  resolveNftCollectionName?: (
+    collectionAddress: string,
+  ) => Promise<NftCollectionNameResult | null>;
 }
 ```
 
-When `resolveToken` returns `null` or is absent, the library emits a `TOKEN_NOT_FOUND` warning and falls back to the raw value. When address name resolution fails, it returns the checksum address with an `ADDRESS_NOT_RESOLVED` warning.
+When `resolveToken` returns `null` or is absent, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value. When address name resolution fails, it returns the checksum address with an `ADDRESS_NOT_RESOLVED` warning.
 
 ## Display Model
 
@@ -162,17 +174,17 @@ interface DisplayModel {
 }
 
 interface DisplayField {
-  label: string;           // e.g. "Spender"
-  value: string;           // e.g. "0xAb5..." or "1 USDT"
-  fieldType: FieldType;    // Solidity type category: "address", "uint", "int", "bool", "bytes", etc.
-  format: string;          // ERC-7730 format: "addressName", "tokenAmount", etc.
-  warning?: Warning;       // field-level warning (e.g. ADDRESS_NOT_RESOLVED)
-  rawAddress?: string;     // EIP-55 checksum address for address fields
+  label: string; // e.g. "Spender"
+  value: string; // e.g. "0xAb5..." or "1 USDT"
+  fieldType: FieldType; // Solidity type category: "address", "uint", "int", "bool", "bytes", etc.
+  format: string; // ERC-7730 format: "addressName", "tokenAmount", etc.
+  warning?: Warning; // field-level warning (e.g. ADDRESS_NOT_RESOLVED)
+  rawAddress?: string; // EIP-55 checksum address for address fields
 }
 
 interface Warning {
-  code: WarningCode;  // machine-readable code
-  message: string;    // human-readable message
+  code: WarningCode; // machine-readable code
+  message: string; // human-readable message
 }
 
 type WarningCode =
@@ -184,7 +196,7 @@ type WarningCode =
   | "MISSING_FIELD_VALUE"
   | "UNRESOLVABLE_FIELD_TYPE"
   | "INTERPOLATION_ERROR"
-  | "TOKEN_NOT_FOUND"
+  | "UNKNOWN_TOKEN"
   | "ADDRESS_NOT_RESOLVED"
   | "ADDRESS_TYPE_MISMATCH";
 ```
@@ -202,7 +214,7 @@ const result = await format(tx, {
   descriptorResolverOptions: {
     type: "github",
     repo: "LedgerHQ/clear-signing-erc7730-registry", // optional
-    ref: "master",                                     // optional
+    ref: "master", // optional
   },
 });
 ```
@@ -216,7 +228,8 @@ import type { RegistryIndex } from "@sourcifyeth/clear-signing";
 
 const index: RegistryIndex = {
   calldataIndex: {
-    "eip155:1:0xdac17f958d2ee523a2206206994597c13d831ec7": "path/to/descriptor.json",
+    "eip155:1:0xdac17f958d2ee523a2206206994597c13d831ec7":
+      "path/to/descriptor.json",
   },
   typedDataIndex: {},
 };
@@ -232,14 +245,14 @@ The GitHub index only keys EIP-712 descriptors on `context.eip712.deployments`. 
 
 ## Field Formats
 
-| Format        | Description                                | Example Output                                     |
-| ------------- | ------------------------------------------ | -------------------------------------------------- |
-| `tokenAmount` | Token amount with decimals and symbol      | `1,000.5 USDT`                                     |
-| `amount`      | Native currency amount                     | `1.5 ETH`                                          |
-| `date`        | Unix timestamp as UTC date string          | `2024-01-15 12:30:00 UTC`                          |
-| `addressName` | Resolved name or checksum address          | `vitalik.eth` or `0xd8dA6BF2...`                  |
-| `enum`        | Mapped enum value from descriptor metadata | `Buy` (from `0`)                                   |
-| `raw`         | Raw hex or string fallback                 | `0x1234abcd`                                       |
+| Format        | Description                                | Example Output                   |
+| ------------- | ------------------------------------------ | -------------------------------- |
+| `tokenAmount` | Token amount with decimals and symbol      | `1,000.5 USDT`                   |
+| `amount`      | Native currency amount                     | `1.5 ETH`                        |
+| `date`        | Unix timestamp as UTC date string          | `2024-01-15 12:30:00 UTC`        |
+| `addressName` | Resolved name or checksum address          | `vitalik.eth` or `0xd8dA6BF2...` |
+| `enum`        | Mapped enum value from descriptor metadata | `Buy` (from `0`)                 |
+| `raw`         | Raw hex or string fallback                 | `0x1234abcd`                     |
 
 ## Browser & Node.js Support
 

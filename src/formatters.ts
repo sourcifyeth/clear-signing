@@ -10,7 +10,7 @@ import type {
 } from "./types";
 import type { ResolvedField } from "./descriptor";
 import { resolveMetadataValue } from "./descriptor";
-import { formatAmountWithDecimals, parseBigInt, toChecksumAddress, warn } from "./utils";
+import { formatAmountWithDecimals, parseBigInt, warn } from "./utils";
 
 /**
  * Format a Unix timestamp (seconds) as a UTC date string.
@@ -82,8 +82,11 @@ export async function formatAddressName(
   const sources = field.params.sources;
   const expectedType = types?.[0] ?? "";
 
+  const tryLocal = !sources || sources.includes("local");
+  const tryEns = !sources || sources.includes("ens");
+
   // Try local wallet names
-  if (sources?.includes("local") && externalDataProvider?.resolveLocalName) {
+  if (tryLocal && externalDataProvider?.resolveLocalName) {
     const result = await externalDataProvider.resolveLocalName(normalized, expectedType);
     if (result) {
       return {
@@ -96,7 +99,7 @@ export async function formatAddressName(
   }
 
   // Try ENS
-  if (sources?.includes("ens") && externalDataProvider?.resolveEnsName) {
+  if (tryEns && externalDataProvider?.resolveEnsName) {
     const result = await externalDataProvider.resolveEnsName(normalized, expectedType);
     if (result) {
       return {
@@ -111,7 +114,7 @@ export async function formatAddressName(
   // Raw address fallback — resolution was expected but failed
   return {
     rendered: checksumAddress,
-    warning: warn("ADDRESS_NOT_RESOLVED", "Address name could not be resolved"),
+    warning: warn("UNKNOWN_ADDRESS", "Address name could not be resolved"),
   };
 }
 

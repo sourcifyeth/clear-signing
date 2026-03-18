@@ -13,6 +13,7 @@ import type {
   TypedData,
 } from "./types";
 import {
+  addThousandSeparators,
   bytesToBigInt,
   bytesToHex,
   hexToBytes,
@@ -318,7 +319,7 @@ export function defaultValueString(value: ArgumentValue): string {
       return bytesToHex(value.bytes);
     case "uint":
     case "int":
-      return value.value.toString();
+      return addThousandSeparators(value.value.toString());
     case "bool":
       return value.value.toString();
     case "raw":

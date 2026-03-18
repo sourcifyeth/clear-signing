@@ -60,8 +60,8 @@ const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "github",
     repo: "LedgerHQ/clear-signing-erc7730-registry", // optional, default
-    ref: "master",                                     // optional, default
-    index: myPrebuiltIndex,                            // optional: skip GitHub API call
+    ref: "master", // optional, default
+    index: myPrebuiltIndex, // optional: skip GitHub API call
   },
 };
 ```
@@ -86,7 +86,7 @@ Loads descriptors from a local directory using dynamic `import()`. Useful for bu
 const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "embedded",
-    index: myIndex,               // RegistryIndex with CAIP-10 → path mappings
+    index: myIndex, // RegistryIndex with CAIP-10 → path mappings
     descriptorDirectory: "./descriptors",
   },
 };
@@ -138,6 +138,7 @@ ignores it. Function descriptors are derived entirely from `display.formats` key
 spec. Do not add them to `DescriptorFormatSpec`.
 
 **Function signature key rules (from spec):**
+
 - Keys MUST include parameter names: `"transfer(address to,uint256 value)"` not `"transfer(address,uint256)"`
 - Commas MUST NOT be followed by spaces
 - Exactly one space between type and parameter name
@@ -146,6 +147,7 @@ spec. Do not add them to `DescriptorFormatSpec`.
 ### EIP-712 Descriptor Keys
 
 **Current ERC-7730 spec:**
+
 - `display.formats` keys are the **full EIP-712 `encodeType` string**, e.g.
   `"PermitSingle(PermitDetails details,address spender,uint256 sigDeadline)PermitDetails(address token,uint160 amount,uint48 expiration,uint48 nonce)"`.
 - `context.eip712.schemas` is **deprecated** — do not add to new descriptors.
@@ -161,7 +163,7 @@ Not yet implemented: `duration`, `unit`, `nftName`, `chainId`, `calldata`, `inte
 
 ### Token Resolution
 
-Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `TOKEN_NOT_FOUND` warning and falls back to the raw value.
+Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value.
 
 ### Address Name Resolution
 
@@ -173,29 +175,29 @@ There is no built-in address book. All name resolution is delegated to the walle
 
 ERC-7730 defines multiple path prefixes:
 
-| Prefix | Meaning |
-|--------|---------|
-| _(none)_ | Calldata argument name / EIP-712 message field name |
-| `#.` | Absolute structured data root (equivalent to bare name) |
-| `@.` | Container path (transaction or typed data metadata) |
-| `$.metadata.*` | Descriptor metadata field |
+| Prefix         | Meaning                                                 |
+| -------------- | ------------------------------------------------------- |
+| _(none)_       | Calldata argument name / EIP-712 message field name     |
+| `#.`           | Absolute structured data root (equivalent to bare name) |
+| `@.`           | Container path (transaction or typed data metadata)     |
+| `$.metadata.*` | Descriptor metadata field                               |
 
 #### EVM Transaction container paths (`@.` prefix)
 
-| Path | Value |
-|---|---|
-| `@.from` | Sender address (`tx.from`) |
-| `@.value` | Native currency value (`tx.value`) |
-| `@.to` | Destination contract address (`tx.to`) |
-| `@.chainId` | Chain ID (`tx.chainId`) |
+| Path        | Value                                  |
+| ----------- | -------------------------------------- |
+| `@.from`    | Sender address (`tx.from`)             |
+| `@.value`   | Native currency value (`tx.value`)     |
+| `@.to`      | Destination contract address (`tx.to`) |
+| `@.chainId` | Chain ID (`tx.chainId`)                |
 
 #### EIP-712 typed data container paths (`@.` prefix)
 
-| Path | Value |
-|---|---|
-| `@.from` | Signer account address (`typedData.account`) |
-| `@.to` | Verifying contract (`typedData.domain.verifyingContract`) |
-| `@.chainId` | Domain chain ID (`typedData.domain.chainId`) |
+| Path        | Value                                                     |
+| ----------- | --------------------------------------------------------- |
+| `@.from`    | Signer account address (`typedData.account`)              |
+| `@.to`      | Verifying contract (`typedData.domain.verifyingContract`) |
+| `@.chainId` | Domain chain ID (`typedData.domain.chainId`)              |
 
 Container paths are resolved by `resolveTransactionPath()` and `resolveTypedDataPath()` in `descriptor.ts`.
 
@@ -234,6 +236,7 @@ npm run test:watch    # Watch mode
 ```
 
 Tests live in `test/`. Current test files:
+
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/erc7730-test-cases.spec.ts` — ERC-7730 spec test cases (in progress)
 
@@ -263,7 +266,7 @@ All errors use plain `new Error(message)`. No custom error classes.
 ```typescript
 import { warn } from "./utils";
 // warn() returns a Warning with a typed WarningCode
-const w = warn("TOKEN_NOT_FOUND", "Token could not be resolved");
+const w = warn("UNKNOWN_TOKEN", "Token could not be resolved");
 ```
 
 All `WarningCode` values are defined as a string literal union in `types.ts`.
@@ -273,7 +276,10 @@ All `WarningCode` values are defined as a string literal union in `types.ts`.
 **Pattern:** return warnings in the result object, never via out-parameters.
 
 ```typescript
-function resolveField(field, defs): { resolved: ResolvedField | undefined; warnings: string[] } {
+function resolveField(
+  field,
+  defs,
+): { resolved: ResolvedField | undefined; warnings: string[] } {
   // ...
 }
 const { resolved, warnings } = resolveField(fieldSpec, definitions);

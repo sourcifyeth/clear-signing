@@ -22,7 +22,6 @@ export interface TypeMember {
  *   - bytes   → calldata, raw
  *   - string  → raw
  *   - bool    → raw
- * Struct and array reference types have no ERC-7730 format mapping.
  */
 export type FieldType =
   | "address"
@@ -60,8 +59,8 @@ export type WarningCode =
   | "MISSING_FIELD_VALUE"
   | "UNRESOLVABLE_FIELD_TYPE"
   | "INTERPOLATION_ERROR"
-  | "TOKEN_NOT_FOUND"
-  | "ADDRESS_NOT_RESOLVED"
+  | "UNKNOWN_TOKEN"
+  | "UNKNOWN_ADDRESS"
   | "ADDRESS_TYPE_MISMATCH";
 
 /** Non-fatal warning from formatting. */
@@ -113,10 +112,18 @@ export interface DisplayField {
   warning?: Warning;
 
   /**
-   * For formatted addresses, wallets should also display the raw
-   * value in some form.
+   * For formatted addresses (fieldType: "address"), wallets should also
+   * display the raw value in some form.
    */
   rawAddress?: string;
+
+  /**
+   * For token amounts (format: "tokenAmount") the token address is returned.
+   * Wallets can display it in case that the library failed to resolve token
+   * metadata from the ExternalDataProvider. In this case, value will fall
+   * back to the raw amount formatting and warning.code will be UNKNOWN_TOKEN.
+   */
+  tokenAddress?: string;
 }
 
 /**
@@ -207,7 +214,7 @@ export interface ExternalDataProvider {
    * this in the result, such that the library can include a warning
    * about the resolved field in the DisplayModel.
    */
-  resolveEnsName?: (
+  resolveLocalName?: (
     address: string,
     type: string,
   ) => Promise<AddressNameResult | null>;
@@ -218,7 +225,7 @@ export interface ExternalDataProvider {
    * this in the result, such that the library can include a warning
    * about the resolved field in the DisplayModel.
    */
-  resolveLocalName?: (
+  resolveEnsName?: (
     address: string,
     type: string,
   ) => Promise<AddressNameResult | null>;

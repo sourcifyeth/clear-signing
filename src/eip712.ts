@@ -413,18 +413,19 @@ async function formatTokenAmount(
     return {
       rendered: formatRaw(value),
       warning: warn(
-        "TOKEN_NOT_FOUND",
+        "UNKNOWN_TOKEN",
         `Token path '${tokenPath}' did not resolve to an address`,
       ),
     };
   }
 
-  const token = await externalDataProvider?.resolveToken?.(chainId, tokenAddress) ?? null;
+  const token =
+    (await externalDataProvider?.resolveToken?.(chainId, tokenAddress)) ?? null;
   if (!token) {
     return {
       rendered: formatRaw(value),
       warning: warn(
-        "TOKEN_NOT_FOUND",
+        "UNKNOWN_TOKEN",
         `Token metadata could not be resolved for ${tokenAddress}`,
       ),
     };

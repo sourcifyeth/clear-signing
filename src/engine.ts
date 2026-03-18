@@ -192,7 +192,7 @@ async function applyDisplayFormat(
       continue;
     }
 
-    const { rendered, warning: fieldWarning } = await renderField(
+    const { rendered, warning: fieldWarning, tokenAddress } = await renderField(
       resolved,
       argValue,
       decoded,
@@ -212,6 +212,10 @@ async function applyDisplayFormat(
 
     if (argValue.type === "address") {
       displayField.rawAddress = toChecksumAddress(argValue.bytes);
+    }
+
+    if (tokenAddress) {
+      displayField.tokenAddress = tokenAddress;
     }
 
     fields.push(displayField);
@@ -242,7 +246,7 @@ async function renderField(
   chainId: number,
   contractAddress: string,
   externalDataProvider?: ExternalDataProvider,
-): Promise<{ rendered: string; warning?: Warning }> {
+): Promise<{ rendered: string; warning?: Warning; tokenAddress?: string }> {
   switch (field.format) {
     case "date":
       return { rendered: formatDate(value) };
@@ -284,7 +288,7 @@ async function formatTokenAmount(
   chainId: number,
   contractAddress: string,
   externalDataProvider?: ExternalDataProvider,
-): Promise<{ rendered: string; warning?: Warning }> {
+): Promise<{ rendered: string; warning?: Warning; tokenAddress?: string }> {
   if (value.type !== "uint") {
     return { rendered: defaultValueString(value) };
   }
@@ -301,20 +305,22 @@ async function formatTokenAmount(
     const erc20Match = caip19Key.match(/^eip155:\d+\/erc20:(.+)$/);
     if (!erc20Match) return { rendered: defaultValueString(value) };
 
+    const tokenAddress = toChecksumAddress(hexToBytes(erc20Match[1]));
+
     const token =
       (await externalDataProvider?.resolveToken?.(chainId, erc20Match[1])) ??
       null;
     if (!token) {
       return {
         rendered: defaultValueString(value),
-        warning: warn(
-          "TOKEN_NOT_FOUND",
-          "Token metadata could not be resolved",
-        ),
+        tokenAddress,
       };
     }
 
-    return { rendered: renderTokenAmount(amount, token, field, metadata) };
+    return {
+      rendered: renderTokenAmount(amount, token, field, metadata),
+      tokenAddress,
+    };
   } catch {
     return { rendered: defaultValueString(value) };
   }
@@ -407,7 +413,7 @@ export function rawPreviewFromCalldata(
     const data = calldata.slice(4);
     for (let i = 0; i < data.length; i += 32) {
       const chunk = data.slice(i, Math.min(i + 32, data.length));
-      args.push(bytesToHex(chunk));
+      args.push(bytesToHex(chunk).slice(2));
     }
   }
 
