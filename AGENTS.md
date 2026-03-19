@@ -31,10 +31,10 @@ src/
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
   metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
 
-- **`formatters.ts`** — The shared field formatting engine. Exports only `applyFieldFormats()`,
+- **`formatters.ts`** — The shared field formatting engine. Primary entry point is `applyFieldFormats()`,
   which iterates format fields, merges definitions, resolves values, and renders each field.
-  All individual format handlers (`renderField`, `formatRaw`, `formatTimestamp`,
-  `renderTokenAmount`, `formatAddressName`, `resolveEnumLabel`, etc.) are module-private.
+  Individual format handlers (`renderField`, `formatRaw`, `formatTimestamp`,
+  `renderTokenAmount`, `formatAddressName`, `resolveEnumLabel`, etc.) are exported for unit testing.
 
 - **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
   `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
@@ -188,6 +188,13 @@ Supported: `tokenAmount`, `amount`, `date`, `addressName`, `enum`, `raw`
 
 Not yet implemented: `duration`, `unit`, `nftName`, `chainId`, `calldata`, `interoperableAddressName`
 
+**Spec-compliance notes:**
+
+- All numeric formats (`date`, `tokenAmount`, `amount`, `enum`) accept both `uint` and `int` field types.
+- `date` format requires `params.encoding` to be `"timestamp"` — falls back to raw when missing.
+- `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
+- Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
+
 ### Token Resolution
 
 Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value.
@@ -263,6 +270,7 @@ npm run test:watch    # Watch mode
 
 Tests live in `test/`. Current test files:
 
+- `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/erc7730-test-cases.spec.ts` — ERC-7730 spec test cases (in progress)
 

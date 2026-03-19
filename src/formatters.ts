@@ -131,12 +131,12 @@ export async function applyFieldFormats(
   return { fields, renderedValues };
 }
 
-type FieldFormatOptions = Pick<
+export type FieldFormatOptions = Pick<
   DescriptorFieldFormat,
   "params" | "visible" | "separator" | "encryption"
 >;
 
-type RenderFieldResult = {
+export type RenderFieldResult = {
   rendered: string;
   warning?: Warning;
   tokenAddress?: string;
@@ -148,7 +148,7 @@ type RenderFieldResult = {
  * Dispatches on `field.format` and uses `resolvePath` to resolve secondary
  * paths (e.g. `tokenPath` for tokenAmount fields).
  */
-async function renderField(
+export async function renderField(
   value: ArgumentValue,
   format: DescriptorFieldFormatType,
   fieldOptions: FieldFormatOptions,
@@ -159,7 +159,7 @@ async function renderField(
 ): Promise<RenderFieldResult> {
   switch (format) {
     case "date":
-      return formatDate(value);
+      return formatDate(value, fieldOptions);
     case "tokenAmount":
       return await formatTokenAmount(
         fieldOptions,
@@ -184,8 +184,10 @@ async function renderField(
   }
 }
 
-function formatDate(value: ArgumentValue): RenderFieldResult {
-  if (value.type !== "uint") return typeMismatch(value, "uint");
+export function formatDate(value: ArgumentValue, fieldOptions: FieldFormatOptions): RenderFieldResult {
+  if (value.type !== "uint" && value.type !== "int") return typeMismatch(value, "uint or int", "date");
+  const encoding = fieldOptions.params?.encoding;
+  if (encoding !== "timestamp") return formatRaw(value);
   try {
     return formatTimestamp(value.value);
   } catch {
@@ -193,7 +195,7 @@ function formatDate(value: ArgumentValue): RenderFieldResult {
   }
 }
 
-async function formatTokenAmount(
+export async function formatTokenAmount(
   field: FieldFormatOptions,
   value: ArgumentValue,
   resolvePath: ResolvePath,
@@ -201,8 +203,8 @@ async function formatTokenAmount(
   metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
-  if (value.type !== "uint") {
-    return typeMismatch(value, "uint");
+  if (value.type !== "uint" && value.type !== "int") {
+    return typeMismatch(value, "uint or int", "tokenAmount");
   }
 
   if (chainId === undefined) {
@@ -239,12 +241,12 @@ async function formatTokenAmount(
   };
 }
 
-function formatNativeAmount(
+export function formatNativeAmount(
   value: ArgumentValue,
   chainId: number | undefined,
 ): RenderFieldResult {
-  if (value.type !== "uint") {
-    return typeMismatch(value, "uint");
+  if (value.type !== "uint" && value.type !== "int") {
+    return typeMismatch(value, "uint or int", "amount");
   }
 
   if (chainId === undefined) {
@@ -262,48 +264,49 @@ function formatNativeAmount(
   return { rendered: `${formatted} ${symbol}` };
 }
 
-async function formatAddressNameField(
+export async function formatAddressNameField(
   value: ArgumentValue,
   field: FieldFormatOptions,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
-  if (value.type !== "address") return typeMismatch(value, "address");
+  if (value.type !== "address") return typeMismatch(value, "address", "addressName");
   const checksum = toChecksumAddress(value.bytes);
   return formatAddressName(checksum, field, externalDataProvider);
 }
 
-function formatEnum(
+export function formatEnum(
   field: FieldFormatOptions,
   value: ArgumentValue,
   metadata: DescriptorMetadata | undefined,
 ): RenderFieldResult {
-  if (value.type !== "uint") return typeMismatch(value, "uint");
+  if (value.type !== "uint" && value.type !== "int") return typeMismatch(value, "uint or int", "enum");
   const label = resolveEnumLabel(field, value.value.toString(), metadata);
   if (!label) return formatRaw(value);
   return { rendered: label };
 }
 
-function typeMismatch(
+export function typeMismatch(
   value: ArgumentValue,
   expected: string,
+  format: DescriptorFieldFormatType,
 ): RenderFieldResult {
   return {
     rendered: renderRaw(value),
     warning: warn(
       "ARGUMENT_TYPE_MISMATCH",
-      `Expected ${expected} but got ${value.type}`,
+      `Format ${format} expects ${expected} but got ${value.type}`,
     ),
   };
 }
 
-function formatRaw(value: ArgumentValue): RenderFieldResult {
+export function formatRaw(value: ArgumentValue): RenderFieldResult {
   return { rendered: renderRaw(value) };
 }
 
-function renderRaw(value: ArgumentValue): string {
+export function renderRaw(value: ArgumentValue): string {
   switch (value.type) {
     case "address":
-      return bytesToHex(value.bytes);
+      return toChecksumAddress(value.bytes);
     case "uint":
     case "int":
       return addThousandSeparators(value.value.toString());
@@ -319,7 +322,7 @@ function renderRaw(value: ArgumentValue): string {
 /**
  * Format a Unix timestamp (seconds) as a UTC date string.
  */
-function formatTimestamp(seconds: bigint): RenderFieldResult {
+export function formatTimestamp(seconds: bigint): RenderFieldResult {
   const date = new Date(Number(seconds) * 1000);
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -335,7 +338,7 @@ function formatTimestamp(seconds: bigint): RenderFieldResult {
 /**
  * Render a token amount with symbol, applying a threshold message if configured.
  */
-function renderTokenAmount(
+export function renderTokenAmount(
   amount: bigint,
   token: TokenResult,
   field: FieldFormatOptions,
@@ -346,15 +349,15 @@ function renderTokenAmount(
   return `${formatAmountWithDecimals(amount, token.decimals)} ${token.symbol}`;
 }
 
-function tokenAmountMessage(
+export function tokenAmountMessage(
   field: FieldFormatOptions,
   amount: bigint,
   metadata: DescriptorMetadata | undefined,
 ): string | undefined {
   const params = field.params ?? {};
   const thresholdSpec = params.threshold;
-  const message = params.message;
-  if (typeof thresholdSpec !== "string" || typeof message !== "string") {
+  const message = typeof params.message === "string" ? params.message : "Unlimited";
+  if (typeof thresholdSpec !== "string") {
     return undefined;
   }
 
@@ -376,7 +379,7 @@ function tokenAmountMessage(
  * Per the spec, `token` takes priority over `tokenPath`. Both can be either
  * a constant address or a path reference.
  */
-function resolveTokenAddress(
+export function resolveTokenAddress(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
   metadata: DescriptorMetadata | undefined,
@@ -412,7 +415,7 @@ function resolveTokenAddress(
   return undefined;
 }
 
-function nativeSymbol(chainId: number): string {
+export function nativeSymbol(chainId: number): string {
   switch (chainId) {
     case 1: // Ethereum mainnet
     case 10: // Optimism
@@ -428,7 +431,7 @@ function nativeSymbol(chainId: number): string {
  * Resolve an address name using local wallet names and ENS.
  * Falls back to the checksum address with a warning when all resolution fails.
  */
-async function formatAddressName(
+export async function formatAddressName(
   checksumAddress: string,
   field: FieldFormatOptions,
   externalDataProvider?: ExternalDataProvider,
@@ -492,7 +495,7 @@ async function formatAddressName(
  * Resolve an enum label from a metadata map using a string key.
  * Returns undefined when the reference or map can't be resolved.
  */
-function resolveEnumLabel(
+export function resolveEnumLabel(
   field: FieldFormatOptions,
   key: string,
   metadata: DescriptorMetadata | undefined,
