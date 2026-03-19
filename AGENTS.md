@@ -272,7 +272,7 @@ Tests live in `test/`. Current test files:
 
 - `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
-- `test/erc7730-test-cases.spec.ts` — ERC-7730 spec test cases (in progress)
+- `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory)
 
 ## Build
 

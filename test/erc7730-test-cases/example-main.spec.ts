@@ -4,21 +4,20 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format } from "../src/index";
+import { format } from "../../src/index";
 import type {
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
   RegistryIndex,
-} from "../src/types";
-import { resolve } from "node:path";
+} from "../../src/types";
 import {
   addThousandSeparators,
   hexToBytes,
   toChecksumAddress,
-} from "../src/utils";
+} from "../../src/utils";
 
-const DESCRIPTORS_DIR = resolve(__dirname, "descriptors/erc7730-test-cases");
+const DESCRIPTORS_DIR = __dirname;
 
 function buildOpts(
   descriptorFile: string,
