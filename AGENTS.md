@@ -13,39 +13,66 @@ src/
 ├── index.ts                    # Public API: format(), formatTypedData()
 ├── types.ts                    # TypeScript interfaces and types
 ├── utils.ts                    # Crypto & formatting utilities
-├── descriptor.ts               # Descriptor parsing, ABI decoding, calldata decoding
-├── formatters.ts               # Shared field formatting logic (used by engine + eip712)
-├── engine.ts                   # Display formatting logic for transactions (calldata)
-├── eip712.ts                   # Display formatting logic for EIP-712 typed data
+├── descriptor.ts               # Shared descriptor logic: binding checks, path resolution, field merging
+├── formatters.ts               # Shared field formatting: applyFieldFormats() + all format handlers
+├── calldata.ts                 # Calldata path: formatCalldata(), signature parsing, ABI decoding
+├── eip712.ts                   # EIP-712 path: formatEip712(), encodeType matching, type resolution
 ├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
 └── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
 ```
+
+### Module responsibilities
+
+- **`descriptor.ts`** — Shared descriptor utilities used by both calldata and EIP-712 paths:
+  descriptor binding checks (`isCalldataDescriptorBoundTo`, `isEip712DescriptorBoundTo`),
+  path resolution (`resolveTransactionPath`, `resolveTypedDataPath`),
+  value conversion (`ArgumentValue`, `toArgumentValue`, `rawToArgumentValue`),
+  field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
+  metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
+
+- **`formatters.ts`** — The shared field formatting engine. Exports only `applyFieldFormats()`,
+  which iterates format fields, merges definitions, resolves values, and renders each field.
+  All individual format handlers (`renderField`, `formatRaw`, `formatTimestamp`,
+  `renderTokenAmount`, `formatAddressName`, `resolveEnumLabel`, etc.) are module-private.
+
+- **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
+  `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
+  selector-to-format lookup (`getFormatsBySelector`), and ABI calldata decoding
+  (`decodeArguments`, `DecodedArguments`). All parsing/decoding internals are module-private.
+
+- **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
+  top-level `formatEip712()` entry point, `encodeType` computation and matching
+  (`findFormatSpec`, `computeEncodeType`), message value navigation (`getMessageValue`),
+  and type resolution (`resolveFieldType`). All internals are module-private.
 
 ## Key Data Flow
 
 1. **Transaction formatting:**
 
    ```
-   format(tx: Transaction, opts?)
-   → DescriptorResolver.resolveCalldataDescriptor() fetches descriptor
-   → engine.formatCalldata(tx, descriptor, externalDataProvider?)
+   format(tx, opts?)
+   → DescriptorResolver.resolveCalldataDescriptor()
+   → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
        → getFormatsBySelector() builds selector→format map from display.formats keys
-       → decodeArguments() decodes calldata
-       → applyDisplayFormat() renders each field
+       → decodeArguments() decodes calldata into DecodedArguments
+       → applyFieldFormats() (from formatters.ts) renders each field
    → returns DisplayModel
    ```
 
 2. **EIP-712 formatting:**
    ```
    formatTypedData(typedData, opts?)
-   → DescriptorResolver.resolveTypedDataDescriptor() fetches descriptor by (chainId, verifyingContract)
+   → DescriptorResolver.resolveTypedDataDescriptor()
    → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
-       → findFormatSpec() matches display.formats key to primaryType via encodeType
-       → iterates format.fields, resolves paths in typedData.message
-       → renderField() formats each value
+       → findFormatSpec() matches display.formats key via encodeType string
+       → applyFieldFormats() (from formatters.ts) renders each field
    → returns DisplayModel
    ```
+
+Both paths share the same field rendering pipeline in `formatters.ts` via `applyFieldFormats()`.
+Each builds a `ResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
+for its domain (calldata args vs. EIP-712 message fields).
 
 ## Descriptor Sources
 
@@ -109,7 +136,7 @@ Pure I/O layer with no caching. Exports:
 
 ERC-7730 descriptors may reference another descriptor file via a top-level `includes` field containing a relative path. `DescriptorResolver` automatically fetches and merges the included file before returning the descriptor.
 
-The merge is implemented in `mergeDescriptors(including, included)` (exported from `resolver.ts`) and follows the EIP-7730 spec:
+The merge is implemented in `mergeDescriptors(including, included)` (internal to `resolver.ts`) and follows the EIP-7730 spec:
 
 - **General keys:** the including descriptor's value wins; nested objects are deep-merged recursively.
 - **`display.formats[*].fields` arrays:** merged by `path` value — fields from the including descriptor override matching entries in the included descriptor, and new `path` values are appended.
@@ -130,9 +157,9 @@ JSON files that define how to display contract interactions:
   separate ABI field is needed or used.
 - `metadata` — constants, owner info, etc.
 
-**`context.contract.abi` is deprecated and removed from the current ERC-7730 spec.** The engine
+**`context.contract.abi` is deprecated and removed from the current ERC-7730 spec.** The library
 ignores it. Function descriptors are derived entirely from `display.formats` keys via
-`parseFunctionSignatureKey()` in `descriptor.ts`.
+`parseFunctionSignatureKey()` in `calldata.ts`.
 
 **`required` and `excluded` arrays on format entries are also legacy** and not part of the current
 spec. Do not add them to `DescriptorFormatSpec`.
@@ -167,7 +194,7 @@ Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chain
 
 ### Address Name Resolution
 
-Address names are resolved via `ExternalDataProvider.resolveLocalName` and/or `resolveEnsName`. Which sources are consulted is controlled by `field.params.sources` in the descriptor (`"local"`, `"ens"`). When resolution fails, the library returns the checksum address with an `ADDRESS_NOT_RESOLVED` warning.
+Address names are resolved via `ExternalDataProvider.resolveLocalName` and/or `resolveEnsName`. Which sources are consulted is controlled by `field.params.sources` in the descriptor (`"local"`, `"ens"`). When resolution fails, the library returns the checksum address with an `UNKNOWN_ADDRESS` warning.
 
 There is no built-in address book. All name resolution is delegated to the wallet.
 
@@ -209,10 +236,9 @@ Non-fatal warnings are returned in the `DisplayModel.warnings` array and on indi
 
 ### Adding a new field format
 
-1. Add format handler in `src/engine.ts` → `renderField()` switch
-2. Add corresponding handler in `src/eip712.ts` → `renderField()` switch
-3. Add shared formatting logic to `src/formatters.ts` if reusable between both
-4. Add the new `WarningCode` value to `types.ts` if the format can emit new warnings
+1. Add a new case to `renderField()` switch in `src/formatters.ts`
+2. Implement the format handler as a module-private function in the same file
+3. Add the new `WarningCode` value to `types.ts` if the format can emit new warnings
 
 ### Testing with a custom descriptor
 
@@ -276,31 +302,36 @@ All `WarningCode` values are defined as a string literal union in `types.ts`.
 **Pattern:** return warnings in the result object, never via out-parameters.
 
 ```typescript
-function resolveField(
-  field,
-  defs,
-): { resolved: ResolvedField | undefined; warnings: string[] } {
+function doSomething(input): { result: string; warnings: string[] } {
   // ...
 }
-const { resolved, warnings } = resolveField(fieldSpec, definitions);
-warnings.push(...warnings.map((msg) => warn("FIELD_RESOLUTION", msg)));
 ```
+
+### Field format return type
+
+All individual format handlers in `formatters.ts` return `RenderFieldResult`:
+
+```typescript
+type RenderFieldResult = { rendered: string; warning?: Warning; tokenAddress?: string };
+```
+
+When a field value has the wrong type, use `typeMismatch(value, expected)` which returns a
+`RenderFieldResult` with the raw value and an `ARGUMENT_TYPE_MISMATCH` warning.
 
 ### Byte manipulation
 
 ```typescript
-import { hexToBytes, bytesToHex, keccak256 } from "./utils.js";
-const selector = keccak256(
-  new TextEncoder().encode("transfer(address,uint256)"),
-).slice(0, 4);
+import { hexToBytes, bytesToHex } from "./utils";
 ```
+
+`keccak256` is module-private in `utils.ts`; use `selectorForSignature(canonical)` to compute a 4-byte function selector.
 
 ### BigInt for token amounts
 
 All token amounts use native `bigint`. Formatting:
 
 ```typescript
-import { formatAmountWithDecimals } from "./utils.js";
+import { formatAmountWithDecimals } from "./utils";
 const display = formatAmountWithDecimals(1000000n, 6); // "1"
 ```
 
@@ -310,6 +341,7 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 2. **All imports need `.js` extension** (ESM requirement)
 3. **Selector matching is case-sensitive** on function names
 4. **Address normalization:** Always lowercase for comparisons
+5. **Minimize exports:** Only export symbols that are imported by other modules. Keep internal helpers module-private.
 
 ## Descriptor Type — Defensive Programming
 
