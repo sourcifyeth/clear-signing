@@ -8,19 +8,19 @@ import type {
 import {
   formatRaw,
   renderRaw,
-  formatDate,
-  formatTimestamp,
   formatNativeAmount,
+  nativeSymbol,
   formatTokenAmount,
-  formatAddressNameField,
-  formatAddressName,
-  formatEnum,
-  typeMismatch,
   renderTokenAmount,
   tokenAmountMessage,
   resolveTokenAddress,
+  formatDate,
+  formatTimestamp,
+  formatEnum,
   resolveEnumLabel,
-  nativeSymbol,
+  formatAddressNameField,
+  formatAddressName,
+  typeMismatch,
   renderField,
 } from "../src/formatters.js";
 import { hexToBytes } from "../src/utils.js";
@@ -58,7 +58,7 @@ function int(value: bigint): ArgumentValue {
 const noopResolvePath: ResolvePath = () => undefined;
 
 // ---------------------------------------------------------------------------
-// renderRaw
+// raw format: renderRaw
 // ---------------------------------------------------------------------------
 
 describe("renderRaw", () => {
@@ -91,7 +91,7 @@ describe("renderRaw", () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatRaw
+// raw format: formatRaw
 // ---------------------------------------------------------------------------
 
 describe("formatRaw", () => {
@@ -103,73 +103,7 @@ describe("formatRaw", () => {
 });
 
 // ---------------------------------------------------------------------------
-// typeMismatch
-// ---------------------------------------------------------------------------
-
-describe("typeMismatch", () => {
-  it("returns raw value with ARGUMENT_TYPE_MISMATCH warning", () => {
-    const result = typeMismatch(str("hello"), "uint", "tokenAmount");
-    expect(result.rendered).toBe("hello");
-    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// formatTimestamp
-// ---------------------------------------------------------------------------
-
-describe("formatTimestamp", () => {
-  it("formats Unix epoch as UTC date", () => {
-    // 2024-01-15 10:00:00 UTC = 1705312800
-    const result = formatTimestamp(1705312800n);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
-  });
-
-  it("formats epoch 0", () => {
-    const result = formatTimestamp(0n);
-    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
-  });
-
-  it("pads single-digit months and days", () => {
-    // 2024-03-05 08:01:02 UTC = 1709625662
-    const result = formatTimestamp(1709625662n);
-    expect(result.rendered).toBe("2024-03-05 08:01:02 UTC");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// formatDate
-// ---------------------------------------------------------------------------
-
-describe("formatDate", () => {
-  const timestampOpts = { params: { encoding: "timestamp" as const } };
-
-  it("formats a uint value as date with encoding=timestamp", () => {
-    const result = formatDate(uint(1705312800n), timestampOpts);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
-    expect(result.warning).toBeUndefined();
-  });
-
-  it("formats an int value as date with encoding=timestamp", () => {
-    const result = formatDate(int(1705312800n), timestampOpts);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
-    expect(result.warning).toBeUndefined();
-  });
-
-  it("falls back to raw when encoding is missing", () => {
-    const result = formatDate(uint(1705312800n), {});
-    expect(result.rendered).toBe("1,705,312,800");
-    expect(result.warning).toBeUndefined();
-  });
-
-  it("returns type mismatch for non-uint/int", () => {
-    const result = formatDate(str("not a date"), timestampOpts);
-    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// formatNativeAmount
+// amount format: formatNativeAmount
 // ---------------------------------------------------------------------------
 
 describe("formatNativeAmount", () => {
@@ -221,7 +155,7 @@ describe("formatNativeAmount", () => {
 });
 
 // ---------------------------------------------------------------------------
-// nativeSymbol
+// amount format: nativeSymbol
 // ---------------------------------------------------------------------------
 
 describe("nativeSymbol", () => {
@@ -234,7 +168,7 @@ describe("nativeSymbol", () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderTokenAmount
+// tokenAmount format: renderTokenAmount
 // ---------------------------------------------------------------------------
 
 describe("renderTokenAmount", () => {
@@ -268,7 +202,7 @@ describe("renderTokenAmount", () => {
 });
 
 // ---------------------------------------------------------------------------
-// tokenAmountMessage
+// tokenAmount format: tokenAmountMessage
 // ---------------------------------------------------------------------------
 
 describe("tokenAmountMessage", () => {
@@ -324,7 +258,7 @@ describe("tokenAmountMessage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveTokenAddress
+// tokenAmount format: resolveTokenAddress
 // ---------------------------------------------------------------------------
 
 describe("resolveTokenAddress", () => {
@@ -403,7 +337,7 @@ describe("resolveTokenAddress", () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatTokenAmount
+// tokenAmount format: formatTokenAmount
 // ---------------------------------------------------------------------------
 
 describe("formatTokenAmount", () => {
@@ -500,7 +434,61 @@ describe("formatTokenAmount", () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveEnumLabel
+// date format: formatTimestamp
+// ---------------------------------------------------------------------------
+
+describe("formatTimestamp", () => {
+  it("formats Unix epoch as UTC date", () => {
+    // 2024-01-15 10:00:00 UTC = 1705312800
+    const result = formatTimestamp(1705312800n);
+    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+  });
+
+  it("formats epoch 0", () => {
+    const result = formatTimestamp(0n);
+    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
+  });
+
+  it("pads single-digit months and days", () => {
+    // 2024-03-05 08:01:02 UTC = 1709625662
+    const result = formatTimestamp(1709625662n);
+    expect(result.rendered).toBe("2024-03-05 08:01:02 UTC");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// date format: formatDate
+// ---------------------------------------------------------------------------
+
+describe("formatDate", () => {
+  const timestampOpts = { params: { encoding: "timestamp" as const } };
+
+  it("formats a uint value as date with encoding=timestamp", () => {
+    const result = formatDate(uint(1705312800n), timestampOpts);
+    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("formats an int value as date with encoding=timestamp", () => {
+    const result = formatDate(int(1705312800n), timestampOpts);
+    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("falls back to raw when encoding is missing", () => {
+    const result = formatDate(uint(1705312800n), {});
+    expect(result.rendered).toBe("1,705,312,800");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("returns type mismatch for non-uint/int", () => {
+    const result = formatDate(str("not a date"), timestampOpts);
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enum format: resolveEnumLabel
 // ---------------------------------------------------------------------------
 
 describe("resolveEnumLabel", () => {
@@ -539,7 +527,7 @@ describe("resolveEnumLabel", () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatEnum
+// enum format: formatEnum
 // ---------------------------------------------------------------------------
 
 describe("formatEnum", () => {
@@ -577,7 +565,7 @@ describe("formatEnum", () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatAddressName / formatAddressNameField
+// addressName format: formatAddressName
 // ---------------------------------------------------------------------------
 
 describe("formatAddressName", () => {
@@ -660,6 +648,10 @@ describe("formatAddressName", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// addressName format: formatAddressNameField
+// ---------------------------------------------------------------------------
+
 describe("formatAddressNameField", () => {
   it("returns type mismatch for non-address", async () => {
     const result = await formatAddressNameField(uint(42n), {});
@@ -671,6 +663,18 @@ describe("formatAddressNameField", () => {
     expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
     // It returns a checksum address
     expect(result.rendered).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// typeMismatch (utility)
+// ---------------------------------------------------------------------------
+
+describe("typeMismatch", () => {
+  it("returns raw value with ARGUMENT_TYPE_MISMATCH warning", () => {
+    const result = typeMismatch(str("hello"), "uint", "tokenAmount");
+    expect(result.rendered).toBe("hello");
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
 });
 
@@ -691,18 +695,6 @@ describe("renderField", () => {
     expect(result.rendered).toBe("42");
   });
 
-  it("dispatches 'date' format with encoding=timestamp", async () => {
-    const result = await renderField(
-      uint(0n),
-      "date",
-      { params: { encoding: "timestamp" } },
-      noopResolvePath,
-      1,
-      undefined,
-    );
-    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
-  });
-
   it("dispatches 'amount' format", async () => {
     const result = await renderField(
       uint(1000000000000000000n),
@@ -713,6 +705,18 @@ describe("renderField", () => {
       undefined,
     );
     expect(result.rendered).toBe("1 ETH");
+  });
+
+  it("dispatches 'date' format with encoding=timestamp", async () => {
+    const result = await renderField(
+      uint(0n),
+      "date",
+      { params: { encoding: "timestamp" } },
+      noopResolvePath,
+      1,
+      undefined,
+    );
+    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
   });
 
   it("dispatches 'enum' format", async () => {

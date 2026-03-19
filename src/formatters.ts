@@ -158,8 +158,10 @@ export async function renderField(
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   switch (format) {
-    case "date":
-      return formatDate(value, fieldOptions);
+    case "raw":
+      return formatRaw(value);
+    case "amount":
+      return formatNativeAmount(value, chainId);
     case "tokenAmount":
       return await formatTokenAmount(
         fieldOptions,
@@ -169,31 +171,87 @@ export async function renderField(
         metadata,
         externalDataProvider,
       );
-    case "amount":
-      return formatNativeAmount(value, chainId);
+    case "date":
+      return formatDate(value, fieldOptions);
+    case "enum":
+      return formatEnum(fieldOptions, value, metadata);
     case "addressName":
       return await formatAddressNameField(
         value,
         fieldOptions,
         externalDataProvider,
       );
-    case "enum":
-      return formatEnum(fieldOptions, value, metadata);
     default:
       return formatRaw(value);
   }
 }
 
-export function formatDate(value: ArgumentValue, fieldOptions: FieldFormatOptions): RenderFieldResult {
-  if (value.type !== "uint" && value.type !== "int") return typeMismatch(value, "uint or int", "date");
-  const encoding = fieldOptions.params?.encoding;
-  if (encoding !== "timestamp") return formatRaw(value);
-  try {
-    return formatTimestamp(value.value);
-  } catch {
-    return formatRaw(value);
+// ---------------------------------------------------------------------------
+// raw format
+// ---------------------------------------------------------------------------
+
+export function formatRaw(value: ArgumentValue): RenderFieldResult {
+  return { rendered: renderRaw(value) };
+}
+
+export function renderRaw(value: ArgumentValue): string {
+  switch (value.type) {
+    case "address":
+      return toChecksumAddress(value.bytes);
+    case "uint":
+    case "int":
+      return addThousandSeparators(value.value.toString());
+    case "bool":
+      return value.value.toString();
+    case "string":
+      return value.value;
+    case "bytes":
+      return bytesToHex(value.bytes);
   }
 }
+
+// ---------------------------------------------------------------------------
+// amount format
+// ---------------------------------------------------------------------------
+
+export function formatNativeAmount(
+  value: ArgumentValue,
+  chainId: number | undefined,
+): RenderFieldResult {
+  if (value.type !== "uint" && value.type !== "int") {
+    return typeMismatch(value, "uint or int", "amount");
+  }
+
+  if (chainId === undefined) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "CONTAINER_MISSING_CHAIN_ID",
+        "Cannot format amount without a chainId on the container",
+      ),
+    };
+  }
+
+  const formatted = formatAmountWithDecimals(value.value, 18);
+  const symbol = nativeSymbol(chainId);
+  return { rendered: `${formatted} ${symbol}` };
+}
+
+export function nativeSymbol(chainId: number): string {
+  switch (chainId) {
+    case 1: // Ethereum mainnet
+    case 10: // Optimism
+    case 42161: // Arbitrum
+    case 8453: // Base
+      return "ETH";
+    default:
+      return "NATIVE";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// tokenAmount format
+// ---------------------------------------------------------------------------
 
 export async function formatTokenAmount(
   field: FieldFormatOptions,
@@ -241,100 +299,6 @@ export async function formatTokenAmount(
   };
 }
 
-export function formatNativeAmount(
-  value: ArgumentValue,
-  chainId: number | undefined,
-): RenderFieldResult {
-  if (value.type !== "uint" && value.type !== "int") {
-    return typeMismatch(value, "uint or int", "amount");
-  }
-
-  if (chainId === undefined) {
-    return {
-      rendered: renderRaw(value),
-      warning: warn(
-        "CONTAINER_MISSING_CHAIN_ID",
-        "Cannot format amount without a chainId on the container",
-      ),
-    };
-  }
-
-  const formatted = formatAmountWithDecimals(value.value, 18);
-  const symbol = nativeSymbol(chainId);
-  return { rendered: `${formatted} ${symbol}` };
-}
-
-export async function formatAddressNameField(
-  value: ArgumentValue,
-  field: FieldFormatOptions,
-  externalDataProvider?: ExternalDataProvider,
-): Promise<RenderFieldResult> {
-  if (value.type !== "address") return typeMismatch(value, "address", "addressName");
-  const checksum = toChecksumAddress(value.bytes);
-  return formatAddressName(checksum, field, externalDataProvider);
-}
-
-export function formatEnum(
-  field: FieldFormatOptions,
-  value: ArgumentValue,
-  metadata: DescriptorMetadata | undefined,
-): RenderFieldResult {
-  if (value.type !== "uint" && value.type !== "int") return typeMismatch(value, "uint or int", "enum");
-  const label = resolveEnumLabel(field, value.value.toString(), metadata);
-  if (!label) return formatRaw(value);
-  return { rendered: label };
-}
-
-export function typeMismatch(
-  value: ArgumentValue,
-  expected: string,
-  format: DescriptorFieldFormatType,
-): RenderFieldResult {
-  return {
-    rendered: renderRaw(value),
-    warning: warn(
-      "ARGUMENT_TYPE_MISMATCH",
-      `Format ${format} expects ${expected} but got ${value.type}`,
-    ),
-  };
-}
-
-export function formatRaw(value: ArgumentValue): RenderFieldResult {
-  return { rendered: renderRaw(value) };
-}
-
-export function renderRaw(value: ArgumentValue): string {
-  switch (value.type) {
-    case "address":
-      return toChecksumAddress(value.bytes);
-    case "uint":
-    case "int":
-      return addThousandSeparators(value.value.toString());
-    case "bool":
-      return value.value.toString();
-    case "string":
-      return value.value;
-    case "bytes":
-      return bytesToHex(value.bytes);
-  }
-}
-
-/**
- * Format a Unix timestamp (seconds) as a UTC date string.
- */
-export function formatTimestamp(seconds: bigint): RenderFieldResult {
-  const date = new Date(Number(seconds) * 1000);
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hours = String(date.getUTCHours()).padStart(2, "0");
-  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-  const secs = String(date.getUTCSeconds()).padStart(2, "0");
-  return {
-    rendered: `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`,
-  };
-}
-
 /**
  * Render a token amount with symbol, applying a threshold message if configured.
  */
@@ -356,7 +320,8 @@ export function tokenAmountMessage(
 ): string | undefined {
   const params = field.params ?? {};
   const thresholdSpec = params.threshold;
-  const message = typeof params.message === "string" ? params.message : "Unlimited";
+  const message =
+    typeof params.message === "string" ? params.message : "Unlimited";
   if (typeof thresholdSpec !== "string") {
     return undefined;
   }
@@ -415,16 +380,90 @@ export function resolveTokenAddress(
   return undefined;
 }
 
-export function nativeSymbol(chainId: number): string {
-  switch (chainId) {
-    case 1: // Ethereum mainnet
-    case 10: // Optimism
-    case 42161: // Arbitrum
-    case 8453: // Base
-      return "ETH";
-    default:
-      return "NATIVE";
+// ---------------------------------------------------------------------------
+// date format
+// ---------------------------------------------------------------------------
+
+export function formatDate(
+  value: ArgumentValue,
+  fieldOptions: FieldFormatOptions,
+): RenderFieldResult {
+  if (value.type !== "uint" && value.type !== "int")
+    return typeMismatch(value, "uint or int", "date");
+  const encoding = fieldOptions.params?.encoding;
+  if (encoding !== "timestamp") return formatRaw(value);
+  try {
+    return formatTimestamp(value.value);
+  } catch {
+    return formatRaw(value);
   }
+}
+
+/**
+ * Format a Unix timestamp (seconds) as a UTC date string.
+ */
+export function formatTimestamp(seconds: bigint): RenderFieldResult {
+  const date = new Date(Number(seconds) * 1000);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  const secs = String(date.getUTCSeconds()).padStart(2, "0");
+  return {
+    rendered: `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// enum format
+// ---------------------------------------------------------------------------
+
+export function formatEnum(
+  field: FieldFormatOptions,
+  value: ArgumentValue,
+  metadata: DescriptorMetadata | undefined,
+): RenderFieldResult {
+  if (value.type !== "uint" && value.type !== "int")
+    return typeMismatch(value, "uint or int", "enum");
+  const label = resolveEnumLabel(field, value.value.toString(), metadata);
+  if (!label) return formatRaw(value);
+  return { rendered: label };
+}
+
+/**
+ * Resolve an enum label from a metadata map using a string key.
+ * Returns undefined when the reference or map can't be resolved.
+ */
+export function resolveEnumLabel(
+  field: FieldFormatOptions,
+  key: string,
+  metadata: DescriptorMetadata | undefined,
+): string | undefined {
+  const params = field.params ?? {};
+  const reference = params.$ref;
+  if (typeof reference !== "string") return undefined;
+
+  const enumMap = resolveMetadataValue(metadata, reference);
+  if (!enumMap || typeof enumMap !== "object") return undefined;
+
+  const label = (enumMap as Record<string, unknown>)[key];
+  return typeof label === "string" ? label : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// addressName format
+// ---------------------------------------------------------------------------
+
+export async function formatAddressNameField(
+  value: ArgumentValue,
+  field: FieldFormatOptions,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
+  if (value.type !== "address")
+    return typeMismatch(value, "address", "addressName");
+  const checksum = toChecksumAddress(value.bytes);
+  return formatAddressName(checksum, field, externalDataProvider);
 }
 
 /**
@@ -491,22 +530,20 @@ export async function formatAddressName(
   };
 }
 
-/**
- * Resolve an enum label from a metadata map using a string key.
- * Returns undefined when the reference or map can't be resolved.
- */
-export function resolveEnumLabel(
-  field: FieldFormatOptions,
-  key: string,
-  metadata: DescriptorMetadata | undefined,
-): string | undefined {
-  const params = field.params ?? {};
-  const reference = params.$ref;
-  if (typeof reference !== "string") return undefined;
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
-  const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") return undefined;
-
-  const label = (enumMap as Record<string, unknown>)[key];
-  return typeof label === "string" ? label : undefined;
+export function typeMismatch(
+  value: ArgumentValue,
+  expected: string,
+  format: DescriptorFieldFormatType,
+): RenderFieldResult {
+  return {
+    rendered: renderRaw(value),
+    warning: warn(
+      "ARGUMENT_TYPE_MISMATCH",
+      `Format ${format} expects ${expected} but got ${value.type}`,
+    ),
+  };
 }
