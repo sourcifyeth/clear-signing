@@ -17,7 +17,7 @@
  */
 
 import { DescriptorResolver } from "./resolver";
-import { formatCalldata, rawPreviewFromCalldata } from "./engine";
+import { formatCalldata, rawPreviewFromCalldata } from "./calldata";
 import { formatEip712 } from "./eip712";
 import { hexToBytes, extractSelector } from "./utils";
 import type {

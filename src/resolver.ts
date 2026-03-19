@@ -131,7 +131,7 @@ class EmbeddedPathResolver implements PathResolver {
  *   and new fields are appended.
  * - The `includes` key itself is not carried over to the merged result.
  */
-export function mergeDescriptors(
+function mergeDescriptors(
   including: Descriptor,
   included: Descriptor,
 ): Descriptor {

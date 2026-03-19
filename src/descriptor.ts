@@ -1,26 +1,25 @@
 /**
- * Descriptor parsing and calldata decoding for clear signing.
+ * Shared descriptor utilities for clear signing.
+ *
+ * Contains descriptor binding checks, path resolution, field/definition merging,
+ * metadata resolution, and template interpolation used by both calldata and EIP-712 paths.
  */
 
 import type {
   Descriptor,
   DescriptorFieldFormat,
   DescriptorFieldFormatParams,
-  DescriptorFieldFormatType,
-  DescriptorFormatSpec,
+  DescriptorFieldGroup,
   DescriptorMetadata,
+  FieldType,
   Transaction,
   TypedData,
 } from "./types";
 import {
-  addThousandSeparators,
-  bytesToBigInt,
-  bytesToHex,
   hexToBytes,
+  coerceBigInt,
   normalizeAddress,
-  normalizeCaip19,
-  selectorForSignature,
-  tokenKeyFromErc20,
+  parseBigInt,
 } from "./utils";
 
 /**
@@ -61,468 +60,155 @@ export function isEip712DescriptorBoundTo(
   );
 }
 
-/** ABI function input parameter. */
-export interface FunctionInput {
-  name: string;
-  type: string;
-  components?: FunctionInput[];
-}
-
-/** Parsed function signature with computed selector. */
-export interface ParsedFunctionSignature {
-  inputs: FunctionInput[];
-  selector: Uint8Array;
-}
-
-/**
- * Parse a display.formats key as a full function signature into a ParsedFunctionSignature.
- *
- * Per ERC-7730, keys MUST include parameter names and use canonical Solidity types.
- * Commas MUST NOT be followed by spaces; exactly one space between type and name.
- *
- * Examples:
- *   "deposit()"
- *   "approve(address spender,uint256 value)"
- *   "submitOrder((address token,uint256 amount) order,bytes32 salt)"
- */
-export function parseFunctionSignatureKey(
-  key: string,
-): ParsedFunctionSignature | undefined {
-  const openParen = key.indexOf("(");
-  if (openParen === -1) return undefined;
-
-  const fnName = key.slice(0, openParen).trim();
-  if (!fnName) return undefined;
-
-  // Find the matching closing paren for the top-level param list
-  const afterOpen = key.slice(openParen + 1);
-  const closeIdx = findMatchingClose(afterOpen, 0);
-  if (closeIdx === -1) return undefined;
-
-  const paramsStr = afterOpen.slice(0, closeIdx);
-  const inputs = parseParamList(paramsStr);
-
-  const canonical = `${fnName}(${canonicalParamList(inputs)})`;
-  const selector = selectorForSignature(canonical);
-
-  return { inputs, selector };
-}
-
-/** Find the index of the closing ')' that matches the opening '(' at depth 0. */
-function findMatchingClose(s: string, startDepth: number): number {
-  let depth = startDepth;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === "(") depth++;
-    else if (s[i] === ")") {
-      if (depth === 0) return i;
-      depth--;
-    }
-  }
-  return -1;
-}
-
-/** Split a top-level parameter list string by commas, respecting nested parens. */
-function splitTopLevel(paramsStr: string): string[] {
-  if (paramsStr.trim() === "") return [];
-  const parts: string[] = [];
-  let depth = 0;
-  let current = "";
-  for (const ch of paramsStr) {
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    else if (ch === "," && depth === 0) {
-      parts.push(current.trim());
-      current = "";
-      continue;
-    }
-    current += ch;
-  }
-  if (current.trim()) parts.push(current.trim());
-  return parts;
-}
-
-function parseParamList(paramsStr: string): FunctionInput[] {
-  return splitTopLevel(paramsStr).map(parseParam);
-}
-
-/**
- * Parse a single parameter string like:
- *   "address"            → {type:"address", name:""}
- *   "address spender"    → {type:"address", name:"spender"}
- *   "uint256[]"          → {type:"uint256[]", name:""}
- *   "(address src,uint256 amt) desc"  → {type:"tuple", name:"desc", components:[...]}
- *   "(address src,uint256 amt)[] orders" → {type:"tuple[]", name:"orders", components:[...]}
- */
-function parseParam(param: string): FunctionInput {
-  param = param.trim();
-
-  if (param.startsWith("(")) {
-    // Tuple: find matching close, then check for array suffix and optional name
-    const closeIdx = findMatchingClose(param.slice(1), 0);
-    if (closeIdx === -1) return { name: "", type: "tuple" };
-
-    const inner = param.slice(1, closeIdx + 1);
-    const components = parseParamList(inner);
-
-    const rest = param.slice(closeIdx + 2).trim(); // after ")"
-    const { arraySuffix, name } = extractSuffixAndName(rest);
-
-    return { type: `tuple${arraySuffix}`, name, components };
-  }
-
-  // Non-tuple: "type" or "type name" or "type[] name"
-  const { arraySuffix, base, name } = extractBaseArrayName(param);
-  return { type: `${base}${arraySuffix}`, name };
-}
-
-/**
- * From a string like "[] orders" or "orders" or "" extract array suffix and name.
- * Used after the closing ) of a tuple.
- */
-function extractSuffixAndName(rest: string): {
-  arraySuffix: string;
-  name: string;
-} {
-  // Collect leading array brackets: [], [3], etc.
-  let arraySuffix = "";
-  let i = 0;
-  while (i < rest.length && rest[i] === "[") {
-    const closeB = rest.indexOf("]", i);
-    if (closeB === -1) break;
-    arraySuffix += rest.slice(i, closeB + 1);
-    i = closeB + 1;
-  }
-  const name = rest.slice(i).trim();
-  return { arraySuffix, name };
-}
-
-/**
- * From a non-tuple param string like "address", "address spender", "uint256[]",
- * "uint256[] values" — extract base type, array suffix, and name.
- */
-function extractBaseArrayName(param: string): {
-  base: string;
-  arraySuffix: string;
-  name: string;
-} {
-  // Split by whitespace
-  const parts = param.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { base: "", arraySuffix: "", name: "" };
-
-  // Check if last token could be an identifier name (purely alphanumeric/underscore, not a type)
-  const last = parts[parts.length - 1];
-  const rest = parts.slice(0, -1).join("");
-
-  const looksLikeName = /^[a-zA-Z_]\w*$/.test(last) && parts.length > 1;
-
-  const typeStr = looksLikeName ? rest : parts.join("");
-  const name = looksLikeName ? last : "";
-
-  // Separate base type from trailing array suffixes like "[]", "[3]"
-  const arrayMatch = typeStr.match(/^(.*?)(\[[\d,\s]*\](?:\[[\d,\s]*\])*)$/);
-  if (arrayMatch) {
-    return { base: arrayMatch[1], arraySuffix: arrayMatch[2], name };
-  }
-  return { base: typeStr, arraySuffix: "", name };
-}
-
-/** Build canonical (selector-compatible) param list — types only, no names. */
-function canonicalParamList(inputs: FunctionInput[]): string {
-  return inputs.map(canonicalParam).join(",");
-}
-
-function canonicalParam(input: FunctionInput): string {
-  if (input.type.startsWith("tuple")) {
-    const suffix = input.type.slice(5); // array suffix after "tuple", e.g. "[]"
-    return `(${canonicalParamList(input.components ?? [])})${suffix}`;
-  }
-  return input.type;
-}
-
-/**
- * Build a map from hex selector (e.g. "0x095ea7b3") to the parsed function descriptor
- * and its display format spec. Parses display.formats keys as function signatures —
- * no separate ABI needed.
- */
-export function getFormatsBySelector(
-  descriptor: Descriptor,
-): Map<string, { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }> {
-  const map = new Map<
-    string,
-    { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }
-  >();
-  const formats = descriptor.display?.formats;
-  if (!formats) return map;
-
-  for (const [key, spec] of Object.entries(formats)) {
-    const fn = parseFunctionSignatureKey(key);
-    if (!fn) continue;
-    map.set(bytesToHex(fn.selector), { fn, spec });
-  }
-  return map;
-}
-
 /** Argument value union type. */
 export type ArgumentValue =
   | { type: "address"; bytes: Uint8Array }
   | { type: "uint"; value: bigint }
   | { type: "int"; value: bigint }
   | { type: "bool"; value: boolean }
-  | { type: "raw"; bytes: Uint8Array };
-
-/** Decoded argument value. */
-export interface DecodedArgument {
-  index: number;
-  name?: string;
-  value: ArgumentValue;
-  word: Uint8Array;
-}
+  | { type: "string"; value: string }
+  | { type: "bytes"; bytes: Uint8Array };
 
 /**
- * Collection of decoded arguments with name-based lookup.
+ * Convert a raw JS value (e.g. from an EIP-712 message) to an ArgumentValue
+ * using the known FieldType from the type tree.
  */
-export class DecodedArguments {
-  private ordered: DecodedArgument[] = [];
-  private indexByName = new Map<string, number>();
-
-  push(
-    name: string | undefined,
-    index: number,
-    value: ArgumentValue,
-    word: Uint8Array,
-  ): void {
-    const entryIndex = this.ordered.length;
-    if (name !== undefined) {
-      this.indexByName.set(name, entryIndex);
+export function rawToArgumentValue(
+  value: unknown,
+  fieldType: FieldType,
+): ArgumentValue | undefined {
+  switch (fieldType) {
+    case "address": {
+      if (typeof value !== "string") return undefined;
+      if (!value.startsWith("0x") || value.length !== 42) return undefined;
+      return { type: "address", bytes: hexToBytes(value) };
     }
-    this.indexByName.set(`arg${index}`, entryIndex);
-    this.ordered.push({ index, name, value, word });
-  }
-
-  get(key: string): ArgumentValue | undefined {
-    const idx = this.indexByName.get(key);
-    if (idx === undefined) return undefined;
-    return this.ordered[idx]?.value;
-  }
-
-  getOrdered(): DecodedArgument[] {
-    return this.ordered;
-  }
-}
-
-/**
- * Get default string representation of an argument value.
- */
-export function defaultValueString(value: ArgumentValue): string {
-  switch (value.type) {
-    case "address":
-      return bytesToHex(value.bytes);
-    case "uint":
-    case "int":
-      return addThousandSeparators(value.value.toString());
-    case "bool":
-      return value.value.toString();
-    case "raw":
-      return bytesToHex(value.bytes);
-  }
-}
-
-/**
- * Decode calldata arguments according to function descriptor.
- */
-export function decodeArguments(
-  fn: ParsedFunctionSignature,
-  calldata: Uint8Array,
-): DecodedArguments {
-  const totalWords = fn.inputs.reduce(
-    (sum, input) => sum + argumentWordCount(input),
-    0,
-  );
-  const expectedLen = 4 + totalWords * 32;
-
-  if (calldata.length < expectedLen) {
-    throw new Error(
-      `calldata length ${calldata.length} too small for ${totalWords} arguments`,
-    );
-  }
-
-  const decoded = new DecodedArguments();
-  let cursor = 4;
-  let globalIndex = 0;
-
-  for (const input of fn.inputs) {
-    const result = decodeInput(input, calldata, cursor, undefined, globalIndex);
-    cursor = result.cursor;
-    globalIndex = result.globalIndex;
-
-    for (const arg of result.args) {
-      decoded.push(arg.name, arg.index, arg.value, arg.word);
+    case "uint": {
+      const n = coerceBigInt(value);
+      if (n === undefined) return undefined;
+      return { type: "uint", value: n };
+    }
+    case "int": {
+      const n = coerceBigInt(value);
+      if (n === undefined) return undefined;
+      return { type: "int", value: n };
+    }
+    case "bool": {
+      if (typeof value === "boolean") return { type: "bool", value };
+      if (value === "true") return { type: "bool", value: true };
+      if (value === "false") return { type: "bool", value: false };
+      return undefined;
+    }
+    case "string": {
+      if (typeof value !== "string") return undefined;
+      return { type: "string", value };
+    }
+    case "bytes": {
+      if (typeof value !== "string") return undefined;
+      try {
+        return { type: "bytes", bytes: hexToBytes(value) };
+      } catch {
+        return undefined;
+      }
     }
   }
-
-  return decoded;
 }
 
-interface DecodeResult {
-  cursor: number;
-  globalIndex: number;
-  args: Array<{
-    name: string | undefined;
-    index: number;
-    value: ArgumentValue;
-    word: Uint8Array;
-  }>;
-}
 
-function decodeInput(
-  input: FunctionInput,
-  calldata: Uint8Array,
-  cursor: number,
-  prefix: string | undefined,
-  globalIndex: number,
-): DecodeResult {
-  if (
-    input.type.startsWith("tuple") &&
-    input.components &&
-    input.components.length > 0
-  ) {
-    const basePrefix =
-      prefix !== undefined
-        ? input.name.trim().length === 0
-          ? prefix
-          : `${prefix}.${input.name.trim()}`
-        : input.name.trim().length === 0
-          ? undefined
-          : input.name.trim();
-
-    const args: DecodeResult["args"] = [];
-    for (const component of input.components) {
-      const result = decodeInput(
-        component,
-        calldata,
-        cursor,
-        basePrefix,
-        globalIndex,
-      );
-      cursor = result.cursor;
-      globalIndex = result.globalIndex;
-      args.push(...result.args);
+/**
+ * Convert a descriptor metadata value to an ArgumentValue.
+ * Used for `$.metadata.*` path resolution.
+ */
+export function toArgumentValue(
+  value: unknown,
+): ArgumentValue | undefined {
+  if (typeof value === "number") {
+    return { type: "uint", value: BigInt(value) };
+  }
+  if (typeof value === "boolean") {
+    return { type: "bool", value };
+  }
+  if (typeof value === "string") {
+    const n = parseBigInt(value);
+    if (n !== undefined) return { type: "uint", value: n };
+    if (value.startsWith("0x") && value.length === 42) {
+      return { type: "address", bytes: hexToBytes(value) };
     }
-    return { cursor, globalIndex, args };
+    if (value.startsWith("0x")) {
+      try {
+        return { type: "bytes", bytes: hexToBytes(value) };
+      } catch {
+        /* fall through */
+      }
+    }
+    return { type: "string", value };
   }
-
-  // Decode single word
-  const start = cursor;
-  const end = start + 32;
-
-  if (end > calldata.length) {
-    throw new Error(
-      `calldata length ${calldata.length} too small while decoding argument '${input.name}'`,
-    );
-  }
-
-  const word = calldata.slice(start, end);
-  const value = decodeWord(input.type, word);
-  const name = argumentName(prefix, input);
-
-  return {
-    cursor: end,
-    globalIndex: globalIndex + 1,
-    args: [{ name, index: globalIndex, value, word }],
-  };
-}
-
-function argumentWordCount(input: FunctionInput): number {
-  if (
-    input.type.startsWith("tuple") &&
-    input.components &&
-    input.components.length > 0
-  ) {
-    return input.components.reduce((sum, c) => sum + argumentWordCount(c), 0);
-  }
-  return 1;
-}
-
-function argumentName(
-  prefix: string | undefined,
-  input: FunctionInput,
-): string | undefined {
-  const trimmed = input.name.trim();
-  if (prefix !== undefined) {
-    return trimmed.length === 0 ? prefix : `${prefix}.${trimmed}`;
-  }
-  return trimmed.length === 0 ? undefined : trimmed;
-}
-
-function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
-  if (kind === "address") {
-    return { type: "address", bytes: word.slice(12) };
-  }
-
-  if (kind.startsWith("uint")) {
-    return { type: "uint", value: bytesToBigInt(word) };
-  }
-
-  if (kind.startsWith("int")) {
-    const bits = kind === "int" ? 256 : parseInt(kind.slice(3), 10);
-    const unsigned = bytesToBigInt(word);
-    const signBit = 1n << BigInt(bits - 1);
-    const value = unsigned & signBit ? unsigned - (1n << BigInt(bits)) : unsigned;
-    return { type: "int", value };
-  }
-
-  if (kind === "bool") {
-    return { type: "bool", value: word[31] !== 0 };
-  }
-
-  return { type: "raw", bytes: word };
-}
-
-
-/** Resolved effective field after applying references. */
-export interface ResolvedField {
-  path: string;
-  label: string;
-  format?: DescriptorFieldFormatType;
-  params: DescriptorFieldFormatParams;
+  return undefined;
 }
 
 /**
- * Resolve effective field after applying definition references.
+ * Resolves an ERC-7730 path to an ArgumentValue.
+ * Handles `@.` (container), `$.` (metadata), `#.` (structured data), and bare paths.
  */
-export function resolveField(
+export type ResolvePath = (path: string) => ArgumentValue | undefined;
+
+export function isFieldGroup(
+  field: DescriptorFieldFormat | DescriptorFieldGroup,
+): field is DescriptorFieldGroup {
+  return "iteration" in field;
+}
+
+/**
+ * Merge a field with its referenced definition (if any).
+ * Always returns a DescriptorFieldFormat — the input itself if no $ref is present.
+ */
+export function mergeDefinitions(
   field: DescriptorFieldFormat,
   definitions: Record<string, DescriptorFieldFormat>,
-): { resolved: ResolvedField | undefined; warnings: string[] } {
+): { merged: DescriptorFieldFormat; warnings: string[] } {
   const warnings: string[] = [];
-  let path = field.path;
-  let label = field.label;
-  let format = field.format;
-  let params: DescriptorFieldFormatParams = field.params ?? {};
 
-  if (field.$ref) {
-    const name = extractDefinitionName(field.$ref);
-    if (name) {
-      const def = definitions[name];
-      if (def) {
-        if (path === undefined) path = def.path;
-        if (label === undefined) label = def.label;
-        if (format === undefined) format = def.format;
-        params = mergeParams(def.params ?? {}, params);
-      } else {
-        warnings.push(`Unknown display definition reference '${field.$ref}'`);
-      }
-    } else {
-      warnings.push(`Unsupported display definition reference '${field.$ref}'`);
-    }
+  if (!field.$ref) {
+    return { merged: field, warnings };
   }
 
-  if (path === undefined) return { resolved: undefined, warnings };
+  const name = extractDefinitionName(field.$ref);
+  if (!name) {
+    warnings.push(`Unsupported display definition reference '${field.$ref}'`);
+    return { merged: field, warnings };
+  }
+
+  const def = definitions[name];
+  if (!def) {
+    warnings.push(`Unknown display definition reference '${field.$ref}'`);
+    return { merged: field, warnings };
+  }
 
   return {
-    resolved: { path, label: label ?? path, format, params },
+    merged: {
+      path: field.path ?? def.path,
+      value: field.value ?? def.value,
+      label: field.label ?? def.label,
+      format: field.format ?? def.format,
+      params: mergeParams(def.params ?? {}, field.params ?? {}),
+      visible: field.visible ?? def.visible,
+      separator: field.separator ?? def.separator,
+      encryption: field.encryption ?? def.encryption,
+    },
     warnings,
   };
+}
+
+/**
+ * Resolve a field's value using its `value` (literal) or `path` property.
+ */
+export function resolveFieldValue(
+  field: DescriptorFieldFormat,
+  resolvePath: ResolvePath,
+): ArgumentValue | undefined {
+  if (field.value !== undefined) return toArgumentValue(field.value);
+  if (field.path !== undefined) return resolvePath(field.path);
+  return undefined;
 }
 
 function extractDefinitionName(reference: string): string | undefined {
@@ -595,48 +281,6 @@ export function resolveTypedDataPath(
   }
 }
 
-/**
- * Determine token lookup key from field parameters.
- */
-export function determineTokenKey(
-  field: ResolvedField,
-  decoded: DecodedArguments,
-  chainId: number,
-  contractAddress: string,
-): string {
-  const tokenParam = field.params.token;
-  if (typeof tokenParam === "string") {
-    return normalizeCaip19(tokenParam);
-  }
-
-  const tokenPath = field.params.tokenPath;
-  if (typeof tokenPath === "string") {
-    let address: string;
-
-    if (tokenPath === "@.to") {
-      address = normalizeAddress(contractAddress);
-    } else {
-      const tokenValue = decoded.get(tokenPath);
-      if (!tokenValue) {
-        throw new Error(
-          `token path '${tokenPath}' not found for field '${field.path}'`,
-        );
-      }
-
-      if (tokenValue.type !== "address") {
-        throw new Error(
-          `token path '${tokenPath}' is not an address for field '${field.path}'`,
-        );
-      }
-
-      address = normalizeAddress(bytesToHex(tokenValue.bytes));
-    }
-
-    return tokenKeyFromErc20(chainId, address);
-  }
-
-  throw new Error(`display field '${field.path}' missing token configuration`);
-}
 
 /**
  * Resolve a metadata value by dot-path pointer (e.g. "$.metadata.enums.OrderType").
@@ -669,7 +313,7 @@ export function resolveMetadataValue(
 export function interpolateTemplate(
   template: string,
   values: Map<string, string>,
-): { value?: string; error?: string } {
+): string {
   let output = "";
   let i = 0;
 
@@ -689,15 +333,15 @@ export function interpolateTemplate(
         i++;
       }
       if (!closed) {
-        return { error: "Unclosed placeholder in interpolated intent" };
+        throw new Error("Unclosed placeholder in interpolated intent");
       }
       const key = placeholder.trim();
       if (key.length === 0) {
-        return { error: "Empty placeholder in interpolated intent" };
+        throw new Error("Empty placeholder in interpolated intent");
       }
       const value = values.get(key);
       if (value === undefined) {
-        return { error: `Missing interpolated value for '${key}'` };
+        throw new Error(`Missing interpolated value for '${key}'`);
       }
       output += value;
     } else {
@@ -706,5 +350,5 @@ export function interpolateTemplate(
     }
   }
 
-  return { value: output };
+  return output;
 }

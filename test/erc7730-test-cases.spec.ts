@@ -225,7 +225,8 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
     expect(amountField.rawAddress).toBeUndefined();
-    expect(amountField.warning).toBeUndefined();
+    assert(amountField.warning);
+    expect(amountField.warning.code).toBe("UNKNOWN_TOKEN");
 
     expect(result.intent).toBe("Send");
     expect(result.interpolatedIntent).toBe(

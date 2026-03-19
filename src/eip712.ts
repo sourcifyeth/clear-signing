@@ -4,11 +4,7 @@
 
 import type {
   Descriptor,
-  DescriptorFieldFormat,
-  DescriptorFieldGroup,
   DescriptorFormatSpec,
-  DescriptorMetadata,
-  DisplayField,
   DisplayModel,
   FieldType,
   ExternalDataProvider,
@@ -17,33 +13,16 @@ import type {
   Warning,
 } from "./types";
 import {
-  type ResolvedField,
-  resolveField,
+  type ResolvePath,
+  toArgumentValue,
+  rawToArgumentValue,
   interpolateTemplate,
   isEip712DescriptorBoundTo,
   resolveMetadataValue,
   resolveTypedDataPath,
-  type ArgumentValue,
 } from "./descriptor";
-import {
-  bytesToHex,
-  hexToBytes,
-  parseBigInt,
-  toChecksumAddress,
-  warn,
-} from "./utils";
-import {
-  formatAddressName,
-  formatTimestamp,
-  renderTokenAmount,
-  resolveEnumLabel,
-} from "./formatters";
-
-function isFieldGroup(
-  field: DescriptorFieldFormat | DescriptorFieldGroup,
-): field is DescriptorFieldGroup {
-  return Array.isArray((field as DescriptorFieldGroup).fields);
-}
+import { warn } from "./utils";
+import { applyFieldFormats } from "./formatters";
 
 /**
  * Format EIP-712 typed data for clear signing display.
@@ -57,170 +36,82 @@ export async function formatEip712(
   descriptor: Descriptor,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<DisplayModel> {
-  const warnings: Warning[] = [];
   const { chainId, verifyingContract } = typedData.domain;
 
   if (chainId !== undefined && verifyingContract !== undefined) {
     if (!isEip712DescriptorBoundTo(descriptor, chainId, verifyingContract)) {
-      warnings.push(
-        warn(
-          "DEPLOYMENT_MISMATCH",
-          `Descriptor is not bound to chain ${chainId} and address ${verifyingContract}`,
-        ),
-      );
-      return { warnings };
+      return {
+        warnings: [
+          warn(
+            "DEPLOYMENT_MISMATCH",
+            `Descriptor is not bound to chain ${chainId} and address ${verifyingContract}`,
+          ),
+        ],
+      };
     }
   }
 
   const format = findFormatSpec(descriptor, typedData);
   if (!format) {
-    warnings.push(
-      warn(
-        "NO_FORMAT_MATCH",
-        `No display format found for primary type '${typedData.primaryType}'`,
-      ),
-    );
-    return { warnings };
+    return {
+      warnings: [
+        warn(
+          "NO_FORMAT_MATCH",
+          `No display format found for primary type '${typedData.primaryType}'`,
+        ),
+      ],
+    };
   }
 
-  const render = await applyDisplayFormat(
-    typedData,
-    descriptor,
+  const resolvePath: ResolvePath = (path: string) => {
+    if (path.startsWith("@.")) return resolveTypedDataPath(path, typedData);
+    if (path.startsWith("$."))
+      return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
+    const key = path.startsWith("#.") ? path.slice(2) : path;
+    const raw = getMessageValue(typedData.message, key);
+    if (raw === undefined) return undefined;
+    const ft = resolveFieldType(key, typedData.primaryType, typedData.types);
+    if (!ft) return undefined;
+    return rawToArgumentValue(raw, ft);
+  };
+
+  const definitions = descriptor.display?.definitions ?? {};
+  const result = await applyFieldFormats(
     format,
+    definitions,
+    resolvePath,
+    chainId,
+    descriptor.metadata,
     externalDataProvider,
   );
-  warnings.push(...render.warnings);
+
+  if ("warnings" in result) {
+    return { warnings: result.warnings };
+  }
+
+  const warnings: Warning[] = [];
+  let interpolatedIntent: string | undefined;
+  if (format.interpolatedIntent) {
+    try {
+      interpolatedIntent = interpolateTemplate(
+        format.interpolatedIntent,
+        result.renderedValues,
+      );
+    } catch (e) {
+      warnings.push(warn("INTERPOLATION_ERROR", (e as Error).message));
+    }
+  }
 
   const meta = descriptor.metadata;
   return {
     intent: format.intent,
-    interpolatedIntent: render.interpolatedIntent,
-    fields: render.fields.length > 0 ? render.fields : undefined,
+    interpolatedIntent,
+    fields: result.fields.length > 0 ? result.fields : undefined,
     metadata: meta
       ? { owner: meta.owner, contractName: meta.contractName, info: meta.info }
       : undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
   };
-}
-
-async function applyDisplayFormat(
-  typedData: TypedData,
-  descriptor: Descriptor,
-  format: DescriptorFormatSpec,
-  externalDataProvider?: ExternalDataProvider,
-): Promise<{
-  fields: DisplayField[];
-  warnings: Warning[];
-  interpolatedIntent?: string;
-}> {
-  const { chainId } = typedData.domain;
-  const definitions = descriptor.display?.definitions ?? {};
-  const fields: DisplayField[] = [];
-  const warnings: Warning[] = [];
-  const renderedValues = new Map<string, string>();
-
-  for (const fieldSpec of format.fields ?? []) {
-    if (isFieldGroup(fieldSpec)) {
-      warnings.push(
-        warn("UNSUPPORTED_FIELD_GROUP", "Field groups are not yet supported"),
-      );
-      continue;
-    }
-
-    // Resolve $ref to a concrete field definition
-    const { resolved, warnings: fieldWarnings } = resolveField(
-      fieldSpec,
-      definitions,
-    );
-    warnings.push(...fieldWarnings.map((msg) => warn("FIELD_RESOLUTION", msg)));
-    if (!resolved) continue;
-
-    // @. → container field; $. → descriptor file value; #. → structured data root; bare → relative
-    let rawValue: unknown;
-    if (resolved.path.startsWith("@.")) {
-      const av = resolveTypedDataPath(resolved.path, typedData);
-      rawValue = av !== undefined ? argumentValueToRaw(av) : undefined;
-    } else if (resolved.path.startsWith("$.")) {
-      rawValue = resolveMetadataValue(descriptor.metadata, resolved.path);
-    } else {
-      const key = resolved.path.startsWith("#.")
-        ? resolved.path.slice(2)
-        : resolved.path;
-      rawValue = getMessageValue(typedData.message, key);
-    }
-
-    if (rawValue === undefined) {
-      warnings.push(
-        warn(
-          "MISSING_FIELD_VALUE",
-          `No value found for field path '${resolved.path}'`,
-        ),
-      );
-      continue;
-    }
-
-    const { rendered, warning: fieldWarning } = await renderField(
-      resolved,
-      rawValue,
-      typedData.message,
-      descriptor.metadata,
-      chainId ?? 1,
-      externalDataProvider,
-    );
-
-    const bareKey = resolved.path.startsWith("#.")
-      ? resolved.path.slice(2)
-      : resolved.path;
-    const fieldType = resolveFieldType(
-      bareKey,
-      typedData.primaryType,
-      typedData.types,
-    );
-    if (!fieldType) {
-      warnings.push(
-        warn(
-          "UNRESOLVABLE_FIELD_TYPE",
-          `Cannot determine ERC-7730 field type for path '${resolved.path}'`,
-        ),
-      );
-      continue;
-    }
-
-    const displayField: DisplayField = {
-      label: resolved.label,
-      value: rendered,
-      fieldType,
-      format: resolved.format ?? "raw",
-      warning: fieldWarning,
-    };
-
-    const address = extractAddressValue(rawValue);
-    if (address) {
-      try {
-        displayField.rawAddress = toChecksumAddress(hexToBytes(address));
-      } catch {
-        // ignore malformed addresses
-      }
-    }
-
-    fields.push(displayField);
-    renderedValues.set(resolved.path, rendered);
-  }
-
-  let interpolatedIntent: string | undefined;
-  if (format.interpolatedIntent) {
-    const result = interpolateTemplate(
-      format.interpolatedIntent,
-      renderedValues,
-    );
-    if (result.error) {
-      warnings.push(warn("INTERPOLATION_ERROR", result.error));
-    } else {
-      interpolatedIntent = result.value;
-    }
-  }
-
-  return { fields, warnings, interpolatedIntent };
 }
 
 /**
@@ -301,24 +192,6 @@ function getMessageValue(
 }
 
 /**
- * Convert an ArgumentValue (from @. container path resolution) to a raw JS
- * value compatible with the EIP-712 renderers.
- */
-function argumentValueToRaw(av: ArgumentValue): unknown {
-  switch (av.type) {
-    case "address":
-      return toChecksumAddress(av.bytes);
-    case "uint":
-    case "int":
-      return av.value.toString();
-    case "bool":
-      return av.value.toString();
-    case "raw":
-      return bytesToHex(av.bytes);
-  }
-}
-
-/**
  * Walk the EIP-712 type tree to resolve the leaf Solidity type at a dot-path.
  * Returns undefined for struct/array reference types and unresolvable paths.
  */
@@ -353,131 +226,5 @@ function toFieldType(type: string): FieldType | undefined {
   if (type === "bytes" || /^bytes\d+$/.test(type)) return "bytes";
   if (/^uint\d*$/.test(type)) return "uint";
   if (/^int\d*$/.test(type)) return "int";
-  return undefined;
-}
-
-async function renderField(
-  field: ResolvedField,
-  value: unknown,
-  message: Record<string, unknown>,
-  metadata: DescriptorMetadata | undefined,
-  chainId: number,
-  externalDataProvider?: ExternalDataProvider,
-): Promise<{ rendered: string; warning?: Warning }> {
-  switch (field.format) {
-    case "tokenAmount":
-      return await formatTokenAmount(
-        field,
-        value,
-        message,
-        metadata,
-        chainId,
-        externalDataProvider,
-      );
-    case "date":
-      return { rendered: formatDate(value) };
-    case "addressName": {
-      const address = extractAddressValue(value);
-      if (!address) return { rendered: formatRaw(value) };
-      try {
-        const checksum = toChecksumAddress(hexToBytes(address));
-        return await formatAddressName(checksum, field, externalDataProvider);
-      } catch {
-        return { rendered: formatRaw(value) };
-      }
-    }
-    case "enum":
-      return { rendered: formatEnum(field, value, metadata) };
-    default:
-      return { rendered: formatRaw(value) };
-  }
-}
-
-async function formatTokenAmount(
-  field: ResolvedField,
-  value: unknown,
-  message: Record<string, unknown>,
-  metadata: DescriptorMetadata | undefined,
-  chainId: number,
-  externalDataProvider?: ExternalDataProvider,
-): Promise<{ rendered: string; warning?: Warning }> {
-  const amount = parseBigIntFromValue(value);
-  if (amount === undefined) return { rendered: formatRaw(value) };
-
-  const tokenPath = field.params.tokenPath;
-  if (typeof tokenPath !== "string") return { rendered: formatRaw(value) };
-
-  const tokenValue = getMessageValue(message, tokenPath);
-  const tokenAddress = extractAddressValue(tokenValue);
-  if (!tokenAddress) {
-    return {
-      rendered: formatRaw(value),
-      warning: warn(
-        "UNKNOWN_TOKEN",
-        `Token path '${tokenPath}' did not resolve to an address`,
-      ),
-    };
-  }
-
-  const token =
-    (await externalDataProvider?.resolveToken?.(chainId, tokenAddress)) ?? null;
-  if (!token) {
-    return {
-      rendered: formatRaw(value),
-      warning: warn(
-        "UNKNOWN_TOKEN",
-        `Token metadata could not be resolved for ${tokenAddress}`,
-      ),
-    };
-  }
-
-  return { rendered: renderTokenAmount(amount, token, field, metadata) };
-}
-
-function formatDate(value: unknown): string {
-  const ts = parseBigIntFromValue(value);
-  if (ts === undefined) return formatRaw(value);
-  try {
-    return formatTimestamp(ts);
-  } catch {
-    return formatRaw(value);
-  }
-}
-
-function formatEnum(
-  field: ResolvedField,
-  value: unknown,
-  metadata: DescriptorMetadata | undefined,
-): string {
-  const key = valueAsString(value);
-  if (key === undefined) return formatRaw(value);
-  return resolveEnumLabel(field, key, metadata) ?? formatRaw(value);
-}
-
-function formatRaw(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toString();
-  if (typeof value === "boolean") return value.toString();
-  return JSON.stringify(value);
-}
-
-function parseBigIntFromValue(value: unknown): bigint | undefined {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number") return BigInt(value);
-  if (typeof value === "string") return parseBigInt(value);
-  return undefined;
-}
-
-function extractAddressValue(value: unknown): string | undefined {
-  const text = valueAsString(value);
-  if (!text) return undefined;
-  if (text.startsWith("0x") && text.length === 42) return text.toLowerCase();
-  return undefined;
-}
-
-function valueAsString(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value.toString();
-  if (typeof value === "boolean") return value.toString();
   return undefined;
 }

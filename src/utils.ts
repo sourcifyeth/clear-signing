@@ -12,7 +12,7 @@ export function warn(code: WarningCode, message: string): Warning {
 
 
 /** Compute keccak256 hash of input data. */
-export function keccak256(data: Uint8Array): Uint8Array {
+function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 
@@ -132,23 +132,20 @@ export function parseBigInt(text: string): bigint | undefined {
   }
 }
 
+/** Coerce an unknown value to bigint if possible. */
+export function coerceBigInt(value: unknown): bigint | undefined {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return BigInt(value);
+  if (typeof value === "string") return parseBigInt(value);
+  return undefined;
+}
+
 /** Compute function selector from signature. */
 export function selectorForSignature(signature: string): Uint8Array {
   const hash = keccak256(asciiToBytes(signature));
   return hash.slice(0, 4);
 }
 
-
-/** Normalize CAIP-19 identifier to lowercase. */
-export function normalizeCaip19(input: string): string {
-  return input.trim().toLowerCase();
-}
-
-/** Create token lookup key for ERC20 token. */
-export function tokenKeyFromErc20(chainId: number, address: string): string {
-  const normalized = normalizeAddress(address);
-  return `eip155:${chainId}/erc20:${normalized}`;
-}
 
 /** Format selector bytes as hex string. */
 export function formatSelectorHex(selector: Uint8Array): string {
