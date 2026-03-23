@@ -71,6 +71,8 @@ export async function applyFieldFormats(
       };
     }
 
+    if (merged.visible === "never") continue;
+
     const argValue = resolveFieldValue(merged, resolvePath);
     if (!argValue) {
       return {

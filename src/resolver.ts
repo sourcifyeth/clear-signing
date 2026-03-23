@@ -250,7 +250,7 @@ function mergeFields(
   for (const field of including) {
     const existingIndex = result.findIndex((f) => f.path === field.path);
     if (existingIndex >= 0) {
-      result[existingIndex] = { ...result[existingIndex], ...field };
+      result[existingIndex] = deepMerge(field, result[existingIndex]);
     } else {
       result.push(field);
     }

@@ -5,41 +5,13 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { format } from "../../src/index";
-import type {
-  DisplayModel,
-  ExternalDataProvider,
-  FormatOptions,
-  RegistryIndex,
-} from "../../src/types";
+import type { DisplayModel, ExternalDataProvider } from "../../src/types";
 import {
   addThousandSeparators,
   hexToBytes,
   toChecksumAddress,
 } from "../../src/utils";
-
-const DESCRIPTORS_DIR = __dirname;
-
-function buildOpts(
-  descriptorFile: string,
-  chainId: number,
-  address: string,
-  externalDataProvider?: ExternalDataProvider,
-): FormatOptions {
-  const index: RegistryIndex = {
-    calldataIndex: {
-      [`eip155:${chainId}:${address.toLowerCase()}`]: descriptorFile,
-    },
-    typedDataIndex: {},
-  };
-  return {
-    descriptorResolverOptions: {
-      type: "embedded",
-      index,
-      descriptorDirectory: DESCRIPTORS_DIR,
-    },
-    externalDataProvider,
-  };
-}
+import { buildEmbeddedResolverOpts } from "../utils";
 
 describe("example-main.json — transfer(address to, uint256 value)", () => {
   // USDT on mainnet (matches example-main.json deployment)
@@ -82,11 +54,24 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     return null;
   };
 
+  function buildOpts(externalDataProvider?: ExternalDataProvider) {
+    return buildEmbeddedResolverOpts(
+      __dirname,
+      {
+        calldataDescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: USDT_ADDRESS,
+            file: "example-main.json",
+          },
+        ],
+      },
+      externalDataProvider,
+    );
+  }
+
   it("formats a transfer call with all DisplayModel properties", async () => {
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS, {
-      resolveToken,
-      resolveLocalName,
-    });
+    const opts = buildOpts({ resolveToken, resolveLocalName });
 
     const result: DisplayModel = await format(
       {
@@ -140,8 +125,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
   it("returns NO_DESCRIPTOR when index has no entry for the address", async () => {
     const unknownAddress = "0x0000000000000000000000000000000000000001";
-    // Index points USDT, but tx.to is a different address not in the index
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS);
+    const opts = buildOpts();
 
     const result = await format(
       {
@@ -170,7 +154,15 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   it("returns DEPLOYMENT_MISMATCH when descriptor does not bind to chain+address", async () => {
     // Index resolves the descriptor for chain 999 + USDT address,
     // but the descriptor itself only binds to chains 1, 137, 42161
-    const opts = buildOpts("example-main.json", 999, USDT_ADDRESS);
+    const opts = buildEmbeddedResolverOpts(__dirname, {
+      calldataDescriptorFiles: [
+        {
+          chainId: 999,
+          address: USDT_ADDRESS,
+          file: "example-main.json",
+        },
+      ],
+    });
 
     const result = await format(
       {
@@ -199,9 +191,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   });
 
   it("returns UNKNOWN_TOKEN warning without externalDataProvider", async () => {
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS, {
-      resolveLocalName,
-    });
+    const opts = buildOpts({ resolveLocalName });
 
     const result = await format(
       {
@@ -238,10 +228,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   });
 
   it("resolves address via ENS when resolveEnsName is provided", async () => {
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS, {
-      resolveToken,
-      resolveEnsName,
-    });
+    const opts = buildOpts({ resolveToken, resolveEnsName });
 
     const result = await format(
       {
@@ -268,11 +255,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   });
 
   it("prefers local name over ENS when both resolve", async () => {
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS, {
-      resolveToken,
-      resolveLocalName,
-      resolveEnsName,
-    });
+    const opts = buildOpts({ resolveToken, resolveLocalName, resolveEnsName });
 
     const result = await format(
       {
@@ -294,7 +277,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   });
 
   it("returns UNKNOWN_ADDRESS warning when address cannot be resolved", async () => {
-    const opts = buildOpts("example-main.json", CHAIN_ID, USDT_ADDRESS, {
+    const opts = buildOpts({
       resolveToken,
       resolveLocalName: async () => null,
       resolveEnsName: async () => null,

@@ -42,22 +42,45 @@ export function isCalldataDescriptorBoundTo(
 }
 
 /**
- * Check if an EIP-712 descriptor is bound to a specific chain and verifying contract.
+ * Check if an EIP-712 descriptor is bound to the given typed data.
+ *
+ * Verifies both `context.eip712.deployments` (chain + address) and
+ * `context.eip712.domain` (key-value constraints) against the message domain.
  */
 export function isEip712DescriptorBoundTo(
   descriptor: Descriptor,
-  chainId: number,
-  address: string,
+  typedData: TypedData,
 ): boolean {
-  const normalized = normalizeAddress(address);
-  return (
-    descriptor.context?.eip712?.deployments?.some(
+  const { chainId, verifyingContract } = typedData.domain;
+  const eip712 = descriptor.context?.eip712;
+
+  // Check deployments
+  if (
+    chainId !== undefined &&
+    verifyingContract !== undefined &&
+    eip712?.deployments
+  ) {
+    const normalized = normalizeAddress(verifyingContract);
+    const match = eip712.deployments.some(
       (d) =>
         d.chainId === chainId &&
         typeof d.address === "string" &&
         normalizeAddress(d.address) === normalized,
-    ) ?? false
-  );
+    );
+    if (!match) return false;
+  }
+
+  // Check domain constraints
+  const domainConstraint = eip712?.domain;
+  if (domainConstraint) {
+    const messageDomain = typedData.domain as Record<string, unknown>;
+    for (const [key, expected] of Object.entries(domainConstraint)) {
+      const actual = messageDomain[key];
+      if (String(actual) !== String(expected)) return false;
+    }
+  }
+
+  return true;
 }
 
 /** Argument value union type. */

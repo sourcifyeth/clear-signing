@@ -36,19 +36,15 @@ export async function formatEip712(
   descriptor: Descriptor,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<DisplayModel> {
-  const { chainId, verifyingContract } = typedData.domain;
-
-  if (chainId !== undefined && verifyingContract !== undefined) {
-    if (!isEip712DescriptorBoundTo(descriptor, chainId, verifyingContract)) {
-      return {
-        warnings: [
-          warn(
-            "DEPLOYMENT_MISMATCH",
-            `Descriptor is not bound to chain ${chainId} and address ${verifyingContract}`,
-          ),
-        ],
-      };
-    }
+  if (!isEip712DescriptorBoundTo(descriptor, typedData)) {
+    return {
+      warnings: [
+        warn(
+          "DOMAIN_MISMATCH",
+          `Descriptor context does not match the typed data domain`,
+        ),
+      ],
+    };
   }
 
   const format = findFormatSpec(descriptor, typedData);
@@ -80,7 +76,7 @@ export async function formatEip712(
     format,
     definitions,
     resolvePath,
-    chainId,
+    typedData.domain.chainId,
     descriptor.metadata,
     externalDataProvider,
   );

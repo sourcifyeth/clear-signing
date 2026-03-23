@@ -62,7 +62,8 @@ export type WarningCode =
   | "UNKNOWN_ADDRESS"
   | "ADDRESS_TYPE_MISMATCH"
   | "CONTAINER_MISSING_CHAIN_ID"
-  | "ARGUMENT_TYPE_MISMATCH";
+  | "ARGUMENT_TYPE_MISMATCH"
+  | "DOMAIN_MISMATCH";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
