@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format } from "../../src/index";
+import { format, isFieldGroup } from "../../src/index";
 import type { DisplayModel, ExternalDataProvider } from "../../src/types";
 import {
   addThousandSeparators,
@@ -88,6 +88,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(result.fields).toHaveLength(2);
 
     const toField = result.fields[0];
+    assert(!isFieldGroup(toField));
     expect(toField.label).toBe("To");
     expect(toField.value).toBe(RECIPIENT_LOCAL_NAME);
     expect(toField.fieldType).toBe("address");
@@ -97,6 +98,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(toField.warning).toBeUndefined();
 
     const amountField = result.fields[1];
+    assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount");
     expect(amountField.value).toBe("1 USDT");
     expect(amountField.fieldType).toBe("uint");
@@ -204,6 +206,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
     assert(result.fields);
     const amountField = result.fields[1];
+    assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount");
     expect(amountField.value).toBe(
       addThousandSeparators(TRANSFER_AMOUNT.toString()),
@@ -241,6 +244,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
     assert(result.fields);
     const toField = result.fields[0];
+    assert(!isFieldGroup(toField));
     expect(toField.label).toBe("To");
     expect(toField.value).toBe(RECIPIENT_ENS_NAME);
     expect(toField.fieldType).toBe("address");
@@ -268,6 +272,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
     assert(result.fields);
     const toField = result.fields[0];
+    assert(!isFieldGroup(toField));
     expect(toField.value).toBe(RECIPIENT_LOCAL_NAME);
     expect(toField.warning).toBeUndefined();
 
@@ -294,6 +299,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
     assert(result.fields);
     const toField = result.fields[0];
+    assert(!isFieldGroup(toField));
     expect(toField.label).toBe("To");
     expect(toField.value).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(toField.fieldType).toBe("address");

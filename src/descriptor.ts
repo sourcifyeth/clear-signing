@@ -178,7 +178,7 @@ export type ResolvePath = (path: string) => ArgumentValue | undefined;
 export function isFieldGroup(
   field: DescriptorFieldFormat | DescriptorFieldGroup,
 ): field is DescriptorFieldGroup {
-  return "iteration" in field;
+  return "fields" in field;
 }
 
 /**

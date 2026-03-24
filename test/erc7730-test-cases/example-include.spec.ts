@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format } from "../../src/index";
+import { format, isFieldGroup } from "../../src/index";
 import type { ExternalDataProvider } from "../../src/types";
 import { toChecksumAddress, hexToBytes } from "../../src/utils";
 import { buildEmbeddedResolverOpts } from "../utils";
@@ -87,6 +87,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
 
     // Spender field inherited from erc20 descriptor
     const spenderField = result.fields[0];
+    assert(!isFieldGroup(spenderField));
     expect(spenderField.label).toBe("Spender");
     expect(spenderField.value).toBe(SPENDER_LOCAL_NAME);
     expect(spenderField.fieldType).toBe("address");
@@ -99,6 +100,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
 
     // Amount field — merged: inherited tokenPath from erc20 + threshold from include
     const amountField = result.fields[1];
+    assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount");
     expect(amountField.value).toBe("10 EXA");
     expect(amountField.fieldType).toBe("uint");
@@ -141,6 +143,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
 
     assert(result.fields);
     const amountField = result.fields[1];
+    assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount");
     expect(amountField.value).toBe("Unlimited EXA");
     expect(amountField.fieldType).toBe("uint");

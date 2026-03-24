@@ -54,7 +54,7 @@ export type WarningCode =
   | "NO_DESCRIPTOR"
   | "DEPLOYMENT_MISMATCH"
   | "NO_FORMAT_MATCH"
-  | "UNSUPPORTED_FIELD_GROUP"
+  | "UNSUPPORTED_NESTED_FIELD_GROUP"
   | "DEFINITIONS_RESOLUTION_ERROR"
   | "INVALID_DESCRIPTOR"
   | "INTERPOLATION_ERROR"
@@ -63,7 +63,9 @@ export type WarningCode =
   | "ADDRESS_TYPE_MISMATCH"
   | "CONTAINER_MISSING_CHAIN_ID"
   | "ARGUMENT_TYPE_MISMATCH"
-  | "DOMAIN_MISMATCH";
+  | "DOMAIN_MISMATCH"
+  | "EMPTY_ARRAY"
+  | "BUNDLED_ARRAY_SIZE_MISMATCH";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
@@ -129,6 +131,17 @@ export interface DisplayField {
 }
 
 /**
+ * A named group of display fields, optionally carrying a warning.
+ * A group with an `EMPTY_ARRAY` warning indicates that the corresponding
+ * array in the transaction data was empty.
+ */
+export interface DisplayFieldGroup {
+  label?: string;
+  fields: DisplayField[];
+  warning?: Warning;
+}
+
+/**
  * The complete display model produced by the library.
  *
  * According to ERC-7730, wallets have two display options:
@@ -154,7 +167,7 @@ export interface DisplayModel {
    * Ordered list of fields to show to the user,
    * formatted according to their field format specification.
    */
-  fields?: DisplayField[];
+  fields?: (DisplayField | DisplayFieldGroup)[];
 
   /**
    * Full sentence with formatted field values interpolated in, e.g.

@@ -9,7 +9,6 @@ import {
   formatRaw,
   renderRaw,
   formatNativeAmount,
-  nativeSymbol,
   formatTokenAmount,
   renderTokenAmount,
   tokenAmountMessage,
@@ -18,6 +17,7 @@ import {
   formatTimestamp,
   formatEnum,
   resolveEnumLabel,
+  formatUnit,
   formatAddressNameField,
   formatAddressName,
   typeMismatch,
@@ -107,64 +107,26 @@ describe("formatRaw", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatNativeAmount", () => {
-  it("formats 1 ETH on mainnet", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n), 1);
+  it("formats 1 ETH", () => {
+    const result = formatNativeAmount(uint(1000000000000000000n));
     expect(result.rendered).toBe("1 ETH");
     expect(result.warning).toBeUndefined();
   });
 
   it("formats fractional ETH", () => {
-    const result = formatNativeAmount(uint(1500000000000000000n), 1);
+    const result = formatNativeAmount(uint(1500000000000000000n));
     expect(result.rendered).toBe("1.5 ETH");
   });
 
-  it("uses ETH for Optimism", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n), 10);
-    expect(result.rendered).toBe("1 ETH");
-  });
-
-  it("uses ETH for Arbitrum", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n), 42161);
-    expect(result.rendered).toBe("1 ETH");
-  });
-
-  it("uses ETH for Base", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n), 8453);
-    expect(result.rendered).toBe("1 ETH");
-  });
-
-  it("uses NATIVE for unknown chains", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n), 999);
-    expect(result.rendered).toBe("1 NATIVE");
-  });
-
-  it("returns warning when chainId is undefined", () => {
-    const result = formatNativeAmount(uint(100n), undefined);
-    expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
-  });
-
   it("accepts int values", () => {
-    const result = formatNativeAmount(int(1000000000000000000n), 1);
+    const result = formatNativeAmount(int(1000000000000000000n));
     expect(result.rendered).toBe("1 ETH");
   });
 
   it("returns type mismatch for non-uint/int", () => {
-    const result = formatNativeAmount(str("not a number"), 1);
+    const result = formatNativeAmount(str("not a number"));
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
-});
-
-// ---------------------------------------------------------------------------
-// amount format: nativeSymbol
-// ---------------------------------------------------------------------------
-
-describe("nativeSymbol", () => {
-  it("returns ETH for mainnet", () => expect(nativeSymbol(1)).toBe("ETH"));
-  it("returns ETH for Optimism", () => expect(nativeSymbol(10)).toBe("ETH"));
-  it("returns ETH for Arbitrum", () => expect(nativeSymbol(42161)).toBe("ETH"));
-  it("returns ETH for Base", () => expect(nativeSymbol(8453)).toBe("ETH"));
-  it("returns NATIVE for unknown", () =>
-    expect(nativeSymbol(137)).toBe("NATIVE"));
 });
 
 // ---------------------------------------------------------------------------
@@ -561,6 +523,62 @@ describe("formatEnum", () => {
     const field = { params: { $ref: "$.metadata.enums.status" } };
     const result = formatEnum(field, str("hello"), metadata);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unit format: formatUnit
+// ---------------------------------------------------------------------------
+
+describe("formatUnit", () => {
+  it("formats integer with base unit (no decimals)", () => {
+    const result = formatUnit(uint(10n), { params: { base: "h" } });
+    expect(result.rendered).toBe("10h");
+  });
+
+  it("formats with decimals", () => {
+    const result = formatUnit(uint(15n), {
+      params: { base: "d", decimals: 1 },
+    });
+    expect(result.rendered).toBe("1.5d");
+  });
+
+  it("formats percentage with decimals", () => {
+    const result = formatUnit(uint(5000n), {
+      params: { base: "%", decimals: 2 },
+    });
+    expect(result.rendered).toBe("50%");
+  });
+
+  it("formats with SI prefix", () => {
+    const result = formatUnit(uint(36000n), {
+      params: { base: "s", prefix: true },
+    });
+    expect(result.rendered).toBe("36ks");
+  });
+
+  it("formats with SI prefix and decimals", () => {
+    const result = formatUnit(uint(1500000n), {
+      params: { base: "W", decimals: 3, prefix: true },
+    });
+    expect(result.rendered).toBe("1.5kW");
+  });
+
+  it("falls back to no prefix when value is too small", () => {
+    const result = formatUnit(uint(500n), {
+      params: { base: "s", prefix: true },
+    });
+    expect(result.rendered).toBe("500s");
+  });
+
+  it("returns type mismatch for non-numeric values", () => {
+    const result = formatUnit(str("hello"), { params: { base: "m" } });
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("defaults decimals to 0 and base to empty", () => {
+    const result = formatUnit(uint(42n), {});
+    expect(result.rendered).toBe("42");
   });
 });
 

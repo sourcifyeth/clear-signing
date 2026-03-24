@@ -31,6 +31,7 @@ import type {
 export type * from "./types";
 
 export { createGitHubRegistryIndex } from "./github-registry-index";
+export { isFieldGroup } from "./utils";
 
 /**
  * Resolves the descriptor for a transaction and returns a DisplayModel

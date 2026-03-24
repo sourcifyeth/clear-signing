@@ -71,11 +71,17 @@ export async function formatEip712(
     return rawToArgumentValue(raw, ft);
   };
 
+  const getArrayLength = (path: string): number => {
+    const raw = getMessageValue(typedData.message, path);
+    return Array.isArray(raw) ? raw.length : 0;
+  };
+
   const definitions = descriptor.display?.definitions ?? {};
   const result = await applyFieldFormats(
     format,
     definitions,
     resolvePath,
+    getArrayLength,
     typedData.domain.chainId,
     descriptor.metadata,
     externalDataProvider,
@@ -174,6 +180,7 @@ function collectReferencedTypes(
 
 /**
  * Navigate a dot-path in an EIP-712 message object.
+ * Supports array index segments: `details.[0].amount` indexes into arrays.
  */
 function getMessageValue(
   message: Record<string, unknown>,
@@ -182,13 +189,20 @@ function getMessageValue(
   let current: unknown = message;
   for (const segment of path.split(".")) {
     if (current === null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[segment];
+    const indexMatch = segment.match(/^\[(\d+)\]$/);
+    if (indexMatch) {
+      if (!Array.isArray(current)) return undefined;
+      current = current[parseInt(indexMatch[1], 10)];
+    } else {
+      current = (current as Record<string, unknown>)[segment];
+    }
   }
   return current;
 }
 
 /**
  * Walk the EIP-712 type tree to resolve the leaf Solidity type at a dot-path.
+ * Supports array index segments (e.g. `[0]`) which are skipped during type resolution.
  * Returns undefined for struct/array reference types and unresolvable paths.
  */
 function resolveFieldType(
@@ -199,6 +213,9 @@ function resolveFieldType(
   const segments = path.split(".");
   let currentType = primaryType;
   for (let i = 0; i < segments.length; i++) {
+    // Skip array index segments — type was already resolved via bracket stripping
+    if (/^\[\d+\]$/.test(segments[i])) continue;
+
     const members = types[currentType];
     if (!members) return undefined;
     const member = members.find((m) => m.name === segments[i]);

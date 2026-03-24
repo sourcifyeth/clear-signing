@@ -3,11 +3,18 @@
  */
 
 import { keccak_256 } from "@noble/hashes/sha3";
-import type { Warning, WarningCode } from "./types";
+import type { DisplayField, DisplayFieldGroup, Warning, WarningCode } from "./types";
 
 /** Create a Warning object. */
 export function warn(code: WarningCode, message: string): Warning {
   return { code, message };
+}
+
+/** Type guard: returns true if the display item is a DisplayFieldGroup (has nested fields). */
+export function isFieldGroup(
+  field: DisplayField | DisplayFieldGroup,
+): field is DisplayFieldGroup {
+  return "fields" in field;
 }
 
 

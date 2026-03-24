@@ -83,6 +83,7 @@ export async function formatCalldata(
     format,
     definitions,
     resolvePath,
+    (path: string) => decoded.getArrayLength(path),
     tx.chainId,
     descriptor.metadata,
     externalDataProvider,
@@ -358,6 +359,7 @@ interface DecodedArgument {
 class DecodedArguments {
   private ordered: DecodedArgument[] = [];
   private indexByName = new Map<string, number>();
+  private arrayLengths = new Map<string, number>();
 
   push(
     name: string | undefined,
@@ -371,6 +373,14 @@ class DecodedArguments {
     }
     this.indexByName.set(`arg${index}`, entryIndex);
     this.ordered.push({ index, name, value, word });
+  }
+
+  setArrayLength(name: string, length: number): void {
+    this.arrayLengths.set(name, length);
+  }
+
+  getArrayLength(name: string): number {
+    return this.arrayLengths.get(name) ?? 0;
   }
 
   get(key: string): ArgumentValue | undefined {
@@ -415,6 +425,10 @@ function decodeArguments(
     for (const arg of result.args) {
       decoded.push(arg.name, arg.index, arg.value, arg.word);
     }
+
+    if (result.arrayMeta) {
+      decoded.setArrayLength(result.arrayMeta.name, result.arrayMeta.length);
+    }
   }
 
   return decoded;
@@ -429,6 +443,7 @@ interface DecodeResult {
     value: ArgumentValue;
     word: Uint8Array;
   }>;
+  arrayMeta?: { name: string; length: number };
 }
 
 function decodeInput(
@@ -468,6 +483,36 @@ function decodeInput(
     return { cursor, globalIndex, args };
   }
 
+  // Dynamic array: head word is an offset pointer to tail section
+  if (isDynamicArrayType(input.type)) {
+    const offsetWord = calldata.slice(cursor, cursor + 32);
+    const offset = Number(bytesToBigInt(offsetWord));
+    const argsStart = 4; // after selector
+    const dataStart = argsStart + offset;
+
+    const lengthWord = calldata.slice(dataStart, dataStart + 32);
+    const length = Number(bytesToBigInt(lengthWord));
+
+    const elementType = input.type.replace(/\[\]$/, "");
+    const baseName = argumentName(prefix, input);
+
+    const args: DecodeResult["args"] = [];
+    for (let i = 0; i < length; i++) {
+      const elemStart = dataStart + 32 + i * 32;
+      const word = calldata.slice(elemStart, elemStart + 32);
+      const value = decodeWord(elementType, word);
+      const name = baseName ? `${baseName}.[${i}]` : undefined;
+      args.push({ name, index: globalIndex, value, word });
+    }
+
+    return {
+      cursor: cursor + 32,
+      globalIndex: globalIndex + 1,
+      args,
+      arrayMeta: baseName ? { name: baseName, length } : undefined,
+    };
+  }
+
   // Decode single word
   const start = cursor;
   const end = start + 32;
@@ -487,6 +532,11 @@ function decodeInput(
     globalIndex: globalIndex + 1,
     args: [{ name, index: globalIndex, value, word }],
   };
+}
+
+/** Check if a type is a dynamic array (e.g. address[], uint256[]). */
+function isDynamicArrayType(type: string): boolean {
+  return type.endsWith("[]") && !type.startsWith("tuple");
 }
 
 function argumentWordCount(input: FunctionInput): number {
