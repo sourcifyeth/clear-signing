@@ -30,6 +30,8 @@ import type {
 // Re-export types
 export type * from "./types";
 
+export { createGitHubRegistryIndex } from "./github-registry-index";
+
 /**
  * Resolves the descriptor for a transaction and returns a DisplayModel
  * with human-readable information.
