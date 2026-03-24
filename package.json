@@ -12,9 +12,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "tsconfig.json"
   ],
   "scripts": {
+    "prepare": "npm run build",
     "build": "tsc",
     "clean": "rm -rf dist",
     "test": "vitest run",
