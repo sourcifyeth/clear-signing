@@ -238,9 +238,9 @@ describe("example-array-iteration.json — distribute", () => {
     const result = await format(tx, opts);
 
     assert(result.warnings);
-    expect(result.warnings.some((w) => w.code === "BUNDLED_ARRAY_SIZE_MISMATCH")).toBe(
-      true,
-    );
+    expect(
+      result.warnings.some((w) => w.code === "BUNDLED_ARRAY_SIZE_MISMATCH"),
+    ).toBe(true);
 
     assert(result.rawCalldataFallback);
     expect(result.rawCalldataFallback.selector).toBe("0x2929abe6");

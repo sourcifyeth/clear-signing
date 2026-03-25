@@ -3,7 +3,12 @@
  */
 
 import { keccak_256 } from "@noble/hashes/sha3";
-import type { DisplayField, DisplayFieldGroup, Warning, WarningCode } from "./types";
+import type {
+  DisplayField,
+  DisplayFieldGroup,
+  Warning,
+  WarningCode,
+} from "./types";
 
 /** Create a Warning object. */
 export function warn(code: WarningCode, message: string): Warning {
@@ -16,7 +21,6 @@ export function isFieldGroup(
 ): field is DisplayFieldGroup {
   return "fields" in field;
 }
-
 
 /** Compute keccak256 hash of input data. */
 function keccak256(data: Uint8Array): Uint8Array {
@@ -153,12 +157,10 @@ export function selectorForSignature(signature: string): Uint8Array {
   return hash.slice(0, 4);
 }
 
-
 /** Format selector bytes as hex string. */
 export function formatSelectorHex(selector: Uint8Array): string {
   return bytesToHex(selector);
 }
-
 
 /** Extract 4-byte selector from calldata. */
 export function extractSelector(calldata: Uint8Array): Uint8Array {

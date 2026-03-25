@@ -57,7 +57,10 @@ describe("fetchRegistryFilePaths", () => {
       ]),
     );
 
-    const paths = await fetchRegistryFilePaths({ repo: DEFAULT_REPO, ref: DEFAULT_REF });
+    const paths = await fetchRegistryFilePaths({
+      repo: DEFAULT_REPO,
+      ref: DEFAULT_REF,
+    });
 
     expect(paths).toEqual([
       "registry/tether/calldata-usdt.json",
@@ -81,7 +84,10 @@ describe("fetchRegistryFilePaths", () => {
       ]),
     );
 
-    const paths = await fetchRegistryFilePaths({ repo: DEFAULT_REPO, ref: DEFAULT_REF });
+    const paths = await fetchRegistryFilePaths({
+      repo: DEFAULT_REPO,
+      ref: DEFAULT_REF,
+    });
     expect(paths).toEqual(["registry/tether/calldata-usdt.json"]);
   });
 
@@ -95,15 +101,16 @@ describe("fetchRegistryFilePaths", () => {
           customTreeUrl,
           {
             truncated: false,
-            tree: [
-              { path: "registry/foo/calldata-foo.json", type: "blob" },
-            ],
+            tree: [{ path: "registry/foo/calldata-foo.json", type: "blob" }],
           },
         ],
       ]),
     );
 
-    const paths = await fetchRegistryFilePaths({ repo: "my-org/my-registry", ref: "v2" });
+    const paths = await fetchRegistryFilePaths({
+      repo: "my-org/my-registry",
+      ref: "v2",
+    });
     expect(paths).toEqual(["registry/foo/calldata-foo.json"]);
   });
 
@@ -128,10 +135,13 @@ describe("fetchRegistryFile", () => {
 
     mockFetch(new Map([[url, body]]));
 
-    const result = await fetchRegistryFile("registry/tether/calldata-usdt.json", {
-      repo: DEFAULT_REPO,
-      ref: DEFAULT_REF,
-    });
+    const result = await fetchRegistryFile(
+      "registry/tether/calldata-usdt.json",
+      {
+        repo: DEFAULT_REPO,
+        ref: DEFAULT_REF,
+      },
+    );
     expect(result).toEqual(body);
   });
 
@@ -142,10 +152,13 @@ describe("fetchRegistryFile", () => {
 
     mockFetch(new Map([[url, body]]));
 
-    const result = await fetchRegistryFile("registry/tether/calldata-usdt.json", {
-      repo: "my-org/my-registry",
-      ref: "v2",
-    });
+    const result = await fetchRegistryFile(
+      "registry/tether/calldata-usdt.json",
+      {
+        repo: "my-org/my-registry",
+        ref: "v2",
+      },
+    );
     expect(result).toEqual(body);
   });
 

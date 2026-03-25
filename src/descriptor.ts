@@ -137,14 +137,11 @@ export function rawToArgumentValue(
   }
 }
 
-
 /**
  * Convert a descriptor metadata value to an ArgumentValue.
  * Used for `$.metadata.*` path resolution.
  */
-export function toArgumentValue(
-  value: unknown,
-): ArgumentValue | undefined {
+export function toArgumentValue(value: unknown): ArgumentValue | undefined {
   if (typeof value === "number") {
     return { type: "uint", value: BigInt(value) };
   }
@@ -303,7 +300,6 @@ export function resolveTypedDataPath(
       return undefined;
   }
 }
-
 
 /**
  * Resolve a metadata value by dot-path pointer (e.g. "$.metadata.enums.OrderType").

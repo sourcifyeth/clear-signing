@@ -326,7 +326,11 @@ function doSomething(input): { result: string; warnings: string[] } {
 All individual format handlers in `formatters.ts` return `RenderFieldResult`:
 
 ```typescript
-type RenderFieldResult = { rendered: string; warning?: Warning; tokenAddress?: string };
+type RenderFieldResult = {
+  rendered: string;
+  warning?: Warning;
+  tokenAddress?: string;
+};
 ```
 
 When a field value has the wrong type, use `typeMismatch(value, expected)` which returns a
