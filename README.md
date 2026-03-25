@@ -1,14 +1,13 @@
 # @sourcifyeth/clear-signing
 
-A TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](https://eips.ethereum.org/EIPS/eip-7730) for Ethereum transactions and EIP-712 typed data.
-
 This library transforms raw transaction calldata and typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
 
+<!--
 ## Installation
 
 ```bash
 npm install @sourcifyeth/clear-signing
-```
+``` -->
 
 ## Quick Start
 
