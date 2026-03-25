@@ -23,6 +23,7 @@ import {
   resolveCollectionAddress,
   formatAddressNameField,
   formatAddressName,
+  formatTokenTicker,
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
@@ -876,6 +877,133 @@ describe("formatAddressNameField", () => {
     expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
     // It returns a checksum address
     expect(result.rendered).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tokenTicker format: formatTokenTicker
+// ---------------------------------------------------------------------------
+
+describe("formatTokenTicker", () => {
+  const usdc: TokenResult = { name: "USD Coin", symbol: "USDC", decimals: 6 };
+  const tokenAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+  const tokenBytes = hexToBytes(tokenAddr);
+
+  it("renders token symbol when resolved", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      {},
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("USDC");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("returns UNKNOWN_TOKEN warning when provider returns null", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(null),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      {},
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe(tokenAddr);
+    expect(result.warning?.code).toBe("UNKNOWN_TOKEN");
+  });
+
+  it("returns UNKNOWN_TOKEN warning when provider throws", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockRejectedValue(new Error("fail")),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      {},
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe(tokenAddr);
+    expect(result.warning?.code).toBe("UNKNOWN_TOKEN");
+  });
+
+  it("returns CONTAINER_MISSING_CHAIN_ID when no chainId available", async () => {
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      {},
+      noopResolvePath,
+      undefined,
+    );
+    expect(result.rendered).toBe(tokenAddr);
+    expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
+  });
+
+  it("uses chainId from params over container chainId", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      { params: { chainId: 137 } },
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("USDC");
+    expect(provider.resolveToken).toHaveBeenCalledWith(
+      137,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("resolves chainIdPath via resolvePath", async () => {
+    const resolve: ResolvePath = (path) =>
+      path === "destChain" ? { type: "uint", value: 42n } : undefined;
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      { params: { chainIdPath: "destChain" } },
+      resolve,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("USDC");
+    expect(provider.resolveToken).toHaveBeenCalledWith(
+      42,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("falls back to container chainId when param chainId is absent", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      {},
+      noopResolvePath,
+      10,
+      provider,
+    );
+    expect(result.rendered).toBe("USDC");
+    expect(provider.resolveToken).toHaveBeenCalledWith(
+      10,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("returns type mismatch for non-address types", async () => {
+    const result = await formatTokenTicker(uint(42n), {}, noopResolvePath, 1);
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
 });
 

@@ -84,6 +84,14 @@ export async function renderField(
         fieldOptions,
         externalDataProvider,
       );
+    case "tokenTicker":
+      return await formatTokenTicker(
+        value,
+        fieldOptions,
+        resolvePath,
+        chainId,
+        externalDataProvider,
+      );
     default:
       return formatRaw(value);
   }
@@ -565,6 +573,78 @@ export async function formatAddressName(
     rendered: checksumAddress,
     warning: warn("UNKNOWN_ADDRESS", "Address name could not be resolved"),
   };
+}
+
+// ---------------------------------------------------------------------------
+// tokenTicker format
+// ---------------------------------------------------------------------------
+
+export async function formatTokenTicker(
+  value: ArgumentValue,
+  fieldOptions: FieldFormatOptions,
+  resolvePath: ResolvePath,
+  containerChainId: number | undefined,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
+  if (value.type !== "address")
+    return typeMismatch(value, "address", "tokenTicker");
+
+  const tokenAddress = bytesToHex(value.bytes).toLowerCase();
+  const chainId = resolveChainId(fieldOptions, resolvePath) ?? containerChainId;
+
+  if (chainId === undefined) {
+    return {
+      rendered: toChecksumAddress(value.bytes),
+      warning: warn(
+        "CONTAINER_MISSING_CHAIN_ID",
+        "Cannot format tokenTicker without a chainId",
+      ),
+    };
+  }
+
+  let token: TokenResult | null;
+  try {
+    token =
+      (await externalDataProvider?.resolveToken?.(chainId, tokenAddress)) ??
+      null;
+  } catch {
+    token = null;
+  }
+  if (!token) {
+    return {
+      rendered: toChecksumAddress(value.bytes),
+      warning: warn("UNKNOWN_TOKEN", "Token could not be resolved"),
+    };
+  }
+
+  return { rendered: token.symbol };
+}
+
+/**
+ * Resolve the chain ID for a tokenTicker field from params.chainId or
+ * params.chainIdPath. Returns undefined when neither is set.
+ */
+function resolveChainId(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): number | undefined {
+  const params = field.params ?? {};
+  const spec = params.chainId ?? params.chainIdPath;
+  if (!spec) return undefined;
+
+  if (typeof spec === "number") return spec;
+
+  if (typeof spec === "string") {
+    const n = Number(spec);
+    if (Number.isInteger(n) && n > 0) return n;
+
+    const resolved = resolvePath(spec);
+    if (resolved?.type === "uint" || resolved?.type === "int") {
+      return Number(resolved.value);
+    }
+  }
+
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

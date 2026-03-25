@@ -38,9 +38,13 @@ src/
   and bundled modes). Delegates individual field rendering to `formatters.ts`.
 
 - **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
-  Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatAddressName`,
-  `resolveEnumLabel`, `formatUnit`, etc. Also defines `FieldFormatOptions` and
-  `RenderFieldResult` types. Handlers are exported for unit testing.
+  Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatNftName`,
+  `formatDuration`, `formatUnit`, `formatAddressName`, `formatTokenTicker`,
+  `resolveEnumLabel`, etc. Also defines `FieldFormatOptions` and `RenderFieldResult`
+  types. Handlers are exported for unit testing. Most format handlers delegate
+  `$.metadata.*` path resolution to the `resolvePath` closure rather than calling
+  `resolveMetadataValue` directly — only `resolveEnumLabel` uses it since it needs
+  an object value that `toArgumentValue` cannot represent.
 
 - **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
   `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
@@ -190,15 +194,17 @@ spec. Do not add them to `DescriptorFormatSpec`.
 
 ### Field Formats
 
-Supported: `tokenAmount`, `amount`, `date`, `addressName`, `enum`, `raw`
+Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`
 
-Not yet implemented: `duration`, `unit`, `nftName`, `chainId`, `calldata`, `interoperableAddressName`
+Not yet implemented: `chainId`, `calldata`, `interoperableAddressName`
 
 **Spec-compliance notes:**
 
-- All numeric formats (`date`, `tokenAmount`, `amount`, `enum`) accept both `uint` and `int` field types.
+- All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`) accept both `uint` and `int` field types.
 - `date` format requires `params.encoding` to be `"timestamp"` — falls back to raw when missing.
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
+- `nftName` resolves collection name via `ExternalDataProvider.resolveNftCollectionName(chainId, address)`.
+- `tokenTicker` accepts only `address` type; supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios.
 - Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
 
 ### Token Resolution
@@ -373,9 +379,6 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 
 ## Not Yet Implemented (from EIP-7730 spec)
 
-- `duration` format (HH:MM:ss)
-- `unit` format (SI prefixes)
-- `nftName` format
 - `chainId` format (ID to chain name)
 - `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
