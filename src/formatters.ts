@@ -60,7 +60,6 @@ export async function renderField(
         value,
         resolvePath,
         chainId,
-        metadata,
         externalDataProvider,
       );
     case "nftName":
@@ -69,7 +68,6 @@ export async function renderField(
         value,
         resolvePath,
         chainId,
-        metadata,
         externalDataProvider,
       );
     case "date":
@@ -137,7 +135,6 @@ export async function formatTokenAmount(
   value: ArgumentValue,
   resolvePath: ResolvePath,
   chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int") {
@@ -155,7 +152,7 @@ export async function formatTokenAmount(
   }
 
   const amount = value.value;
-  const tokenAddress = resolveTokenAddress(field, resolvePath, metadata);
+  const tokenAddress = resolveTokenAddress(field, resolvePath);
   if (!tokenAddress) {
     return formatRaw(value);
   }
@@ -179,7 +176,7 @@ export async function formatTokenAmount(
   }
 
   return {
-    rendered: renderTokenAmount(amount, token, field, metadata),
+    rendered: renderTokenAmount(amount, token, field, resolvePath),
     tokenAddress: checksumTokenAddress,
   };
 }
@@ -191,9 +188,9 @@ export function renderTokenAmount(
   amount: bigint,
   token: TokenResult,
   field: FieldFormatOptions,
-  metadata: DescriptorMetadata | undefined,
+  resolvePath: ResolvePath,
 ): string {
-  const msg = tokenAmountMessage(field, amount, metadata);
+  const msg = tokenAmountMessage(field, amount, resolvePath);
   if (msg) return `${msg} ${token.symbol}`;
   return `${formatAmountWithDecimals(amount, token.decimals)} ${token.symbol}`;
 }
@@ -201,7 +198,7 @@ export function renderTokenAmount(
 export function tokenAmountMessage(
   field: FieldFormatOptions,
   amount: bigint,
-  metadata: DescriptorMetadata | undefined,
+  resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
   const thresholdSpec = params.threshold;
@@ -212,10 +209,9 @@ export function tokenAmountMessage(
   }
 
   let threshold: bigint | undefined;
-  if (thresholdSpec.startsWith("$.")) {
-    const value = resolveMetadataValue(metadata, thresholdSpec);
-    if (typeof value === "string") threshold = parseBigInt(value);
-    else if (typeof value === "number") threshold = BigInt(value);
+  const resolved = resolvePath(thresholdSpec);
+  if (resolved?.type === "uint" || resolved?.type === "int") {
+    threshold = resolved.value;
   } else {
     threshold = parseBigInt(thresholdSpec);
   }
@@ -232,7 +228,6 @@ export function tokenAmountMessage(
 export function resolveTokenAddress(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
-  metadata: DescriptorMetadata | undefined,
 ): string | undefined {
   const params = field.params ?? {};
   const token = params.token ?? params.tokenPath;
@@ -243,20 +238,7 @@ export function resolveTokenAddress(
     return token.toLowerCase();
   }
 
-  // $.metadata.* path
-  if (token.startsWith("$.")) {
-    const metaValue = resolveMetadataValue(metadata, token);
-    if (
-      typeof metaValue === "string" &&
-      metaValue.startsWith("0x") &&
-      metaValue.length === 42
-    ) {
-      return metaValue.toLowerCase();
-    }
-    return undefined;
-  }
-
-  // @. or bare/# path — resolve via the caller's closure
+  // Any path ($., @., #., or bare) — resolve via the caller's closure
   const resolved = resolvePath(token);
   if (resolved?.type === "address") {
     return bytesToHex(resolved.bytes).toLowerCase();
@@ -274,7 +256,6 @@ export async function formatNftName(
   value: ArgumentValue,
   resolvePath: ResolvePath,
   chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int") {
@@ -292,11 +273,7 @@ export async function formatNftName(
   }
 
   const tokenId = value.value;
-  const collectionAddress = resolveCollectionAddress(
-    field,
-    resolvePath,
-    metadata,
-  );
+  const collectionAddress = resolveCollectionAddress(field, resolvePath);
   if (!collectionAddress) {
     return formatRaw(value);
   }
@@ -314,10 +291,7 @@ export async function formatNftName(
   if (!collection) {
     return {
       rendered: renderRaw(value),
-      warning: warn(
-        "UNKNOWN_NFT",
-        "NFT collection name could not be resolved",
-      ),
+      warning: warn("UNKNOWN_NFT", "NFT collection name could not be resolved"),
     };
   }
 
@@ -335,7 +309,6 @@ export async function formatNftName(
 export function resolveCollectionAddress(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
-  metadata: DescriptorMetadata | undefined,
 ): string | undefined {
   const params = field.params ?? {};
   const collection = params.collection ?? params.collectionPath;
@@ -346,20 +319,7 @@ export function resolveCollectionAddress(
     return collection.toLowerCase();
   }
 
-  // $.metadata.* path
-  if (collection.startsWith("$.")) {
-    const metaValue = resolveMetadataValue(metadata, collection);
-    if (
-      typeof metaValue === "string" &&
-      metaValue.startsWith("0x") &&
-      metaValue.length === 42
-    ) {
-      return metaValue.toLowerCase();
-    }
-    return undefined;
-  }
-
-  // @. or bare/# path — resolve via the caller's closure
+  // Any path ($., @., #., or bare) — resolve via the caller's closure
   const resolved = resolvePath(collection);
   if (resolved?.type === "address") {
     return bytesToHex(resolved.bytes).toLowerCase();

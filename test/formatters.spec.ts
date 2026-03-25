@@ -140,12 +140,12 @@ describe("renderTokenAmount", () => {
   const usdc: TokenResult = { name: "USD Coin", symbol: "USDC", decimals: 6 };
 
   it("formats token amount with symbol", () => {
-    const result = renderTokenAmount(1000000n, usdc, {}, undefined);
+    const result = renderTokenAmount(1000000n, usdc, {}, noopResolvePath);
     expect(result).toBe("1 USDC");
   });
 
   it("formats fractional token amount", () => {
-    const result = renderTokenAmount(1500000n, usdc, {}, undefined);
+    const result = renderTokenAmount(1500000n, usdc, {}, noopResolvePath);
     expect(result).toBe("1.5 USDC");
   });
 
@@ -153,7 +153,7 @@ describe("renderTokenAmount", () => {
     const field = {
       params: { threshold: "1000000", message: "Unlimited" },
     };
-    const result = renderTokenAmount(1000000n, usdc, field, undefined);
+    const result = renderTokenAmount(1000000n, usdc, field, noopResolvePath);
     expect(result).toBe("Unlimited USDC");
   });
 
@@ -161,7 +161,7 @@ describe("renderTokenAmount", () => {
     const field = {
       params: { threshold: "2000000", message: "Unlimited" },
     };
-    const result = renderTokenAmount(999999n, usdc, field, undefined);
+    const result = renderTokenAmount(999999n, usdc, field, noopResolvePath);
     expect(result).toBe("0.999999 USDC");
   });
 });
@@ -172,12 +172,12 @@ describe("renderTokenAmount", () => {
 
 describe("tokenAmountMessage", () => {
   it("returns undefined when no threshold/message params", () => {
-    expect(tokenAmountMessage({}, 100n, undefined)).toBeUndefined();
+    expect(tokenAmountMessage({}, 100n, noopResolvePath)).toBeUndefined();
   });
 
   it("defaults message to 'Unlimited' when not specified", () => {
     const field = { params: { threshold: "100" } };
-    expect(tokenAmountMessage(field, 100n, undefined)).toBe("Unlimited");
+    expect(tokenAmountMessage(field, 100n, noopResolvePath)).toBe("Unlimited");
   });
 
   it("returns undefined when threshold is not a string", () => {
@@ -185,40 +185,42 @@ describe("tokenAmountMessage", () => {
       tokenAmountMessage(
         { params: { threshold: 100, message: "msg" } },
         100n,
-        undefined,
+        noopResolvePath,
       ),
     ).toBeUndefined();
   });
 
   it("returns message when amount >= literal threshold", () => {
     const field = { params: { threshold: "100", message: "Over limit" } };
-    expect(tokenAmountMessage(field, 100n, undefined)).toBe("Over limit");
+    expect(tokenAmountMessage(field, 100n, noopResolvePath)).toBe("Over limit");
   });
 
   it("returns undefined when amount < literal threshold", () => {
     const field = { params: { threshold: "100", message: "Over limit" } };
-    expect(tokenAmountMessage(field, 99n, undefined)).toBeUndefined();
+    expect(tokenAmountMessage(field, 99n, noopResolvePath)).toBeUndefined();
   });
 
   it("resolves threshold from metadata path", () => {
     const field = {
       params: { threshold: "$.metadata.constants.maxAmount", message: "Max" },
     };
-    const metadata: DescriptorMetadata = {
-      constants: { maxAmount: "500" },
-    };
-    expect(tokenAmountMessage(field, 500n, metadata)).toBe("Max");
-    expect(tokenAmountMessage(field, 499n, metadata)).toBeUndefined();
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.maxAmount"
+        ? { type: "uint", value: 500n }
+        : undefined;
+    expect(tokenAmountMessage(field, 500n, resolve)).toBe("Max");
+    expect(tokenAmountMessage(field, 499n, resolve)).toBeUndefined();
   });
 
   it("resolves numeric metadata threshold", () => {
     const field = {
       params: { threshold: "$.metadata.constants.maxAmount", message: "Max" },
     };
-    const metadata: DescriptorMetadata = {
-      constants: { maxAmount: 200 },
-    };
-    expect(tokenAmountMessage(field, 200n, metadata)).toBe("Max");
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.maxAmount"
+        ? { type: "uint", value: 200n }
+        : undefined;
+    expect(tokenAmountMessage(field, 200n, resolve)).toBe("Max");
   });
 });
 
@@ -228,14 +230,14 @@ describe("tokenAmountMessage", () => {
 
 describe("resolveTokenAddress", () => {
   it("returns undefined when no token or tokenPath", () => {
-    expect(resolveTokenAddress({}, noopResolvePath, undefined)).toBeUndefined();
+    expect(resolveTokenAddress({}, noopResolvePath)).toBeUndefined();
   });
 
   it("resolves constant address from params.token", () => {
     const field = {
       params: { token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
     };
-    expect(resolveTokenAddress(field, noopResolvePath, undefined)).toBe(
+    expect(resolveTokenAddress(field, noopResolvePath)).toBe(
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     );
   });
@@ -244,7 +246,7 @@ describe("resolveTokenAddress", () => {
     const field = {
       params: { tokenPath: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
     };
-    expect(resolveTokenAddress(field, noopResolvePath, undefined)).toBe(
+    expect(resolveTokenAddress(field, noopResolvePath)).toBe(
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     );
   });
@@ -256,27 +258,30 @@ describe("resolveTokenAddress", () => {
         tokenPath: "0x0000000000000000000000000000000000000001",
       },
     };
-    expect(resolveTokenAddress(field, noopResolvePath, undefined)).toBe(
+    expect(resolveTokenAddress(field, noopResolvePath)).toBe(
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     );
   });
 
-  it("resolves token from metadata path", () => {
+  it("resolves token from metadata path via resolvePath", () => {
+    const tokenBytes = hexToBytes("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.tokenAddr"
+        ? { type: "address", bytes: tokenBytes }
+        : undefined;
     const field = { params: { token: "$.metadata.constants.tokenAddr" } };
-    const metadata: DescriptorMetadata = {
-      constants: { tokenAddr: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
-    };
-    expect(resolveTokenAddress(field, noopResolvePath, metadata)).toBe(
+    expect(resolveTokenAddress(field, resolve)).toBe(
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     );
   });
 
   it("returns undefined for non-address metadata value", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.foo"
+        ? { type: "string", value: "not-an-addr" }
+        : undefined;
     const field = { params: { token: "$.metadata.constants.foo" } };
-    const metadata: DescriptorMetadata = { constants: { foo: "not-an-addr" } };
-    expect(
-      resolveTokenAddress(field, noopResolvePath, metadata),
-    ).toBeUndefined();
+    expect(resolveTokenAddress(field, resolve)).toBeUndefined();
   });
 
   it("resolves token from resolvePath (address type)", () => {
@@ -286,7 +291,7 @@ describe("resolveTokenAddress", () => {
       return undefined;
     };
     const field = { params: { token: "token" } };
-    expect(resolveTokenAddress(field, resolvePath, undefined)).toBe(
+    expect(resolveTokenAddress(field, resolvePath)).toBe(
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     );
   });
@@ -297,7 +302,7 @@ describe("resolveTokenAddress", () => {
       value: 42n,
     });
     const field = { params: { token: "someField" } };
-    expect(resolveTokenAddress(field, resolvePath, undefined)).toBeUndefined();
+    expect(resolveTokenAddress(field, resolvePath)).toBeUndefined();
   });
 });
 
@@ -319,7 +324,6 @@ describe("formatTokenAmount", () => {
       str("hello"),
       noopResolvePath,
       1,
-      undefined,
     );
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
@@ -331,7 +335,6 @@ describe("formatTokenAmount", () => {
       int(1000000n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -343,7 +346,6 @@ describe("formatTokenAmount", () => {
       uint(100n),
       noopResolvePath,
       undefined,
-      undefined,
     );
     expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
   });
@@ -354,7 +356,6 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
-      undefined,
     );
     expect(result.rendered).toBe("1,000,000");
     expect(result.warning).toBeUndefined();
@@ -370,7 +371,6 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
-      undefined,
       nullProvider,
     );
     expect(result.rendered).toBe("1,000,000");
@@ -387,7 +387,6 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -407,7 +406,7 @@ describe("resolveCollectionAddress", () => {
     const field = {
       params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
     };
-    const result = resolveCollectionAddress(field, noopResolvePath, undefined);
+    const result = resolveCollectionAddress(field, noopResolvePath);
     expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
   });
 
@@ -415,20 +414,22 @@ describe("resolveCollectionAddress", () => {
     const field = {
       params: { collectionPath: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
     };
-    const result = resolveCollectionAddress(field, noopResolvePath, undefined);
+    const result = resolveCollectionAddress(field, noopResolvePath);
     expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
   });
 
-  it("resolves from metadata path", () => {
+  it("resolves from metadata path via resolvePath", () => {
+    const collectionBytes = hexToBytes(
+      "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+    );
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.collectionAddr"
+        ? { type: "address", bytes: collectionBytes }
+        : undefined;
     const field = {
       params: { collection: "$.metadata.constants.collectionAddr" },
     };
-    const metadata: DescriptorMetadata = {
-      constants: {
-        collectionAddr: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
-      },
-    };
-    const result = resolveCollectionAddress(field, noopResolvePath, metadata);
+    const result = resolveCollectionAddress(field, resolve);
     expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
   });
 
@@ -436,14 +437,12 @@ describe("resolveCollectionAddress", () => {
     const resolve: ResolvePath = (path) =>
       path === "nftAddr" ? addr() : undefined;
     const field = { params: { collection: "nftAddr" } };
-    const result = resolveCollectionAddress(field, resolve, undefined);
-    expect(result).toBe(
-      "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-    );
+    const result = resolveCollectionAddress(field, resolve);
+    expect(result).toBe("0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
   });
 
   it("returns undefined when no collection param", () => {
-    const result = resolveCollectionAddress({}, noopResolvePath, undefined);
+    const result = resolveCollectionAddress({}, noopResolvePath);
     expect(result).toBeUndefined();
   });
 });
@@ -463,7 +462,6 @@ describe("formatNftName", () => {
       uint(1036n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe(
@@ -473,13 +471,7 @@ describe("formatNftName", () => {
   });
 
   it("falls back to raw when collection address is missing", async () => {
-    const result = await formatNftName(
-      {},
-      uint(1036n),
-      noopResolvePath,
-      1,
-      undefined,
-    );
+    const result = await formatNftName({}, uint(1036n), noopResolvePath, 1);
     expect(result.rendered).toBe("1,036");
     expect(result.warning).toBeUndefined();
   });
@@ -492,7 +484,6 @@ describe("formatNftName", () => {
       field,
       uint(1036n),
       noopResolvePath,
-      undefined,
       undefined,
     );
     expect(result.rendered).toBe("1,036");
@@ -511,7 +502,6 @@ describe("formatNftName", () => {
       uint(1036n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe("1,036");
@@ -530,7 +520,6 @@ describe("formatNftName", () => {
       uint(1036n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe("1,036");
@@ -538,13 +527,7 @@ describe("formatNftName", () => {
   });
 
   it("returns type mismatch for non-numeric types", async () => {
-    const result = await formatNftName(
-      {},
-      str("hello"),
-      noopResolvePath,
-      1,
-      undefined,
-    );
+    const result = await formatNftName({}, str("hello"), noopResolvePath, 1);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
 
@@ -560,7 +543,6 @@ describe("formatNftName", () => {
       int(42n),
       noopResolvePath,
       1,
-      undefined,
       provider,
     );
     expect(result.rendered).toBe("Collection Name: CoolCats - Token ID: 42");
