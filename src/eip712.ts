@@ -22,7 +22,7 @@ import {
   resolveTypedDataPath,
 } from "./descriptor";
 import { warn } from "./utils";
-import { applyFieldFormats } from "./formatters";
+import { applyFieldFormats } from "./fields";
 
 /**
  * Format EIP-712 typed data for clear signing display.

@@ -28,7 +28,7 @@ import {
   selectorForSignature,
   warn,
 } from "./utils";
-import { applyFieldFormats } from "./formatters";
+import { applyFieldFormats } from "./fields";
 
 /**
  * Decodes calldata using a resolved descriptor and returns a human-readable

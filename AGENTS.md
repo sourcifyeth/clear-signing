@@ -14,7 +14,8 @@ src/
 ├── types.ts                    # TypeScript interfaces and types
 ├── utils.ts                    # Crypto & formatting utilities
 ├── descriptor.ts               # Shared descriptor logic: binding checks, path resolution, field merging
-├── formatters.ts               # Shared field formatting: applyFieldFormats() + all format handlers
+├── fields.ts                   # Field processing pipeline: applyFieldFormats() loop and field groups
+├── formatters.ts               # Individual format handlers: renderField(), formatRaw(), etc.
 ├── calldata.ts                 # Calldata path: formatCalldata(), signature parsing, ABI decoding
 ├── eip712.ts                   # EIP-712 path: formatEip712(), encodeType matching, type resolution
 ├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
@@ -31,10 +32,15 @@ src/
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
   metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
 
-- **`formatters.ts`** — The shared field formatting engine. Primary entry point is `applyFieldFormats()`,
+- **`fields.ts`** — The field processing pipeline. Primary entry point is `applyFieldFormats()`,
   which iterates format fields, merges definitions, resolves values, and renders each field.
-  Individual format handlers (`renderField`, `formatRaw`, `formatTimestamp`,
-  `renderTokenAmount`, `formatAddressName`, `resolveEnumLabel`, etc.) are exported for unit testing.
+  Handles field groups with array iteration (group-level and child-level patterns, sequential
+  and bundled modes). Delegates individual field rendering to `formatters.ts`.
+
+- **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
+  Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatAddressName`,
+  `resolveEnumLabel`, `formatUnit`, etc. Also defines `FieldFormatOptions` and
+  `RenderFieldResult` types. Handlers are exported for unit testing.
 
 - **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
   `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
@@ -56,7 +62,7 @@ src/
    → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
        → getFormatsBySelector() builds selector→format map from display.formats keys
        → decodeArguments() decodes calldata into DecodedArguments
-       → applyFieldFormats() (from formatters.ts) renders each field
+       → applyFieldFormats() (from fields.ts) renders each field
    → returns DisplayModel
    ```
 
@@ -66,11 +72,11 @@ src/
    → DescriptorResolver.resolveTypedDataDescriptor()
    → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
        → findFormatSpec() matches display.formats key via encodeType string
-       → applyFieldFormats() (from formatters.ts) renders each field
+       → applyFieldFormats() (from fields.ts) renders each field
    → returns DisplayModel
    ```
 
-Both paths share the same field rendering pipeline in `formatters.ts` via `applyFieldFormats()`.
+Both paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
 Each builds a `ResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
 for its domain (calldata args vs. EIP-712 message fields).
 
