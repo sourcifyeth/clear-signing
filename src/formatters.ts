@@ -150,8 +150,14 @@ export async function formatTokenAmount(
 
   const checksumTokenAddress = toChecksumAddress(hexToBytes(tokenAddress));
 
-  const token =
-    (await externalDataProvider?.resolveToken?.(chainId, tokenAddress)) ?? null;
+  let token: TokenResult | null;
+  try {
+    token =
+      (await externalDataProvider?.resolveToken?.(chainId, tokenAddress)) ??
+      null;
+  } catch {
+    token = null;
+  }
   if (!token) {
     return {
       rendered: renderRaw(value),
@@ -415,39 +421,47 @@ export async function formatAddressName(
 
   // Try local wallet names
   if (tryLocal && externalDataProvider?.resolveLocalName) {
-    const result = await externalDataProvider.resolveLocalName(
-      normalized,
-      expectedType,
-    );
-    if (result) {
-      return {
-        rendered: result.name,
-        warning: result.typeMatch
-          ? undefined
-          : warn(
-              "ADDRESS_TYPE_MISMATCH",
-              `Resolved address type does not match expected type '${expectedType}'`,
-            ),
-      };
+    try {
+      const result = await externalDataProvider.resolveLocalName(
+        normalized,
+        expectedType,
+      );
+      if (result) {
+        return {
+          rendered: result.name,
+          warning: result.typeMatch
+            ? undefined
+            : warn(
+                "ADDRESS_TYPE_MISMATCH",
+                `Resolved address type does not match expected type '${expectedType}'`,
+              ),
+        };
+      }
+    } catch {
+      // Fall through to next resolution method or raw fallback
     }
   }
 
   // Try ENS
   if (tryEns && externalDataProvider?.resolveEnsName) {
-    const result = await externalDataProvider.resolveEnsName(
-      normalized,
-      expectedType,
-    );
-    if (result) {
-      return {
-        rendered: result.name,
-        warning: result.typeMatch
-          ? undefined
-          : warn(
-              "ADDRESS_TYPE_MISMATCH",
-              `Resolved address type does not match expected type '${expectedType}'`,
-            ),
-      };
+    try {
+      const result = await externalDataProvider.resolveEnsName(
+        normalized,
+        expectedType,
+      );
+      if (result) {
+        return {
+          rendered: result.name,
+          warning: result.typeMatch
+            ? undefined
+            : warn(
+                "ADDRESS_TYPE_MISMATCH",
+                `Resolved address type does not match expected type '${expectedType}'`,
+              ),
+        };
+      }
+    } catch {
+      // Fall through to raw fallback
     }
   }
 
