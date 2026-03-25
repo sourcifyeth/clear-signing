@@ -68,6 +68,8 @@ export async function renderField(
       return formatEnum(fieldOptions, value, metadata);
     case "unit":
       return formatUnit(value, fieldOptions);
+    case "duration":
+      return formatDuration(value);
     case "addressName":
       return await formatAddressNameField(
         value,
@@ -289,39 +291,23 @@ export function formatTimestamp(seconds: bigint): RenderFieldResult {
 }
 
 // ---------------------------------------------------------------------------
-// enum format
+// duration format
 // ---------------------------------------------------------------------------
 
-export function formatEnum(
-  field: FieldFormatOptions,
-  value: ArgumentValue,
-  metadata: DescriptorMetadata | undefined,
-): RenderFieldResult {
+export function formatDuration(value: ArgumentValue): RenderFieldResult {
   if (value.type !== "uint" && value.type !== "int")
-    return typeMismatch(value, "uint or int", "enum");
-  const label = resolveEnumLabel(field, value.value.toString(), metadata);
-  if (!label) return formatRaw(value);
-  return { rendered: label };
-}
+    return typeMismatch(value, "uint or int", "duration");
 
-/**
- * Resolve an enum label from a metadata map using a string key.
- * Returns undefined when the reference or map can't be resolved.
- */
-export function resolveEnumLabel(
-  field: FieldFormatOptions,
-  key: string,
-  metadata: DescriptorMetadata | undefined,
-): string | undefined {
-  const params = field.params ?? {};
-  const reference = params.$ref;
-  if (typeof reference !== "string") return undefined;
+  const totalSeconds = Number(value.value < 0n ? -value.value : value.value);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
 
-  const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") return undefined;
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(secs).padStart(2, "0");
 
-  const label = (enumMap as Record<string, unknown>)[key];
-  return typeof label === "string" ? label : undefined;
+  return { rendered: `${hh}:${mm}:${ss}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +369,42 @@ function bigintLog10(n: bigint): number {
     count++;
   }
   return count;
+}
+
+// ---------------------------------------------------------------------------
+// enum format
+// ---------------------------------------------------------------------------
+
+export function formatEnum(
+  field: FieldFormatOptions,
+  value: ArgumentValue,
+  metadata: DescriptorMetadata | undefined,
+): RenderFieldResult {
+  if (value.type !== "uint" && value.type !== "int")
+    return typeMismatch(value, "uint or int", "enum");
+  const label = resolveEnumLabel(field, value.value.toString(), metadata);
+  if (!label) return formatRaw(value);
+  return { rendered: label };
+}
+
+/**
+ * Resolve an enum label from a metadata map using a string key.
+ * Returns undefined when the reference or map can't be resolved.
+ */
+export function resolveEnumLabel(
+  field: FieldFormatOptions,
+  key: string,
+  metadata: DescriptorMetadata | undefined,
+): string | undefined {
+  const params = field.params ?? {};
+  const reference = params.$ref;
+  if (typeof reference !== "string") return undefined;
+
+  const enumMap = resolveMetadataValue(metadata, reference);
+  if (!enumMap || typeof enumMap !== "object") return undefined;
+
+  const label = (enumMap as Record<string, unknown>)[key];
+  return typeof label === "string" ? label : undefined;
 }
 
 // ---------------------------------------------------------------------------

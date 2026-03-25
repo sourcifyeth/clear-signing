@@ -18,6 +18,7 @@ import {
   formatEnum,
   resolveEnumLabel,
   formatUnit,
+  formatDuration,
   formatAddressNameField,
   formatAddressName,
   typeMismatch,
@@ -583,6 +584,47 @@ describe("formatUnit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// duration format: formatDuration
+// ---------------------------------------------------------------------------
+
+describe("formatDuration", () => {
+  it("formats seconds as HH:MM:ss", () => {
+    const result = formatDuration(uint(8250n));
+    expect(result.rendered).toBe("02:17:30");
+  });
+
+  it("formats zero", () => {
+    const result = formatDuration(uint(0n));
+    expect(result.rendered).toBe("00:00:00");
+  });
+
+  it("formats values under a minute", () => {
+    const result = formatDuration(uint(45n));
+    expect(result.rendered).toBe("00:00:45");
+  });
+
+  it("formats exactly one hour", () => {
+    const result = formatDuration(uint(3600n));
+    expect(result.rendered).toBe("01:00:00");
+  });
+
+  it("handles large values (over 99 hours)", () => {
+    const result = formatDuration(uint(360000n));
+    expect(result.rendered).toBe("100:00:00");
+  });
+
+  it("accepts int type", () => {
+    const result = formatDuration(int(8250n));
+    expect(result.rendered).toBe("02:17:30");
+  });
+
+  it("returns type mismatch for non-numeric types", () => {
+    const result = formatDuration(str("hello"));
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // addressName format: formatAddressName
 // ---------------------------------------------------------------------------
 
@@ -756,7 +798,7 @@ describe("renderField", () => {
   it("falls back to raw for unrecognized format", async () => {
     const result = await renderField(
       uint(7n),
-      "duration",
+      "nftName",
       {},
       noopResolvePath,
       1,
