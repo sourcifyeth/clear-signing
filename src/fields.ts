@@ -27,6 +27,17 @@ import { renderField } from "./formatters";
 /** Callback to get the length of an array at a given container path. */
 export type GetArrayLength = (path: string) => number;
 
+/** Shared context threaded through all internal processing functions. */
+interface FieldContext {
+  definitions: Record<string, DescriptorFieldFormat>;
+  resolvePath: ResolvePath;
+  getArrayLength: GetArrayLength;
+  chainId: number | undefined;
+  metadata: DescriptorMetadata | undefined;
+  renderedValues: Map<string, string>;
+  externalDataProvider?: ExternalDataProvider;
+}
+
 /**
  * Shared field formatting loop used by both calldata and EIP-712 engines.
  *
@@ -49,35 +60,28 @@ export async function applyFieldFormats(
     }
   | { warnings: Warning[] }
 > {
-  const fields: (DisplayField | DisplayFieldGroup)[] = [];
   const renderedValues = new Map<string, string>();
+  const ctx: FieldContext = {
+    definitions,
+    resolvePath,
+    getArrayLength,
+    chainId,
+    metadata,
+    renderedValues,
+    externalDataProvider,
+  };
+
+  const fields: (DisplayField | DisplayFieldGroup)[] = [];
 
   for (const fieldSpec of format.fields ?? []) {
     if (isFieldGroup(fieldSpec)) {
-      const groupResult = await processFieldGroup(
-        fieldSpec,
-        definitions,
-        resolvePath,
-        getArrayLength,
-        chainId,
-        metadata,
-        renderedValues,
-        externalDataProvider,
-      );
+      const groupResult = await processFieldGroup(fieldSpec, ctx);
       if ("warnings" in groupResult) return groupResult;
       fields.push(groupResult.group);
       continue;
     }
 
-    const result = await processSingleField(
-      fieldSpec,
-      definitions,
-      resolvePath,
-      chainId,
-      metadata,
-      renderedValues,
-      externalDataProvider,
-    );
+    const result = await processSingleField(fieldSpec, ctx);
     if ("warnings" in result) return result;
     if (result.field) fields.push(result.field);
   }
@@ -91,16 +95,11 @@ export async function applyFieldFormats(
  */
 async function processSingleField(
   fieldSpec: DescriptorFieldFormat,
-  definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
-  chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
-  renderedValues: Map<string, string>,
-  externalDataProvider?: ExternalDataProvider,
+  ctx: FieldContext,
 ): Promise<{ field: DisplayField | null } | { warnings: Warning[] }> {
   const { merged, warnings: defWarnings } = mergeDefinitions(
     fieldSpec,
-    definitions,
+    ctx.definitions,
   );
   if (defWarnings.length > 0) {
     return {
@@ -112,7 +111,7 @@ async function processSingleField(
 
   if (merged.visible === "never") return { field: null };
 
-  const argValue = resolveFieldValue(merged, resolvePath);
+  const argValue = resolveFieldValue(merged, ctx.resolvePath);
   if (!argValue) {
     return {
       warnings: [
@@ -143,10 +142,10 @@ async function processSingleField(
     argValue,
     merged.format,
     merged,
-    resolvePath,
-    chainId,
-    metadata,
-    externalDataProvider,
+    ctx.resolvePath,
+    ctx.chainId,
+    ctx.metadata,
+    ctx.externalDataProvider,
   );
 
   // Apply separator prefix for array elements (e.g. "Recipient {index}" → "Recipient 0")
@@ -175,7 +174,7 @@ async function processSingleField(
     displayField.tokenAddress = tokenAddress;
   }
 
-  if (merged.path) renderedValues.set(merged.path, finalValue);
+  if (merged.path) ctx.renderedValues.set(merged.path, finalValue);
   return { field: displayField };
 }
 
@@ -193,39 +192,12 @@ async function processSingleField(
  */
 async function processFieldGroup(
   group: DescriptorFieldGroup,
-  definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
-  getArrayLength: GetArrayLength,
-  chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
-  renderedValues: Map<string, string>,
-  externalDataProvider?: ExternalDataProvider,
+  ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
-  // Pattern 1: group itself has a .[] path
   if (group.path?.endsWith(".[]")) {
-    return processGroupArrayPath(
-      group,
-      definitions,
-      resolvePath,
-      getArrayLength,
-      chainId,
-      metadata,
-      renderedValues,
-      externalDataProvider,
-    );
+    return processGroupArrayPath(group, ctx);
   }
-
-  // Pattern 2: children have their own .[] paths
-  return processChildArrayPaths(
-    group,
-    definitions,
-    resolvePath,
-    getArrayLength,
-    chainId,
-    metadata,
-    renderedValues,
-    externalDataProvider,
-  );
+  return processChildArrayPaths(group, ctx);
 }
 
 /**
@@ -234,16 +206,10 @@ async function processFieldGroup(
  */
 async function processGroupArrayPath(
   group: DescriptorFieldGroup,
-  definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
-  getArrayLength: GetArrayLength,
-  chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
-  renderedValues: Map<string, string>,
-  externalDataProvider?: ExternalDataProvider,
+  ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const basePath = parseGroupBasePath(group.path);
-  const length = getArrayLength(basePath);
+  const length = ctx.getArrayLength(basePath);
 
   if (length === 0) {
     return {
@@ -260,21 +226,16 @@ async function processGroupArrayPath(
     const prefix = `${basePath}.[${i}]`;
     const scopedResolvePath: ResolvePath = (path: string) => {
       if (path.startsWith("@.") || path.startsWith("$.")) {
-        return resolvePath(path);
+        return ctx.resolvePath(path);
       }
       const key = path.startsWith("#.") ? path.slice(2) : path;
-      return resolvePath(`${prefix}.${key}`);
+      return ctx.resolvePath(`${prefix}.${key}`);
     };
 
-    const result = await processFlatFields(
-      group.fields ?? [],
-      definitions,
-      scopedResolvePath,
-      chainId,
-      metadata,
-      renderedValues,
-      externalDataProvider,
-    );
+    const result = await processFlatFields(group.fields ?? [], {
+      ...ctx,
+      resolvePath: scopedResolvePath,
+    });
     if ("warnings" in result) return result;
 
     allFields.push(...result.fields);
@@ -290,15 +251,8 @@ async function processGroupArrayPath(
  */
 async function processChildArrayPaths(
   group: DescriptorFieldGroup,
-  definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
-  getArrayLength: GetArrayLength,
-  chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
-  renderedValues: Map<string, string>,
-  externalDataProvider?: ExternalDataProvider,
+  ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
-  // Collect array lengths from children with .[] paths
   const childFields = group.fields ?? [];
   const arrayLengths: { path: string; length: number }[] = [];
   for (const child of childFields) {
@@ -306,7 +260,7 @@ async function processChildArrayPaths(
       const childBasePath = parseGroupBasePath(child.path);
       arrayLengths.push({
         path: childBasePath,
-        length: getArrayLength(childBasePath),
+        length: ctx.getArrayLength(childBasePath),
       });
     }
   }
@@ -343,31 +297,15 @@ async function processChildArrayPaths(
     // Bundled: pair children by index — a0[0] a1[0] a0[1] a1[1] ...
     const allFields: DisplayField[] = [];
     for (let i = 0; i < first; i++) {
-      const indexedFields = childFields.map(
-        (child): DescriptorFieldFormat | DescriptorFieldGroup => {
-          if (isFieldGroup(child)) return child;
-          if (child.path?.includes(".[]")) {
-            return { ...child, path: child.path.replace(".[]", `.[${i}]`) };
-          }
-          return child;
-        },
-      );
-
       const result = await processFlatFields(
-        indexedFields,
-        definitions,
-        resolvePath,
-        chainId,
-        metadata,
-        renderedValues,
-        externalDataProvider,
+        expandArrayIndex(childFields, i),
+        ctx,
       );
       if ("warnings" in result) return result;
-
       allFields.push(...result.fields);
     }
 
-    joinArrayValues(arrayLengths, renderedValues);
+    joinArrayValues(arrayLengths, ctx.renderedValues);
     return { group: { label: group.label, fields: allFields } };
   }
 
@@ -387,40 +325,24 @@ async function processChildArrayPaths(
 
     if (child.path?.includes(".[]")) {
       const childBasePath = parseGroupBasePath(child.path);
-      const len = getArrayLength(childBasePath);
+      const len = ctx.getArrayLength(childBasePath);
       for (let i = 0; i < len; i++) {
         const indexed = {
           ...child,
           path: child.path.replace(".[]", `.[${i}]`),
         };
-        const result = await processSingleField(
-          indexed,
-          definitions,
-          resolvePath,
-          chainId,
-          metadata,
-          renderedValues,
-          externalDataProvider,
-        );
+        const result = await processSingleField(indexed, ctx);
         if ("warnings" in result) return result;
         if (result.field) allFields.push(result.field);
       }
     } else {
-      const result = await processSingleField(
-        child,
-        definitions,
-        resolvePath,
-        chainId,
-        metadata,
-        renderedValues,
-        externalDataProvider,
-      );
+      const result = await processSingleField(child, ctx);
       if ("warnings" in result) return result;
       if (result.field) allFields.push(result.field);
     }
   }
 
-  joinArrayValues(arrayLengths, renderedValues);
+  joinArrayValues(arrayLengths, ctx.renderedValues);
   return { group: { label: group.label, fields: allFields } };
 }
 
@@ -430,12 +352,7 @@ async function processChildArrayPaths(
  */
 async function processFlatFields(
   fieldSpecs: (DescriptorFieldFormat | DescriptorFieldGroup)[],
-  definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
-  chainId: number | undefined,
-  metadata: DescriptorMetadata | undefined,
-  renderedValues: Map<string, string>,
-  externalDataProvider?: ExternalDataProvider,
+  ctx: FieldContext,
 ): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
   const fields: DisplayField[] = [];
 
@@ -450,20 +367,28 @@ async function processFlatFields(
         ],
       };
     }
-    const result = await processSingleField(
-      fieldSpec,
-      definitions,
-      resolvePath,
-      chainId,
-      metadata,
-      renderedValues,
-      externalDataProvider,
-    );
+    const result = await processSingleField(fieldSpec, ctx);
     if ("warnings" in result) return result;
     if (result.field) fields.push(result.field);
   }
 
   return { fields };
+}
+
+/**
+ * Replace .[] with .[index] in child field paths for a given iteration index.
+ */
+function expandArrayIndex(
+  childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
+  index: number,
+): (DescriptorFieldFormat | DescriptorFieldGroup)[] {
+  return childFields.map((child) => {
+    if (isFieldGroup(child)) return child;
+    if (child.path?.includes(".[]")) {
+      return { ...child, path: child.path.replace(".[]", `.[${index}]`) };
+    }
+    return child;
+  });
 }
 
 /**
