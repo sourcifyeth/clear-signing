@@ -1,7 +1,5 @@
 # @sourcifyeth/clear-signing
 
-> **⚠️ Work in Progress**: This repository is currently under active development. The README was AI-generated and has not been reviewed. It might contain examples that don't work as expected and features that are not yet fully implemented. What currently works can be seen in the test folder.
-
 A TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](https://eips.ethereum.org/EIPS/eip-7730) for Ethereum transactions and EIP-712 typed data.
 
 This library transforms raw transaction calldata and typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
@@ -15,31 +13,42 @@ npm install @sourcifyeth/clear-signing
 ## Quick Start
 
 ```typescript
-import { format, formatTypedData } from "@sourcifyeth/clear-signing";
+import {
+  format,
+  formatTypedData,
+  createGitHubRegistryIndex,
+} from "@sourcifyeth/clear-signing";
 
-// Format an ERC-20 transfer transaction
+// Build the registry index once at app build time or startup.
+// This fetches the descriptor file tree from GitHub and indexes it
+// so that subsequent format() calls don't need to re-fetch it.
+const index = await createGitHubRegistryIndex();
+
+// Format an ERC-20 approve transaction
 const result = await format(
   {
     chainId: 1,
     to: "0xdAC17F958D2ee523a2206206994597C13D831ec7", // USDT
     data:
-      "0xa9059cbb" +
-      "000000000000000000000000ab5801a7d398351b8be11c439e05c5b3259aec9" + // to
+      "0x095ea7b3" +
+      "0000000000000000000000001234567890abcdef1234567890abcdef12345678" + // spender
       "00000000000000000000000000000000000000000000000000000000000f4240", // value
   },
   {
+    descriptorResolverOptions: { type: "github", index },
     externalDataProvider: {
       resolveToken: async (chainId, address) => {
         // return token metadata from your wallet's token list
+        // or call the ERC-20 methods on-chain
         return { name: "Tether USD", symbol: "USDT", decimals: 6 };
       },
     },
   },
 );
 
-console.log(result.intent); // "Send"
-console.log(result.fields); // [{ label: "To", value: "0xAb5..." }, { label: "Amount", value: "1 USDT" }]
-console.log(result.interpolatedIntent); // "Send 1 USDT to 0xAb5..."
+console.log(result.intent); // "Approve"
+console.log(result.fields); // [{ label: "Spender", value: "0x1234..." }, { label: "Amount", value: "1 USDT" }]
+console.log(result.interpolatedIntent); // "Approve 1 USDT to 0x1234..."
 ```
 
 ## API Reference
@@ -58,10 +67,10 @@ async function format(
 ```typescript
 interface Transaction {
   chainId: number;
-  to: string; // contract address
+  to: string;
   data: string; // calldata as hex string
-  value?: bigint; // native value in wei
-  from?: string; // sender address
+  value?: bigint;
+  from?: string;
 }
 ```
 
@@ -76,25 +85,42 @@ async function formatTypedData(
 ): Promise<DisplayModel>;
 ```
 
+```typescript
+interface TypedData {
+  account: string; // signer address
+  types: Record<string, TypeMember[]>;
+  primaryType: string;
+  domain: TypedDataDomain;
+  message: Record<string, unknown>;
+}
+```
+
 ### `FormatOptions`
 
 ```typescript
 interface FormatOptions {
   /**
-   * Provides external data resolution (token metadata, ENS names, etc.).
-   * When absent the library falls back to raw display for affected fields.
+   * Wallets should provide an object with async methods to resolve
+   * external data like ENS names, token metadata, and NFT collection
+   * names. The provided functions may use RPC calls or fetch data
+   * from internal sources. This allows the library to remain
+   * agnostic about how this data is fetched. If absent, the library
+   * will fall back to raw formats for the corresponding fields.
    */
   externalDataProvider?: ExternalDataProvider;
 
   /**
    * Controls where descriptors are fetched from.
    * Defaults to the GitHub registry when omitted.
+   * Also allows to pass descriptors directly via the `embedded` option.
    */
   descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
 
   /**
-   * For proxy contracts: the resolved implementation address for descriptor lookup.
-   * Proxy detection is left to the caller.
+   * For proxy contracts: the resolved implementation address to use for
+   * descriptor lookup. If present the library will use this address to
+   * resolve the descriptor instead of `tx.to`.
+   * This leaves proxy detection up to the user of the library.
    */
   resolvedImplementationAddress?: string;
 }
@@ -102,130 +128,72 @@ interface FormatOptions {
 
 ### `ExternalDataProvider`
 
-The library delegates all external data resolution to the wallet. None of the methods are required.
+The library delegates all external data resolution to the wallet. The wallet may use RPC calls to resolve the data.
 
 ```typescript
 interface ExternalDataProvider {
-  /** Resolve ENS name for an address. */
+  /**
+   * Resolution for addressName formats. The wallet must verify if the
+   * address matches the provided type (e.g., "eoa", "contract", ...)
+   * if able to. If the type does not match, the wallet should indicate
+   * this in the result, such that the library can include a warning
+   * about the resolved field in the DisplayModel.
+   */
+  resolveLocalName?: (
+    address: string,
+    type: string,
+  ) => Promise<AddressNameResult | null>;
+  /**
+   * Resolution for addressName formats. The wallet must verify if the
+   * address matches the provided type (e.g., "eoa", "contract", ...)
+   * if able to. If the type does not match, the wallet should indicate
+   * this in the result, such that the library can include a warning
+   * about the resolved field in the DisplayModel.
+   */
   resolveEnsName?: (
     address: string,
     type: string,
   ) => Promise<AddressNameResult | null>;
 
-  /** Resolve a locally known name for an address (e.g. from contacts). */
-  resolveLocalName?: (
-    address: string,
-    type: string,
-  ) => Promise<AddressNameResult | null>;
-
-  /** Resolve token metadata (symbol, decimals) for a contract address. */
+  /** Resolution for tokenAmount formats. */
   resolveToken?: (
     chainId: number,
     tokenAddress: string,
   ) => Promise<TokenResult | null>;
 
-  /** Resolve NFT collection name for a contract address. */
+  /** Resolution for nftName formats. */
   resolveNftCollectionName?: (
     collectionAddress: string,
   ) => Promise<NftCollectionNameResult | null>;
 }
 ```
 
-When `resolveToken` returns `null` or is absent, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value. When address name resolution fails, it returns the checksum address with an `ADDRESS_NOT_RESOLVED` warning.
-
-## Display Model
-
-All format functions return a `DisplayModel`:
-
-```typescript
-interface DisplayModel {
-  /**
-   * Short description of the operation, e.g. "Approve token spending".
-   */
-  intent?: string | Record<string, string>;
-
-  /**
-   * Ordered list of labeled fields to show to the user.
-   */
-  fields?: DisplayField[];
-
-  /**
-   * Full sentence with field values interpolated in, e.g.
-   * "Approve USDC spending up to 1,000 USDC for Uniswap V3".
-   */
-  interpolatedIntent?: string;
-
-  /**
-   * Additional metadata from the descriptor (owner, contract name, info URL).
-   */
-  metadata?: {
-    owner?: string;
-    contractName?: string;
-    info?: { deploymentDate?: string; url?: string };
-  };
-
-  /**
-   * Raw fallback when no descriptor matched or the descriptor was invalid.
-   */
-  rawCalldataFallback?: RawCalldataPreview;
-
-  /**
-   * Non-fatal warnings (e.g. token not resolved, address name not found).
-   */
-  warnings?: Warning[];
-}
-
-interface DisplayField {
-  label: string; // e.g. "Spender"
-  value: string; // e.g. "0xAb5..." or "1 USDT"
-  fieldType: FieldType; // Solidity type category: "address", "uint", "int", "bool", "bytes", etc.
-  format: string; // ERC-7730 format: "addressName", "tokenAmount", etc.
-  warning?: Warning; // field-level warning (e.g. ADDRESS_NOT_RESOLVED)
-  rawAddress?: string; // EIP-55 checksum address for address fields
-}
-
-interface Warning {
-  code: WarningCode; // machine-readable code
-  message: string; // human-readable message
-}
-
-type WarningCode =
-  | "NO_DESCRIPTOR"
-  | "DEPLOYMENT_MISMATCH"
-  | "NO_FORMAT_MATCH"
-  | "UNSUPPORTED_FIELD_GROUP"
-  | "FIELD_RESOLUTION"
-  | "MISSING_FIELD_VALUE"
-  | "UNRESOLVABLE_FIELD_TYPE"
-  | "INTERPOLATION_ERROR"
-  | "UNKNOWN_TOKEN"
-  | "ADDRESS_NOT_RESOLVED"
-  | "ADDRESS_TYPE_MISMATCH";
-```
-
-## Descriptor Sources
+### Descriptor Sources
 
 Descriptors are fetched from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) on GitHub by default.
 
-### GitHub Registry (default)
+#### GitHub Registry (default)
 
 ```typescript
-import type { GitHubResolverOptions } from "@sourcifyeth/clear-signing";
+import { format } from "@sourcifyeth/clear-signing";
 
 const result = await format(tx, {
   descriptorResolverOptions: {
     type: "github",
-    repo: "LedgerHQ/clear-signing-erc7730-registry", // optional
-    ref: "master", // optional
+    githubSource: {
+      repo: "LedgerHQ/clear-signing-erc7730-registry", // default
+      ref: "master", // default
+    },
   },
 });
 ```
 
-### Custom Index
+#### Embedded Descriptors
 
-For testing or offline use, provide a `RegistryIndex` directly:
+For bundled descriptors or testing, build your own index and descriptors will be loaded via JS module resolution:
 
 ```typescript
+import { format } from "@sourcifyeth/clear-signing";
 import type { RegistryIndex } from "@sourcifyeth/clear-signing";
 
 const index: RegistryIndex = {
@@ -237,33 +205,85 @@ const index: RegistryIndex = {
 };
 
 const result = await format(tx, {
-  descriptorResolverOptions: { type: "github", index },
+  descriptorResolverOptions: {
+    type: "embedded",
+    index,
+    descriptorDirectory: "./descriptors",
+  },
 });
 ```
 
-### Known Limitation — EIP-712 Index Coverage
+### Display Model
+
+All format functions return a `DisplayModel`:
+
+```typescript
+/**
+ * The complete display model produced by the library.
+ *
+ * According to ERC-7730, wallets have two display options:
+ *   1. Show `intent` as an explanation what the contract call does, and
+ *      `fields` as a list of labeled values representing the calldata parameters.
+ *   2. Show `interpolatedIntent` as a short string presentation of intent and fields,
+ *      which already has formatted field values embedded in it — in this case
+ *      `fields` can be omitted or shown as supplementary detail.
+ *
+ * When interpolation fails or is not defined, wallets should fall back to Option 1.
+ */
+interface DisplayModel {
+  /**
+   * The intent from the resolved descriptor, representing a short
+   * description of the operation, e.g. "Approve token spending".
+   * Two possible forms:
+   *   - A simple human-readable string
+   *   - A list of human-readable key-value pairs
+   */
+  intent?: string | Record<string, string>;
+
+  /**
+   * Ordered list of fields to show to the user,
+   * formatted according to their field format specification.
+   */
+  fields?: (DisplayField | DisplayFieldGroup)[];
+
+  /**
+   * Full sentence with formatted field values interpolated in, e.g.
+   * "Approve USDC spending up to 1,000 USDC for Uniswap V3".
+   * Absent when the descriptor does not define an interpolatedIntent,
+   * or when interpolation fails.
+   */
+  interpolatedIntent?: string;
+
+  /**
+   * Additional metadata directly from the resolved descriptor.
+   * Wallets may choose to display these items to provide additional
+   * context about the contract being interacted with.
+   */
+  metadata?: {
+    owner?: string;
+    contractName?: string;
+    info?: { deploymentDate?: string; url?: string };
+  };
+
+  /**
+   * Raw calldata fallback when no descriptor matched or the descriptor was faulty.
+   * Only present for calldata formatting — not applicable to EIP-712 typed data.
+   */
+  rawCalldataFallback?: RawCalldataFallback;
+
+  /**
+   * Non-fatal warnings providing additional context, e.g. why
+   * interpolation failed or why a field could not be formatted.
+   */
+  warnings?: Warning[];
+}
+```
+
+See `src/types.ts` for the full type definitions.
+
+## Known Limitation — EIP-712 Index Coverage
 
 The GitHub index only keys EIP-712 descriptors on `context.eip712.deployments`. Descriptors that bind via `context.eip712.domain` or `context.eip712.domainSeparator` cannot be pre-indexed.
-
-## Field Formats
-
-| Format        | Description                                | Example Output                   |
-| ------------- | ------------------------------------------ | -------------------------------- |
-| `tokenAmount` | Token amount with decimals and symbol      | `1,000.5 USDT`                   |
-| `amount`      | Native currency amount                     | `1.5 ETH`                        |
-| `date`        | Unix timestamp as UTC date string          | `2024-01-15 12:30:00 UTC`        |
-| `addressName` | Resolved name or checksum address          | `vitalik.eth` or `0xd8dA6BF2...` |
-| `enum`        | Mapped enum value from descriptor metadata | `Buy` (from `0`)                 |
-| `raw`         | Raw hex or string fallback                 | `0x1234abcd`                     |
-
-## Browser & Node.js Support
-
-This library works in both environments:
-
-- **Node.js**: >= 18.0.0
-- **Browsers**: All modern browsers (ES2020+)
-
-No Node.js-specific APIs are used. Cryptographic operations use [@noble/hashes](https://github.com/paulmillr/noble-hashes).
 
 ## Development
 

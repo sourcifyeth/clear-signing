@@ -271,7 +271,7 @@ export interface FormatOptions {
   /**
    * Controls where descriptors are fetched from.
    * Defaults to the GitHub registry when omitted.
-   * Will also allow to pass descriptors directly.
+   * Also allows to pass descriptors directly via the `embedded` option.
    */
   descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
 
