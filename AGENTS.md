@@ -273,6 +273,10 @@ const opts: FormatOptions = {
 };
 ```
 
+## Before Committing
+
+Always run `npm run fix` before committing to auto-fix lint and formatting issues.
+
 ## Testing
 
 ```bash

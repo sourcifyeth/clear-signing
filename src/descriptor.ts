@@ -339,6 +339,12 @@ export function interpolateTemplate(
   while (i < template.length) {
     const ch = template[i];
     if (ch === "{") {
+      // Escaped {{ → literal {
+      if (template[i + 1] === "{") {
+        output += "{";
+        i += 2;
+        continue;
+      }
       let placeholder = "";
       i++;
       let closed = false;
@@ -363,6 +369,10 @@ export function interpolateTemplate(
         throw new Error(`Missing interpolated value for '${key}'`);
       }
       output += value;
+    } else if (ch === "}" && template[i + 1] === "}") {
+      // Escaped }} → literal }
+      output += "}";
+      i += 2;
     } else {
       output += ch;
       i++;
