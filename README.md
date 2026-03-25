@@ -162,6 +162,7 @@ interface ExternalDataProvider {
 
   /** Resolution for nftName formats. */
   resolveNftCollectionName?: (
+    chainId: number,
     collectionAddress: string,
   ) => Promise<NftCollectionNameResult | null>;
 }

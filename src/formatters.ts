@@ -7,6 +7,7 @@ import type {
   DescriptorFieldFormatType,
   DescriptorMetadata,
   ExternalDataProvider,
+  NftCollectionNameResult,
   TokenResult,
   Warning,
 } from "./types";
@@ -62,14 +63,23 @@ export async function renderField(
         metadata,
         externalDataProvider,
       );
+    case "nftName":
+      return await formatNftName(
+        fieldOptions,
+        value,
+        resolvePath,
+        chainId,
+        metadata,
+        externalDataProvider,
+      );
     case "date":
       return formatDate(value, fieldOptions);
-    case "enum":
-      return formatEnum(fieldOptions, value, metadata);
-    case "unit":
-      return formatUnit(value, fieldOptions);
     case "duration":
       return formatDuration(value);
+    case "unit":
+      return formatUnit(value, fieldOptions);
+    case "enum":
+      return formatEnum(fieldOptions, value, metadata);
     case "addressName":
       return await formatAddressNameField(
         value,
@@ -248,6 +258,109 @@ export function resolveTokenAddress(
 
   // @. or bare/# path — resolve via the caller's closure
   const resolved = resolvePath(token);
+  if (resolved?.type === "address") {
+    return bytesToHex(resolved.bytes).toLowerCase();
+  }
+
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// nftName format
+// ---------------------------------------------------------------------------
+
+export async function formatNftName(
+  field: FieldFormatOptions,
+  value: ArgumentValue,
+  resolvePath: ResolvePath,
+  chainId: number | undefined,
+  metadata: DescriptorMetadata | undefined,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
+  if (value.type !== "uint" && value.type !== "int") {
+    return typeMismatch(value, "uint or int", "nftName");
+  }
+
+  if (chainId === undefined) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "CONTAINER_MISSING_CHAIN_ID",
+        "Cannot format nftName without a chainId on the container",
+      ),
+    };
+  }
+
+  const tokenId = value.value;
+  const collectionAddress = resolveCollectionAddress(
+    field,
+    resolvePath,
+    metadata,
+  );
+  if (!collectionAddress) {
+    return formatRaw(value);
+  }
+
+  let collection: NftCollectionNameResult | null;
+  try {
+    collection =
+      (await externalDataProvider?.resolveNftCollectionName?.(
+        chainId,
+        collectionAddress,
+      )) ?? null;
+  } catch {
+    collection = null;
+  }
+  if (!collection) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "UNKNOWN_NFT",
+        "NFT collection name could not be resolved",
+      ),
+    };
+  }
+
+  return {
+    rendered: `Collection Name: ${collection.name} - Token ID: ${tokenId.toString()}`,
+  };
+}
+
+/**
+ * Resolve the NFT collection address for an nftName field.
+ *
+ * Per the spec, `collection` takes priority over `collectionPath`. Both can be
+ * either a constant address or a path reference.
+ */
+export function resolveCollectionAddress(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+): string | undefined {
+  const params = field.params ?? {};
+  const collection = params.collection ?? params.collectionPath;
+  if (!collection) return undefined;
+
+  // Constant address
+  if (collection.startsWith("0x") && collection.length === 42) {
+    return collection.toLowerCase();
+  }
+
+  // $.metadata.* path
+  if (collection.startsWith("$.")) {
+    const metaValue = resolveMetadataValue(metadata, collection);
+    if (
+      typeof metaValue === "string" &&
+      metaValue.startsWith("0x") &&
+      metaValue.length === 42
+    ) {
+      return metaValue.toLowerCase();
+    }
+    return undefined;
+  }
+
+  // @. or bare/# path — resolve via the caller's closure
+  const resolved = resolvePath(collection);
   if (resolved?.type === "address") {
     return bytesToHex(resolved.bytes).toLowerCase();
   }

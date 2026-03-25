@@ -19,6 +19,8 @@ import {
   resolveEnumLabel,
   formatUnit,
   formatDuration,
+  formatNftName,
+  resolveCollectionAddress,
   formatAddressNameField,
   formatAddressName,
   typeMismatch,
@@ -393,6 +395,175 @@ describe("formatTokenAmount", () => {
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     );
     expect(result.warning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nftName format: formatNftName, resolveCollectionAddress
+// ---------------------------------------------------------------------------
+
+describe("resolveCollectionAddress", () => {
+  it("returns constant address from collection param", () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const result = resolveCollectionAddress(field, noopResolvePath, undefined);
+    expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
+  });
+
+  it("falls back to collectionPath param", () => {
+    const field = {
+      params: { collectionPath: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const result = resolveCollectionAddress(field, noopResolvePath, undefined);
+    expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
+  });
+
+  it("resolves from metadata path", () => {
+    const field = {
+      params: { collection: "$.metadata.constants.collectionAddr" },
+    };
+    const metadata: DescriptorMetadata = {
+      constants: {
+        collectionAddr: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+      },
+    };
+    const result = resolveCollectionAddress(field, noopResolvePath, metadata);
+    expect(result).toBe("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d");
+  });
+
+  it("resolves from resolvePath for bare paths", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "nftAddr" ? addr() : undefined;
+    const field = { params: { collection: "nftAddr" } };
+    const result = resolveCollectionAddress(field, resolve, undefined);
+    expect(result).toBe(
+      "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+    );
+  });
+
+  it("returns undefined when no collection param", () => {
+    const result = resolveCollectionAddress({}, noopResolvePath, undefined);
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("formatNftName", () => {
+  it("renders collection name and token ID when resolved", async () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const provider: ExternalDataProvider = {
+      resolveNftCollectionName: vi.fn().mockResolvedValue({
+        name: "BoredApeYachtClub",
+      }),
+    };
+    const result = await formatNftName(
+      field,
+      uint(1036n),
+      noopResolvePath,
+      1,
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe(
+      "Collection Name: BoredApeYachtClub - Token ID: 1036",
+    );
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("falls back to raw when collection address is missing", async () => {
+    const result = await formatNftName(
+      {},
+      uint(1036n),
+      noopResolvePath,
+      1,
+      undefined,
+    );
+    expect(result.rendered).toBe("1,036");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("returns CONTAINER_MISSING_CHAIN_ID warning when chainId is undefined", async () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const result = await formatNftName(
+      field,
+      uint(1036n),
+      noopResolvePath,
+      undefined,
+      undefined,
+    );
+    expect(result.rendered).toBe("1,036");
+    expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
+  });
+
+  it("returns UNKNOWN_NFT warning when provider returns null", async () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const provider: ExternalDataProvider = {
+      resolveNftCollectionName: vi.fn().mockResolvedValue(null),
+    };
+    const result = await formatNftName(
+      field,
+      uint(1036n),
+      noopResolvePath,
+      1,
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe("1,036");
+    expect(result.warning?.code).toBe("UNKNOWN_NFT");
+  });
+
+  it("returns UNKNOWN_NFT warning when provider throws", async () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const provider: ExternalDataProvider = {
+      resolveNftCollectionName: vi.fn().mockRejectedValue(new Error("fail")),
+    };
+    const result = await formatNftName(
+      field,
+      uint(1036n),
+      noopResolvePath,
+      1,
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe("1,036");
+    expect(result.warning?.code).toBe("UNKNOWN_NFT");
+  });
+
+  it("returns type mismatch for non-numeric types", async () => {
+    const result = await formatNftName(
+      {},
+      str("hello"),
+      noopResolvePath,
+      1,
+      undefined,
+    );
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("accepts int type", async () => {
+    const field = {
+      params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
+    };
+    const provider: ExternalDataProvider = {
+      resolveNftCollectionName: vi.fn().mockResolvedValue({ name: "CoolCats" }),
+    };
+    const result = await formatNftName(
+      field,
+      int(42n),
+      noopResolvePath,
+      1,
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe("Collection Name: CoolCats - Token ID: 42");
   });
 });
 

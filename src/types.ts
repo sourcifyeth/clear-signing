@@ -65,6 +65,7 @@ export type WarningCode =
   | "ARGUMENT_TYPE_MISMATCH"
   | "DOMAIN_MISMATCH"
   | "EMPTY_ARRAY"
+  | "UNKNOWN_NFT"
   | "BUNDLED_ARRAY_SIZE_MISMATCH";
 
 /** Non-fatal warning from formatting. */
@@ -253,6 +254,7 @@ export interface ExternalDataProvider {
 
   /** Resolution for nftName formats. */
   resolveNftCollectionName?: (
+    chainId: number,
     collectionAddress: string,
   ) => Promise<NftCollectionNameResult | null>;
 }
