@@ -1,12 +1,11 @@
 import type { GitHubSource, RegistryIndex } from "./types";
 import {
+  DEFAULT_REPO,
+  DEFAULT_REF,
   fetchRegistryFilePaths,
   fetchRegistryFile,
 } from "./github-registry-client";
 import { normalizeAddress } from "./utils";
-
-export const DEFAULT_REPO = "LedgerHQ/clear-signing-erc7730-registry";
-export const DEFAULT_REF = "master";
 
 function indexDescriptor(
   descriptor: Record<string, unknown>,

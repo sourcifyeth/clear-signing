@@ -6,6 +6,9 @@
 
 import type { GitHubSource } from "./types";
 
+export const DEFAULT_REPO = "LedgerHQ/clear-signing-erc7730-registry";
+export const DEFAULT_REF = "master";
+
 /**
  * Returns the raw content base URL for a GitHub repo/ref.
  * e.g. "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master"

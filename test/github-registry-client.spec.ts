@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+  DEFAULT_REPO,
+  DEFAULT_REF,
   fetchRegistryFilePaths,
   fetchRegistryFile,
 } from "../src/github-registry-client";
-import { DEFAULT_REPO, DEFAULT_REF } from "../src/github-registry-index";
 
 // ---------------------------------------------------------------------------
 // Fetch mock helpers

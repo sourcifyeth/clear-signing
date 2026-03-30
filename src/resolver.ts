@@ -1,4 +1,8 @@
-import { fetchRegistryFile } from "./github-registry-client";
+import {
+  DEFAULT_REPO,
+  DEFAULT_REF,
+  fetchRegistryFile,
+} from "./github-registry-client";
 import type {
   Descriptor,
   EmbeddedResolverOptions,
@@ -7,9 +11,6 @@ import type {
   RegistryIndex,
 } from "./types";
 import { normalizeAddress } from "./utils";
-
-export const DEFAULT_REPO = "LedgerHQ/clear-signing-erc7730-registry";
-export const DEFAULT_REF = "master";
 
 /**
  * Uses the index to resolve a descriptor path, then fetches and returns the
