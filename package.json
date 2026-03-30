@@ -26,7 +26,8 @@
     "fix": "npm run fix:prettier && npm run fix:eslint",
     "fix:prettier": "prettier \"**/*.{ts,js,md,json}\" --write",
     "fix:eslint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
-    "check": "npm run check:prettier && npm run check:eslint",
+    "check": "npm run check:types && npm run check:prettier && npm run check:eslint",
+    "check:types": "tsc --noEmit -p tsconfig.check.json",
     "check:prettier": "prettier \"**/*.{ts,js,md,json}\" --check",
     "check:eslint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
   },

@@ -12,7 +12,7 @@ import { DEFAULT_REPO, DEFAULT_REF } from "../src/github-registry-index";
 function mockFetch(responses: Map<string, unknown>) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
       if (responses.has(url)) {
         return new Response(JSON.stringify(responses.get(url)), {
