@@ -734,7 +734,7 @@ describe("formatNftName", () => {
     expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
   });
 
-  it("returns UNKNOWN_NFT warning when provider returns null", async () => {
+  it("returns UNKNOWN_NFT_COLLECTION warning when provider returns null", async () => {
     const field = {
       params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
     };
@@ -749,10 +749,10 @@ describe("formatNftName", () => {
       provider,
     );
     expect(result.rendered).toBe("1,036");
-    expect(result.warning?.code).toBe("UNKNOWN_NFT");
+    expect(result.warning?.code).toBe("UNKNOWN_NFT_COLLECTION");
   });
 
-  it("returns UNKNOWN_NFT warning when provider throws", async () => {
+  it("returns UNKNOWN_NFT_COLLECTION warning when provider throws", async () => {
     const field = {
       params: { collection: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D" },
     };
@@ -767,7 +767,7 @@ describe("formatNftName", () => {
       provider,
     );
     expect(result.rendered).toBe("1,036");
-    expect(result.warning?.code).toBe("UNKNOWN_NFT");
+    expect(result.warning?.code).toBe("UNKNOWN_NFT_COLLECTION");
   });
 
   it("returns type mismatch for non-numeric types", async () => {

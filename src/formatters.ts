@@ -383,7 +383,7 @@ export async function formatNftName(
   if (!collection) {
     return {
       rendered: renderRaw(value),
-      warning: warn("UNKNOWN_NFT", "NFT collection name could not be resolved"),
+      warning: warn("UNKNOWN_NFT_COLLECTION", "NFT collection name could not be resolved"),
     };
   }
 
