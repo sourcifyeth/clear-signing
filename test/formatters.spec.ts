@@ -397,6 +397,78 @@ describe("formatTokenAmount", () => {
     );
     expect(result.warning).toBeUndefined();
   });
+
+  it("uses chainId from params over container chainId", async () => {
+    const resolveTokenSpy: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const field = { params: { token: tokenAddr, chainId: 137 } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      1,
+      resolveTokenSpy,
+    );
+    expect(result.rendered).toBe("1 USDC");
+    expect(resolveTokenSpy.resolveToken).toHaveBeenCalledWith(
+      137,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("resolves chainIdPath via resolvePath", async () => {
+    const resolve: ResolvePath = (path) =>
+      path === "destChain" ? { type: "uint", value: 42n } : undefined;
+    const resolveTokenSpy: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const field = { params: { token: tokenAddr, chainIdPath: "destChain" } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      resolve,
+      1,
+      resolveTokenSpy,
+    );
+    expect(result.rendered).toBe("1 USDC");
+    expect(resolveTokenSpy.resolveToken).toHaveBeenCalledWith(
+      42,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("falls back to container chainId when param chainId is absent", async () => {
+    const resolveTokenSpy: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const field = { params: { token: tokenAddr } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      10,
+      resolveTokenSpy,
+    );
+    expect(result.rendered).toBe("1 USDC");
+    expect(resolveTokenSpy.resolveToken).toHaveBeenCalledWith(
+      10,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("falls back to raw when chainIdPath cannot be resolved", async () => {
+    const field = { params: { token: tokenAddr, chainIdPath: "missingPath" } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("1,000,000");
+    expect(result.warning).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1242,17 @@ describe("formatTokenTicker", () => {
       10,
       tokenAddr.toLowerCase(),
     );
+  });
+
+  it("falls back to raw when chainIdPath cannot be resolved", async () => {
+    const result = await formatTokenTicker(
+      addr(tokenBytes),
+      { params: { chainIdPath: "missingPath" } },
+      noopResolvePath,
+      1,
+    );
+    expect(result.rendered).toBe(tokenAddr);
+    expect(result.warning).toBeUndefined();
   });
 
   it("returns type mismatch for non-address types", async () => {

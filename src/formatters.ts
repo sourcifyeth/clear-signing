@@ -143,12 +143,20 @@ export async function formatTokenAmount(
   field: FieldFormatOptions,
   value: ArgumentValue,
   resolvePath: ResolvePath,
-  chainId: number | undefined,
+  containerChainId: number | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int") {
     return typeMismatch(value, "uint or int", "tokenAmount");
   }
+
+  const chainIdResult = resolveChainId(field, resolvePath);
+  if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
+    return formatRaw(value);
+  }
+  const chainId = chainIdResult.hasChainIdParam
+    ? chainIdResult.value
+    : containerChainId;
 
   if (chainId === undefined) {
     return {
@@ -642,7 +650,13 @@ export async function formatTokenTicker(
     return typeMismatch(value, "address", "tokenTicker");
 
   const tokenAddress = bytesToHex(value.bytes).toLowerCase();
-  const chainId = resolveChainId(fieldOptions, resolvePath) ?? containerChainId;
+  const chainIdResult = resolveChainId(fieldOptions, resolvePath);
+  if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
+    return formatRaw(value);
+  }
+  const chainId = chainIdResult.hasChainIdParam
+    ? chainIdResult.value
+    : containerChainId;
 
   if (chainId === undefined) {
     return {
@@ -672,36 +686,43 @@ export async function formatTokenTicker(
   return { rendered: token.symbol };
 }
 
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
 /**
- * Resolve the chain ID for a tokenTicker field from params.chainId or
- * params.chainIdPath. Returns undefined when neither is set.
+ * Resolve the chain ID from params.chainId or params.chainIdPath.
+ *
+ * Returns:
+ * - `{ hasChainIdParam: false }` — neither chainId nor chainIdPath is present
+ * - `{ hasChainIdParam: true, value: number }` — successfully resolved
+ * - `{ hasChainIdParam: true, value: undefined }` — param was present but could not be resolved
  */
 function resolveChainId(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
-): number | undefined {
+):
+  | { hasChainIdParam: false }
+  | { hasChainIdParam: true; value: number | undefined } {
   const params = field.params ?? {};
   const spec = params.chainId ?? params.chainIdPath;
-  if (!spec) return undefined;
+  if (!spec) return { hasChainIdParam: false };
 
-  if (typeof spec === "number") return spec;
+  if (typeof spec === "number") return { hasChainIdParam: true, value: spec };
 
   if (typeof spec === "string") {
     const n = Number(spec);
-    if (Number.isInteger(n) && n > 0) return n;
+    if (Number.isInteger(n) && n > 0)
+      return { hasChainIdParam: true, value: n };
 
     const resolved = resolvePath(spec);
     if (resolved?.type === "uint" || resolved?.type === "int") {
-      return Number(resolved.value);
+      return { hasChainIdParam: true, value: Number(resolved.value) };
     }
   }
 
-  return undefined;
+  return { hasChainIdParam: true, value: undefined };
 }
-
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
 
 export function typeMismatch(
   value: ArgumentValue,
