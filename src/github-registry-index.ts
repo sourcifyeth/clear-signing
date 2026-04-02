@@ -71,18 +71,28 @@ export async function createGitHubRegistryIndex(
     calldataIndex: {},
     typedDataIndex: {},
   };
-  await Promise.all(
-    paths.map(async (path) => {
-      try {
-        const descriptor = (await fetchRegistryFile(
-          path,
-          gitHubSource,
-        )) as Record<string, unknown>;
-        indexDescriptor(descriptor, path, index);
-      } catch {
-        // Skip malformed or inaccessible descriptors
-      }
-    }),
-  );
+  const concurrency = 25;
+  const maxRetries = 3;
+  for (let i = 0; i < paths.length; i += concurrency) {
+    const batch = paths.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (path) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const descriptor = (await fetchRegistryFile(
+              path,
+              gitHubSource,
+            )) as Record<string, unknown>;
+            indexDescriptor(descriptor, path, index);
+            return;
+          } catch {
+            if (attempt < maxRetries) {
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+            }
+          }
+        }
+      }),
+    );
+  }
   return index;
 }
