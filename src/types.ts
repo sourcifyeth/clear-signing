@@ -66,7 +66,9 @@ export type WarningCode =
   | "DOMAIN_MISMATCH"
   | "EMPTY_ARRAY"
   | "UNKNOWN_NFT"
-  | "BUNDLED_ARRAY_SIZE_MISMATCH";
+  | "BUNDLED_ARRAY_SIZE_MISMATCH"
+  | "FORMAT_PARAM_RESOLUTION_ERROR"
+  | "UNKNOWN_ENCODING";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {

@@ -152,7 +152,13 @@ export async function formatTokenAmount(
 
   const chainIdResult = resolveChainId(field, resolvePath);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
-    return formatRaw(value);
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "chainId or chainIdPath param could not be resolved",
+      ),
+    };
   }
   const chainId = chainIdResult.hasChainIdParam
     ? chainIdResult.value
@@ -171,7 +177,13 @@ export async function formatTokenAmount(
   const amount = value.value;
   const tokenAddress = resolveTokenAddress(field, resolvePath);
   if (!tokenAddress) {
-    return formatRaw(value);
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "token or tokenPath param could not be resolved",
+      ),
+    };
   }
 
   const checksumTokenAddress = toChecksumAddress(hexToBytes(tokenAddress));
@@ -343,7 +355,13 @@ export async function formatNftName(
   const tokenId = value.value;
   const collectionAddress = resolveCollectionAddress(field, resolvePath);
   if (!collectionAddress) {
-    return formatRaw(value);
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "collection or collectionPath param could not be resolved",
+      ),
+    };
   }
 
   let collection: NftCollectionNameResult | null;
@@ -407,11 +425,22 @@ export function formatDate(
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "date");
   const encoding = fieldOptions.params?.encoding;
-  if (encoding !== "timestamp") return formatRaw(value);
+  if (encoding !== "timestamp") {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "UNKNOWN_ENCODING",
+        `Unsupported or missing encoding: ${encoding ?? "(none)"}`,
+      ),
+    };
+  }
   try {
     return formatTimestamp(value.value);
   } catch {
-    return formatRaw(value);
+    return {
+      rendered: renderRaw(value),
+      warning: warn("UNKNOWN_ENCODING", "Failed to parse timestamp value"),
+    };
   }
 }
 
@@ -524,7 +553,15 @@ export function formatEnum(
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "enum");
   const label = resolveEnumLabel(field, value.value.toString(), metadata);
-  if (!label) return formatRaw(value);
+  if (!label) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "Enum label could not be resolved",
+      ),
+    };
+  }
   return { rendered: label };
 }
 
@@ -652,7 +689,13 @@ export async function formatTokenTicker(
   const tokenAddress = bytesToHex(value.bytes).toLowerCase();
   const chainIdResult = resolveChainId(fieldOptions, resolvePath);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
-    return formatRaw(value);
+    return {
+      rendered: toChecksumAddress(value.bytes),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "chainId or chainIdPath param could not be resolved",
+      ),
+    };
   }
   const chainId = chainIdResult.hasChainIdParam
     ? chainIdResult.value

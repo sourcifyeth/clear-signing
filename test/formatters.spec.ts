@@ -360,7 +360,7 @@ describe("formatTokenAmount", () => {
       1,
     );
     expect(result.rendered).toBe("1,000,000");
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
   it("returns UNKNOWN_TOKEN when provider returns null", async () => {
@@ -467,7 +467,7 @@ describe("formatTokenAmount", () => {
       provider,
     );
     expect(result.rendered).toBe("1,000,000");
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 });
 
@@ -717,7 +717,7 @@ describe("formatNftName", () => {
   it("falls back to raw when collection address is missing", async () => {
     const result = await formatNftName({}, uint(1036n), noopResolvePath, 1);
     expect(result.rendered).toBe("1,036");
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
   it("returns CONTAINER_MISSING_CHAIN_ID warning when chainId is undefined", async () => {
@@ -838,7 +838,7 @@ describe("formatDate", () => {
   it("falls back to raw when encoding is missing", () => {
     const result = formatDate(uint(1705312800n), {});
     expect(result.rendered).toBe("1,705,312,800");
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("UNKNOWN_ENCODING");
   });
 
   it("returns type mismatch for non-uint/int", () => {
@@ -908,7 +908,7 @@ describe("formatEnum", () => {
     const field = { params: { $ref: "$.metadata.enums.status" } };
     const result = formatEnum(field, uint(99n), metadata);
     expect(result.rendered).toBe("99");
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
   it("accepts int values", () => {
@@ -1252,7 +1252,7 @@ describe("formatTokenTicker", () => {
       1,
     );
     expect(result.rendered).toBe(tokenAddr);
-    expect(result.warning).toBeUndefined();
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
   it("returns type mismatch for non-address types", async () => {
