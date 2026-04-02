@@ -201,7 +201,8 @@ Not yet implemented: `chainId`, `calldata`, `interoperableAddressName`
 **Spec-compliance notes:**
 
 - All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`) accept both `uint` and `int` field types.
-- `date` format requires `params.encoding` to be `"timestamp"` — falls back to raw when missing.
+- `date` format supports `params.encoding` of `"timestamp"` (unix seconds) and `"blockheight"` (resolved via `ExternalDataProvider.resolveBlockTimestamp`). Falls back to raw with `UNKNOWN_ENCODING` warning for missing or unsupported encodings.
+- `tokenAmount` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios (same as `tokenTicker`).
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
 - `nftName` resolves collection name via `ExternalDataProvider.resolveNftCollectionName(chainId, address)`.
 - `tokenTicker` accepts only `address` type; supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios.

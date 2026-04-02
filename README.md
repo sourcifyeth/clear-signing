@@ -165,6 +165,12 @@ interface ExternalDataProvider {
     chainId: number,
     collectionAddress: string,
   ) => Promise<NftCollectionNameResult | null>;
+
+  /** Resolution for date format with blockheight encoding. */
+  resolveBlockTimestamp?: (
+    chainId: number,
+    blockHeight: bigint,
+  ) => Promise<BlockTimestampResult | null>;
 }
 ```
 

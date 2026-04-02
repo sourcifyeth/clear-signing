@@ -3,6 +3,7 @@
  */
 
 import type {
+  BlockTimestampResult,
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
   DescriptorMetadata,
@@ -71,7 +72,12 @@ export async function renderField(
         externalDataProvider,
       );
     case "date":
-      return formatDate(value, fieldOptions);
+      return await formatDate(
+        value,
+        fieldOptions,
+        chainId,
+        externalDataProvider,
+      );
     case "duration":
       return formatDuration(value);
     case "unit":
@@ -418,30 +424,65 @@ export function resolveCollectionAddress(
 // date format
 // ---------------------------------------------------------------------------
 
-export function formatDate(
+export async function formatDate(
   value: ArgumentValue,
   fieldOptions: FieldFormatOptions,
-): RenderFieldResult {
+  chainId: number | undefined,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "date");
   const encoding = fieldOptions.params?.encoding;
-  if (encoding !== "timestamp") {
-    return {
-      rendered: renderRaw(value),
-      warning: warn(
-        "UNKNOWN_ENCODING",
-        `Unsupported or missing encoding: ${encoding ?? "(none)"}`,
-      ),
-    };
+
+  if (encoding === "timestamp") {
+    try {
+      return formatTimestamp(value.value);
+    } catch {
+      return {
+        rendered: renderRaw(value),
+        warning: warn("UNKNOWN_ENCODING", "Failed to parse timestamp value"),
+      };
+    }
   }
-  try {
-    return formatTimestamp(value.value);
-  } catch {
-    return {
-      rendered: renderRaw(value),
-      warning: warn("UNKNOWN_ENCODING", "Failed to parse timestamp value"),
-    };
+
+  if (encoding === "blockheight") {
+    if (chainId === undefined) {
+      return {
+        rendered: renderRaw(value),
+        warning: warn(
+          "CONTAINER_MISSING_CHAIN_ID",
+          "Cannot format blockheight without a chainId on the container",
+        ),
+      };
+    }
+
+    let result: BlockTimestampResult | null;
+    try {
+      result =
+        (await externalDataProvider?.resolveBlockTimestamp?.(
+          chainId,
+          value.value,
+        )) ?? null;
+    } catch {
+      result = null;
+    }
+    if (!result) {
+      return {
+        rendered: renderRaw(value),
+        warning: warn("UNKNOWN_BLOCK", "Block timestamp could not be resolved"),
+      };
+    }
+
+    return formatTimestamp(BigInt(result.timestamp));
   }
+
+  return {
+    rendered: renderRaw(value),
+    warning: warn(
+      "UNKNOWN_ENCODING",
+      `Unsupported or missing encoding: ${encoding ?? "(none)"}`,
+    ),
+  };
 }
 
 /**

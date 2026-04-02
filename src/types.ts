@@ -68,7 +68,8 @@ export type WarningCode =
   | "UNKNOWN_NFT"
   | "BUNDLED_ARRAY_SIZE_MISMATCH"
   | "FORMAT_PARAM_RESOLUTION_ERROR"
-  | "UNKNOWN_ENCODING";
+  | "UNKNOWN_ENCODING"
+  | "UNKNOWN_BLOCK";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
@@ -223,6 +224,12 @@ export interface NftCollectionNameResult {
   name: string;
 }
 
+/** Result of resolving a block timestamp. */
+export interface BlockTimestampResult {
+  /** Unix timestamp in seconds. */
+  timestamp: number;
+}
+
 /** Wallet-provided async resolvers for external data. */
 export interface ExternalDataProvider {
   /**
@@ -259,6 +266,12 @@ export interface ExternalDataProvider {
     chainId: number,
     collectionAddress: string,
   ) => Promise<NftCollectionNameResult | null>;
+
+  /** Resolution for date format with blockheight encoding. */
+  resolveBlockTimestamp?: (
+    chainId: number,
+    blockHeight: bigint,
+  ) => Promise<BlockTimestampResult | null>;
 }
 
 export interface FormatOptions {

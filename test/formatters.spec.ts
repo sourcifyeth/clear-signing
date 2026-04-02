@@ -822,28 +822,100 @@ describe("formatTimestamp", () => {
 
 describe("formatDate", () => {
   const timestampOpts = { params: { encoding: "timestamp" as const } };
+  const blockheightOpts = { params: { encoding: "blockheight" as const } };
 
-  it("formats a uint value as date with encoding=timestamp", () => {
-    const result = formatDate(uint(1705312800n), timestampOpts);
+  it("formats a uint value as date with encoding=timestamp", async () => {
+    const result = await formatDate(uint(1705312800n), timestampOpts, 1);
     expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
     expect(result.warning).toBeUndefined();
   });
 
-  it("formats an int value as date with encoding=timestamp", () => {
-    const result = formatDate(int(1705312800n), timestampOpts);
+  it("formats an int value as date with encoding=timestamp", async () => {
+    const result = await formatDate(int(1705312800n), timestampOpts, 1);
     expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
     expect(result.warning).toBeUndefined();
   });
 
-  it("falls back to raw when encoding is missing", () => {
-    const result = formatDate(uint(1705312800n), {});
+  it("falls back to raw when encoding is missing", async () => {
+    const result = await formatDate(uint(1705312800n), {}, 1);
     expect(result.rendered).toBe("1,705,312,800");
     expect(result.warning?.code).toBe("UNKNOWN_ENCODING");
   });
 
-  it("returns type mismatch for non-uint/int", () => {
-    const result = formatDate(str("not a date"), timestampOpts);
+  it("returns type mismatch for non-uint/int", async () => {
+    const result = await formatDate(str("not a date"), timestampOpts, 1);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("formats blockheight with resolved timestamp", async () => {
+    const provider: ExternalDataProvider = {
+      resolveBlockTimestamp: async () => ({ timestamp: 1709191632 }),
+    };
+    const result = await formatDate(
+      uint(19332140n),
+      blockheightOpts,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("2024-02-29 07:27:12 UTC");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("accepts int values for blockheight", async () => {
+    const provider: ExternalDataProvider = {
+      resolveBlockTimestamp: async () => ({ timestamp: 1709191632 }),
+    };
+    const result = await formatDate(
+      int(19332140n),
+      blockheightOpts,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("2024-02-29 07:27:12 UTC");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("returns CONTAINER_MISSING_CHAIN_ID for blockheight without chainId", async () => {
+    const result = await formatDate(
+      uint(19332140n),
+      blockheightOpts,
+      undefined,
+    );
+    expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
+  });
+
+  it("returns UNKNOWN_BLOCK when provider returns null", async () => {
+    const provider: ExternalDataProvider = {
+      resolveBlockTimestamp: async () => null,
+    };
+    const result = await formatDate(
+      uint(19332140n),
+      blockheightOpts,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("19,332,140");
+    expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
+  });
+
+  it("returns UNKNOWN_BLOCK when provider throws", async () => {
+    const provider: ExternalDataProvider = {
+      resolveBlockTimestamp: vi.fn().mockRejectedValue(new Error("fail")),
+    };
+    const result = await formatDate(
+      uint(19332140n),
+      blockheightOpts,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("19,332,140");
+    expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
+  });
+
+  it("returns UNKNOWN_BLOCK when no provider for blockheight", async () => {
+    const result = await formatDate(uint(19332140n), blockheightOpts, 1);
+    expect(result.rendered).toBe("19,332,140");
+    expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
   });
 });
 
