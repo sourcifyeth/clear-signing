@@ -24,6 +24,7 @@ import {
   formatAddressNameField,
   formatAddressName,
   formatTokenTicker,
+  isNativeCurrencyAddress,
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
@@ -395,6 +396,176 @@ describe("formatTokenAmount", () => {
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     );
     expect(result.warning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nativeCurrencyAddress: isNativeCurrencyAddress + formatTokenAmount integration
+// ---------------------------------------------------------------------------
+
+describe("isNativeCurrencyAddress", () => {
+  const ethSentinel = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+  it("returns false when nativeCurrencyAddress is not set", () => {
+    expect(isNativeCurrencyAddress(ethSentinel, {}, noopResolvePath)).toBe(
+      false,
+    );
+  });
+
+  it("matches a literal address (string)", () => {
+    const field = {
+      params: {
+        nativeCurrencyAddress: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      },
+    };
+    expect(isNativeCurrencyAddress(ethSentinel, field, noopResolvePath)).toBe(
+      true,
+    );
+  });
+
+  it("matches one of several literal addresses (array)", () => {
+    const field = {
+      params: {
+        nativeCurrencyAddress: [
+          "0x0000000000000000000000000000000000000000",
+          "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+        ],
+      },
+    };
+    expect(isNativeCurrencyAddress(ethSentinel, field, noopResolvePath)).toBe(
+      true,
+    );
+  });
+
+  it("returns false when no literal address matches", () => {
+    const field = {
+      params: {
+        nativeCurrencyAddress: "0x0000000000000000000000000000000000000000",
+      },
+    };
+    expect(isNativeCurrencyAddress(ethSentinel, field, noopResolvePath)).toBe(
+      false,
+    );
+  });
+
+  it("resolves a path reference to an address", () => {
+    const ethBytes = hexToBytes("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.addressAsEth"
+        ? { type: "address", bytes: ethBytes }
+        : undefined;
+    const field = {
+      params: {
+        nativeCurrencyAddress: "$.metadata.constants.addressAsEth",
+      },
+    };
+    expect(isNativeCurrencyAddress(ethSentinel, field, resolve)).toBe(true);
+  });
+
+  it("resolves a path reference to a string value", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "$.metadata.constants.ethAddr"
+        ? {
+            type: "string",
+            value: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          }
+        : undefined;
+    const field = {
+      params: {
+        nativeCurrencyAddress: "$.metadata.constants.ethAddr",
+      },
+    };
+    expect(isNativeCurrencyAddress(ethSentinel, field, resolve)).toBe(true);
+  });
+});
+
+describe("formatTokenAmount with nativeCurrencyAddress", () => {
+  const ethSentinel = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+  const ethBytes = hexToBytes(ethSentinel);
+
+  const resolve: ResolvePath = (path) => {
+    if (path === "tokenAddr") {
+      return { type: "address", bytes: ethBytes };
+    }
+    if (path === "$.metadata.constants.addressAsEth") {
+      return { type: "address", bytes: ethBytes };
+    }
+    return undefined;
+  };
+
+  it("formats as native currency when tokenAddress matches nativeCurrencyAddress", async () => {
+    const field = {
+      params: {
+        tokenPath: "tokenAddr",
+        nativeCurrencyAddress: ethSentinel,
+      },
+    };
+    const result = await formatTokenAmount(
+      field,
+      uint(5n * 10n ** 18n),
+      resolve,
+      1,
+    );
+    expect(result.rendered).toBe("5 ETH");
+    expect(result.tokenAddress).toBe(
+      "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    );
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("does not call resolveToken when nativeCurrencyAddress matches", async () => {
+    const spy = vi.fn().mockResolvedValue({
+      name: "Wrapped Ether",
+      symbol: "WETH",
+      decimals: 18,
+    });
+    const field = {
+      params: {
+        tokenPath: "tokenAddr",
+        nativeCurrencyAddress: ethSentinel,
+      },
+    };
+    await formatTokenAmount(field, uint(10n ** 18n), resolve, 1, {
+      resolveToken: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("falls through to resolveToken when tokenAddress does not match", async () => {
+    const otherAddr = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const otherBytes = hexToBytes(otherAddr);
+    const otherResolve: ResolvePath = (path) => {
+      if (path === "tokenAddr") return { type: "address", bytes: otherBytes };
+      return undefined;
+    };
+    const usdc: TokenResult = { name: "USD Coin", symbol: "USDC", decimals: 6 };
+    const field = {
+      params: {
+        tokenPath: "tokenAddr",
+        nativeCurrencyAddress: ethSentinel,
+      },
+    };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      otherResolve,
+      1,
+      { resolveToken: async () => usdc },
+    );
+    expect(result.rendered).toBe("1 USDC");
+  });
+
+  it("applies threshold message with native currency", async () => {
+    const field = {
+      params: {
+        tokenPath: "tokenAddr",
+        nativeCurrencyAddress: ethSentinel,
+        threshold: "1000000000000000000",
+        message: "Unlimited",
+      },
+    };
+    const result = await formatTokenAmount(field, uint(10n ** 18n), resolve, 1);
+    expect(result.rendered).toBe("Unlimited ETH");
   });
 });
 

@@ -130,8 +130,9 @@ export function formatNativeAmount(value: ArgumentValue): RenderFieldResult {
     return typeMismatch(value, "uint or int", "amount");
   }
 
-  const formatted = formatAmountWithDecimals(value.value, 18);
-  return { rendered: `${formatted} ETH` };
+  const native = getNativeCurrency();
+  const formatted = formatAmountWithDecimals(value.value, native.decimals);
+  return { rendered: `${formatted} ${native.symbol}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,19 @@ export async function formatTokenAmount(
   }
 
   const checksumTokenAddress = toChecksumAddress(hexToBytes(tokenAddress));
+
+  // Per ERC-7730: if tokenAddress matches nativeCurrencyAddress, format as native currency
+  if (isNativeCurrencyAddress(tokenAddress, field, resolvePath)) {
+    return {
+      rendered: renderTokenAmount(
+        amount,
+        getNativeCurrency(),
+        field,
+        resolvePath,
+      ),
+      tokenAddress: checksumTokenAddress,
+    };
+  }
 
   let token: TokenResult | null;
   try {
@@ -253,6 +267,44 @@ export function resolveTokenAddress(
   }
 
   return undefined;
+}
+
+/**
+ * Check whether a resolved token address matches one of the nativeCurrencyAddress
+ * values in the field params. Values can be literal addresses or path references
+ * (e.g. `$.metadata.constants.addressAsEth`).
+ */
+export function isNativeCurrencyAddress(
+  tokenAddress: string,
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): boolean {
+  const params = field.params ?? {};
+  const spec = params.nativeCurrencyAddress;
+  if (!spec) return false;
+
+  const candidates = Array.isArray(spec) ? spec : [spec];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+
+    // Literal address
+    if (candidate.startsWith("0x") && candidate.length === 42) {
+      if (candidate.toLowerCase() === tokenAddress) return true;
+      continue;
+    }
+
+    // Path reference — resolve and compare
+    const resolved = resolvePath(candidate);
+    if (resolved?.type === "address") {
+      if (bytesToHex(resolved.bytes).toLowerCase() === tokenAddress)
+        return true;
+    } else if (resolved?.type === "string") {
+      if (resolved.value.toLowerCase() === tokenAddress) return true;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -663,4 +715,8 @@ export function typeMismatch(
       `Format ${format} expects ${expected} but got ${value.type}`,
     ),
   };
+}
+
+function getNativeCurrency(): TokenResult {
+  return { name: "Ether", symbol: "ETH", decimals: 18 };
 }

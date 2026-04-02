@@ -149,11 +149,13 @@ export function toArgumentValue(value: unknown): ArgumentValue | undefined {
     return { type: "bool", value };
   }
   if (typeof value === "string") {
-    const n = parseBigInt(value);
-    if (n !== undefined) return { type: "uint", value: n };
+    // Address check must precede parseBigInt — 42-char hex strings are valid
+    // BigInt literals but should be treated as addresses, not numbers.
     if (value.startsWith("0x") && value.length === 42) {
       return { type: "address", bytes: hexToBytes(value) };
     }
+    const n = parseBigInt(value);
+    if (n !== undefined) return { type: "uint", value: n };
     if (value.startsWith("0x")) {
       try {
         return { type: "bytes", bytes: hexToBytes(value) };

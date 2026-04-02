@@ -1,0 +1,136 @@
+{
+  "$schema": "../../specs/erc7730-v2.schema.json",
+  "metadata": {
+    "owner": "1inch Network",
+    "info": {
+      "url": "https://1inch.io/",
+      "deploymentDate": "2024-02-12T03:44:35Z"
+    },
+    "enums": {
+      "takerTraits": {
+        "0": "None",
+        "16": "None",
+        "32": "None",
+        "64": "Unwrap",
+        "80": "Unwrap",
+        "96": "Unwrap"
+      }
+    },
+    "constants": {
+      "addressAsEth": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "addressAsNull": "0x0000000000000000000000000000000000000000"
+    }
+  },
+  "display": {
+    "definitions": {
+      "sendAmount": {
+        "label": "Amount to Send",
+        "format": "tokenAmount",
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
+      },
+      "minReceiveAmount": {
+        "label": "Minimum to Receive",
+        "format": "tokenAmount",
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
+      },
+      "makingAmount": {
+        "label": "Order purchasing amt",
+        "format": "tokenAmount",
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
+      },
+      "takingAmount": {
+        "label": "Order selling amount",
+        "format": "tokenAmount",
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
+      },
+      "fillAmount": {
+        "label": "Amount to sell",
+        "format": "tokenAmount",
+        "params": {
+          "nativeCurrencyAddress": [
+            "$.metadata.constants.addressAsEth",
+            "$.metadata.constants.addressAsNull"
+          ]
+        }
+      },
+      "takerTraits": {
+        "format": "enum",
+        "label": "Additional action",
+        "params": {
+          "$ref": "$.metadata.enums.takerTraits"
+        }
+      },
+      "beneficiary": {
+        "label": "Beneficiary",
+        "format": "addressName"
+      },
+      "lastPool": {
+        "label": "Last pool",
+        "format": "addressName",
+        "params": {
+          "types": ["contract"]
+        }
+      },
+      "expirationTime": {
+        "label": "Expiration time",
+        "format": "date",
+        "params": {
+          "encoding": "timestamp"
+        }
+      }
+    },
+    "formats": {
+      "swap(address executor, (address srcToken, address dstToken, address srcReceiver, address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags) desc, bytes data)": {
+        "$id": "swap",
+        "intent": "Swap",
+        "fields": [
+          {
+            "path": "desc.amount",
+            "$ref": "$.display.definitions.sendAmount",
+            "params": { "tokenPath": "desc.srcToken" },
+            "visible": "always"
+          },
+          {
+            "path": "desc.minReturnAmount",
+            "$ref": "$.display.definitions.minReceiveAmount",
+            "params": { "tokenPath": "desc.dstToken" },
+            "visible": "always"
+          },
+          {
+            "path": "desc.dstReceiver",
+            "$ref": "$.display.definitions.beneficiary",
+            "visible": "always"
+          },
+          { "label": "Executor", "path": "executor", "visible": "never" },
+          {
+            "label": "Desc Src Receiver",
+            "path": "desc.srcReceiver",
+            "visible": "never"
+          },
+          { "label": "Desc Flags", "path": "desc.flags", "visible": "never" },
+          { "label": "Data", "path": "data", "visible": "never" }
+        ]
+      }
+    }
+  }
+}
