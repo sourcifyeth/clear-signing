@@ -25,6 +25,7 @@ import {
   formatAddressName,
   formatTokenTicker,
   isNativeCurrencyAddress,
+  resolveMetadataToken,
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
@@ -326,6 +327,7 @@ describe("formatTokenAmount", () => {
       str("hello"),
       noopResolvePath,
       1,
+      undefined,
     );
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
@@ -337,6 +339,7 @@ describe("formatTokenAmount", () => {
       int(1000000n),
       noopResolvePath,
       1,
+      undefined,
       provider,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -348,6 +351,7 @@ describe("formatTokenAmount", () => {
       uint(100n),
       noopResolvePath,
       undefined,
+      undefined,
     );
     expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
   });
@@ -358,6 +362,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
+      undefined,
     );
     expect(result.rendered).toBe("1,000,000");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
@@ -373,6 +378,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
+      undefined,
       nullProvider,
     );
     expect(result.rendered).toBe("1,000,000");
@@ -389,6 +395,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
+      undefined,
       provider,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -408,6 +415,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
+      undefined,
       resolveTokenSpy,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -429,6 +437,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       resolve,
       1,
+      undefined,
       resolveTokenSpy,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -448,6 +457,7 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       10,
+      undefined,
       resolveTokenSpy,
     );
     expect(result.rendered).toBe("1 USDC");
@@ -464,10 +474,149 @@ describe("formatTokenAmount", () => {
       uint(1000000n),
       noopResolvePath,
       1,
+      undefined,
       provider,
     );
     expect(result.rendered).toBe("1,000,000");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tokenAmount format: resolveMetadataToken
+// ---------------------------------------------------------------------------
+
+describe("resolveMetadataToken", () => {
+  const metadata: DescriptorMetadata = {
+    token: { name: "Tether USD", ticker: "USDT", decimals: 6 },
+  };
+
+  it("returns token from metadata when param is $.metadata.token", () => {
+    const field = { params: { token: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, metadata);
+    expect(result).toEqual({
+      hasMetadataRef: true,
+      token: { name: "Tether USD", symbol: "USDT", decimals: 6 },
+    });
+  });
+
+  it("returns token via tokenPath as well", () => {
+    const field = { params: { tokenPath: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, metadata);
+    expect(result).toEqual({
+      hasMetadataRef: true,
+      token: { name: "Tether USD", symbol: "USDT", decimals: 6 },
+    });
+  });
+
+  it("uses ticker as name when name is missing", () => {
+    const meta: DescriptorMetadata = {
+      token: { ticker: "USDT", decimals: 6 },
+    };
+    const field = { params: { token: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, meta);
+    expect(result).toEqual({
+      hasMetadataRef: true,
+      token: { name: "USDT", symbol: "USDT", decimals: 6 },
+    });
+  });
+
+  it("returns hasMetadataRef false for a regular address", () => {
+    const field = {
+      params: { token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
+    };
+    expect(resolveMetadataToken(field, metadata).hasMetadataRef).toBe(false);
+  });
+
+  it("returns hasMetadataRef false for a different path", () => {
+    const field = { params: { tokenPath: "someField" } };
+    expect(resolveMetadataToken(field, metadata).hasMetadataRef).toBe(false);
+  });
+
+  it("returns failed result when metadata is undefined", () => {
+    const field = { params: { token: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, undefined);
+    expect(result).toEqual({ hasMetadataRef: true, token: undefined });
+  });
+
+  it("returns failed result when metadata.token has no ticker", () => {
+    const meta: DescriptorMetadata = { token: { decimals: 6 } };
+    const field = { params: { token: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, meta);
+    expect(result).toEqual({ hasMetadataRef: true, token: undefined });
+  });
+
+  it("returns failed result when metadata.token has no decimals", () => {
+    const meta: DescriptorMetadata = { token: { ticker: "USDT" } };
+    const field = { params: { token: "$.metadata.token" } };
+    const result = resolveMetadataToken(field, meta);
+    expect(result).toEqual({ hasMetadataRef: true, token: undefined });
+  });
+});
+
+describe("formatTokenAmount with metadata token", () => {
+  const metadata: DescriptorMetadata = {
+    token: { name: "Tether USD", ticker: "USDT", decimals: 6 },
+  };
+
+  it("formats using metadata token without external provider", async () => {
+    const field = { params: { token: "$.metadata.token" } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      1,
+      metadata,
+    );
+    expect(result.rendered).toBe("1 USDT");
+    expect(result.warning).toBeUndefined();
+    expect(result.tokenAddress).toBeUndefined();
+  });
+
+  it("skips chainId requirement for metadata token", async () => {
+    const field = { params: { token: "$.metadata.token" } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      undefined,
+      metadata,
+    );
+    // metadata token doesn't need chainId since we already have the token info
+    expect(result.rendered).toBe("1 USDT");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("returns FORMAT_PARAM_RESOLUTION_ERROR when metadata.token is incomplete", async () => {
+    const incompleteMeta: DescriptorMetadata = { token: { decimals: 6 } };
+    const field = { params: { token: "$.metadata.token" } };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      1,
+      incompleteMeta,
+    );
+    expect(result.rendered).toBe("1,000,000");
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
+  });
+
+  it("applies threshold message with metadata token", async () => {
+    const field = {
+      params: {
+        token: "$.metadata.token",
+        threshold: "1000000",
+        message: "Unlimited",
+      },
+    };
+    const result = await formatTokenAmount(
+      field,
+      uint(1000000n),
+      noopResolvePath,
+      1,
+      metadata,
+    );
+    expect(result.rendered).toBe("Unlimited USDT");
   });
 });
 
@@ -577,6 +726,7 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
       uint(5n * 10n ** 18n),
       resolve,
       1,
+      undefined,
     );
     expect(result.rendered).toBe("5 ETH");
     expect(result.tokenAddress).toBe(
@@ -597,7 +747,7 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
         nativeCurrencyAddress: ethSentinel,
       },
     };
-    await formatTokenAmount(field, uint(10n ** 18n), resolve, 1, {
+    await formatTokenAmount(field, uint(10n ** 18n), resolve, 1, undefined, {
       resolveToken: spy,
     });
     expect(spy).not.toHaveBeenCalled();
@@ -622,6 +772,7 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
       uint(1000000n),
       otherResolve,
       1,
+      undefined,
       { resolveToken: async () => usdc },
     );
     expect(result.rendered).toBe("1 USDC");
@@ -636,7 +787,13 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
         message: "Unlimited",
       },
     };
-    const result = await formatTokenAmount(field, uint(10n ** 18n), resolve, 1);
+    const result = await formatTokenAmount(
+      field,
+      uint(10n ** 18n),
+      resolve,
+      1,
+      undefined,
+    );
     expect(result.rendered).toBe("Unlimited ETH");
   });
 });

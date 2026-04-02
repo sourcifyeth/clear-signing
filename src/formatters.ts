@@ -61,6 +61,7 @@ export async function renderField(
         value,
         resolvePath,
         chainId,
+        metadata,
         externalDataProvider,
       );
     case "nftName":
@@ -150,10 +151,36 @@ export async function formatTokenAmount(
   value: ArgumentValue,
   resolvePath: ResolvePath,
   containerChainId: number | undefined,
+  metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int") {
     return typeMismatch(value, "uint or int", "tokenAmount");
+  }
+
+  const amount = value.value;
+
+  // When token param points to $.metadata.token, use metadata directly —
+  // no chainId or external provider needed since we have the full token info.
+  const metadataTokenResult = resolveMetadataToken(field, metadata);
+  if (metadataTokenResult.hasMetadataRef) {
+    if (!metadataTokenResult.token) {
+      return {
+        rendered: renderRaw(value),
+        warning: warn(
+          "FORMAT_PARAM_RESOLUTION_ERROR",
+          "$.metadata.token is missing required ticker or decimals",
+        ),
+      };
+    }
+    return {
+      rendered: renderTokenAmount(
+        amount,
+        metadataTokenResult.token,
+        field,
+        resolvePath,
+      ),
+    };
   }
 
   const chainIdResult = resolveChainId(field, resolvePath);
@@ -180,7 +207,6 @@ export async function formatTokenAmount(
     };
   }
 
-  const amount = value.value;
   const tokenAddress = resolveTokenAddress(field, resolvePath);
   if (!tokenAddress) {
     return {
@@ -265,6 +291,41 @@ export function tokenAmountMessage(
   }
 
   return threshold !== undefined && amount >= threshold ? message : undefined;
+}
+
+/**
+ * When the token param points to `$.metadata.token`, the descriptor metadata
+ * contains the ERC-20 token info (name, ticker, decimals) directly — the
+ * contract itself is the token and doesn't need external resolution.
+ *
+ * Returns:
+ * - `{ hasMetadataRef: false }` — token param does not reference $.metadata.token
+ * - `{ hasMetadataRef: true, token: TokenResult }` — successfully resolved from metadata
+ * - `{ hasMetadataRef: true, token: undefined }` — references $.metadata.token but metadata is missing/incomplete
+ */
+export function resolveMetadataToken(
+  field: FieldFormatOptions,
+  metadata: DescriptorMetadata | undefined,
+):
+  | { hasMetadataRef: false }
+  | { hasMetadataRef: true; token: TokenResult | undefined } {
+  const params = field.params ?? {};
+  const tokenSpec = params.token ?? params.tokenPath;
+  if (tokenSpec !== "$.metadata.token") return { hasMetadataRef: false };
+
+  const meta = metadata?.token;
+  if (!meta?.ticker || meta.decimals === undefined) {
+    return { hasMetadataRef: true, token: undefined };
+  }
+
+  return {
+    hasMetadataRef: true,
+    token: {
+      name: meta.name ?? meta.ticker,
+      symbol: meta.ticker,
+      decimals: meta.decimals,
+    },
+  };
 }
 
 /**
@@ -383,7 +444,10 @@ export async function formatNftName(
   if (!collection) {
     return {
       rendered: renderRaw(value),
-      warning: warn("UNKNOWN_NFT_COLLECTION", "NFT collection name could not be resolved"),
+      warning: warn(
+        "UNKNOWN_NFT_COLLECTION",
+        "NFT collection name could not be resolved",
+      ),
     };
   }
 
