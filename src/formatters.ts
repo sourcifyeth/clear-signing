@@ -4,6 +4,7 @@
 
 import type {
   BlockTimestampResult,
+  ChainInfoResult,
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
   DescriptorMetadata,
@@ -54,7 +55,7 @@ export async function renderField(
     case "raw":
       return formatRaw(value);
     case "amount":
-      return formatNativeAmount(value);
+      return await formatNativeAmount(value, chainId, externalDataProvider);
     case "tokenAmount":
       return await formatTokenAmount(
         fieldOptions,
@@ -85,6 +86,8 @@ export async function renderField(
       return formatUnit(value, fieldOptions);
     case "enum":
       return formatEnum(fieldOptions, value, metadata);
+    case "chainId":
+      return await formatChainId(value, externalDataProvider);
     case "addressName":
       return await formatAddressNameField(
         value,
@@ -132,12 +135,32 @@ export function renderRaw(value: ArgumentValue): string {
 // amount format
 // ---------------------------------------------------------------------------
 
-export function formatNativeAmount(value: ArgumentValue): RenderFieldResult {
+export async function formatNativeAmount(
+  value: ArgumentValue,
+  chainId: number | undefined,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
   if (value.type !== "uint" && value.type !== "int") {
     return typeMismatch(value, "uint or int", "amount");
   }
 
-  const native = getNativeCurrency();
+  let chainInfo: ChainInfoResult | null = null;
+  if (chainId !== undefined) {
+    try {
+      chainInfo =
+        (await externalDataProvider?.resolveChainInfo?.(chainId)) ?? null;
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!chainInfo) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn("UNKNOWN_CHAIN", "Chain info could not be resolved"),
+    };
+  }
+
+  const native = chainInfo.nativeCurrency;
   const formatted = formatAmountWithDecimals(value.value, native.decimals);
   return { rendered: `${formatted} ${native.symbol}` };
 }
@@ -222,10 +245,24 @@ export async function formatTokenAmount(
 
   // Per ERC-7730: if tokenAddress matches nativeCurrencyAddress, format as native currency
   if (isNativeCurrencyAddress(tokenAddress, field, resolvePath)) {
+    let chainInfo: ChainInfoResult | null = null;
+    try {
+      chainInfo =
+        (await externalDataProvider?.resolveChainInfo?.(chainId)) ?? null;
+    } catch {
+      /* fall through */
+    }
+    if (!chainInfo) {
+      return {
+        rendered: renderRaw(value),
+        tokenAddress: checksumTokenAddress,
+        warning: warn("UNKNOWN_CHAIN", "Chain info could not be resolved"),
+      };
+    }
     return {
       rendered: renderTokenAmount(
         amount,
-        getNativeCurrency(),
+        chainInfo.nativeCurrency,
         field,
         resolvePath,
       ),
@@ -691,6 +728,35 @@ export function resolveEnumLabel(
 }
 
 // ---------------------------------------------------------------------------
+// chainId format
+// ---------------------------------------------------------------------------
+
+export async function formatChainId(
+  value: ArgumentValue,
+  externalDataProvider?: ExternalDataProvider,
+): Promise<RenderFieldResult> {
+  if (value.type !== "uint" && value.type !== "int") {
+    return typeMismatch(value, "uint or int", "chainId");
+  }
+
+  const id = Number(value.value);
+  let chainInfo: ChainInfoResult | null = null;
+  try {
+    chainInfo = (await externalDataProvider?.resolveChainInfo?.(id)) ?? null;
+  } catch {
+    /* fall through */
+  }
+  if (!chainInfo) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn("UNKNOWN_CHAIN", "Chain info could not be resolved"),
+    };
+  }
+
+  return { rendered: chainInfo.name };
+}
+
+// ---------------------------------------------------------------------------
 // addressName format
 // ---------------------------------------------------------------------------
 
@@ -884,8 +950,4 @@ export function typeMismatch(
       `Format ${format} expects ${expected} but got ${value.type}`,
     ),
   };
-}
-
-function getNativeCurrency(): TokenResult {
-  return { name: "Ether", symbol: "ETH", decimals: 18 };
 }

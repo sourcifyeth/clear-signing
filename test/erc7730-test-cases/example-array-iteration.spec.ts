@@ -95,7 +95,13 @@ describe("example-array-iteration.json — distribute", () => {
       value: 1000000000000000000n, // 1 ETH
     };
 
-    const opts = buildOpts({ resolveLocalName });
+    const opts = buildOpts({
+      resolveLocalName,
+      resolveChainInfo: async () => ({
+        name: "Ethereum Mainnet",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      }),
+    });
     const result = await format(tx, opts);
 
     expect(result.intent).toBe("Distribute fees among recipients");

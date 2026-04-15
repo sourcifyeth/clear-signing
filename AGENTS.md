@@ -40,7 +40,7 @@ src/
 - **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
   Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatNftName`,
   `formatDuration`, `formatUnit`, `formatAddressName`, `formatTokenTicker`,
-  `resolveEnumLabel`, etc. Also defines `FieldFormatOptions` and `RenderFieldResult`
+  `formatChainId`, `formatNativeAmount`, `resolveEnumLabel`, etc. Also defines `FieldFormatOptions` and `RenderFieldResult`
   types. Handlers are exported for unit testing. Most format handlers delegate
   `$.metadata.*` path resolution to the `resolvePath` closure rather than calling
   `resolveMetadataValue` directly — only `resolveEnumLabel` uses it since it needs
@@ -194,23 +194,30 @@ spec. Do not add them to `DescriptorFormatSpec`.
 
 ### Field Formats
 
-Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`
+Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`, `chainId`
 
-Not yet implemented: `chainId`, `calldata`, `interoperableAddressName`
+Not yet implemented: `calldata`, `interoperableAddressName`
 
 **Spec-compliance notes:**
 
-- All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`) accept both `uint` and `int` field types.
+- All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`, `chainId`) accept both `uint` and `int` field types.
 - `date` format supports `params.encoding` of `"timestamp"` (unix seconds) and `"blockheight"` (resolved via `ExternalDataProvider.resolveBlockTimestamp`). Falls back to raw with `UNKNOWN_ENCODING` warning for missing or unsupported encodings.
 - `tokenAmount` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios (same as `tokenTicker`).
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
 - `nftName` resolves collection name via `ExternalDataProvider.resolveNftCollectionName(chainId, address)`.
 - `tokenTicker` accepts only `address` type; supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios.
+- `chainId` converts an integer chain ID to a human-readable chain name via `ExternalDataProvider.resolveChainInfo`. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
+- `amount` displays a value as native currency using `ExternalDataProvider.resolveChainInfo` for decimals and ticker. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
+- `tokenAmount` with `nativeCurrencyAddress` also resolves native currency metadata via `resolveChainInfo`.
 - Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
 
 ### Token Resolution
 
 Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value.
+
+### Chain Info Resolution
+
+Chain metadata (name, native currency) is resolved via `ExternalDataProvider.resolveChainInfo(chainId)`. This is used by the `chainId` format (to display chain names), the `amount` format (to display native currency amounts with correct decimals and ticker), and the `tokenAmount` format when `nativeCurrencyAddress` matches. There is no embedded chain registry. When `resolveChainInfo` is absent or returns `null`, the library emits an `UNKNOWN_CHAIN` warning and falls back to the raw value.
 
 ### Address Name Resolution
 
@@ -384,7 +391,6 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 
 ## Not Yet Implemented (from EIP-7730 spec)
 
-- `chainId` format (ID to chain name)
 - `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
 - Array/slice path selectors (`array.[0]`, `array.[start:end]`)

@@ -80,7 +80,14 @@ describe("1inch AggregationRouterV6 swap", () => {
   }
 
   it("formats a swap call with all DisplayModel properties", async () => {
-    const opts = buildOpts({ resolveToken, resolveLocalName });
+    const opts = buildOpts({
+      resolveToken,
+      resolveLocalName,
+      resolveChainInfo: async () => ({
+        name: "Ethereum Mainnet",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      }),
+    });
 
     const result: DisplayModel = await format(
       {

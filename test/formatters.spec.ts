@@ -9,6 +9,7 @@ import {
   formatRaw,
   renderRaw,
   formatNativeAmount,
+  formatChainId,
   formatTokenAmount,
   renderTokenAmount,
   tokenAmountMessage,
@@ -113,25 +114,60 @@ describe("formatRaw", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatNativeAmount", () => {
-  it("formats 1 ETH", () => {
-    const result = formatNativeAmount(uint(1000000000000000000n));
+  const provider: ExternalDataProvider = {
+    resolveChainInfo: async () => ({
+      name: "Ethereum Mainnet",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    }),
+  };
+
+  it("formats 1 ETH", async () => {
+    const result = await formatNativeAmount(
+      uint(1000000000000000000n),
+      1,
+      provider,
+    );
     expect(result.rendered).toBe("1 ETH");
     expect(result.warning).toBeUndefined();
   });
 
-  it("formats fractional ETH", () => {
-    const result = formatNativeAmount(uint(1500000000000000000n));
+  it("formats fractional ETH", async () => {
+    const result = await formatNativeAmount(
+      uint(1500000000000000000n),
+      1,
+      provider,
+    );
     expect(result.rendered).toBe("1.5 ETH");
   });
 
-  it("accepts int values", () => {
-    const result = formatNativeAmount(int(1000000000000000000n));
+  it("accepts int values", async () => {
+    const result = await formatNativeAmount(
+      int(1000000000000000000n),
+      1,
+      provider,
+    );
     expect(result.rendered).toBe("1 ETH");
   });
 
-  it("returns type mismatch for non-uint/int", () => {
-    const result = formatNativeAmount(str("not a number"));
+  it("returns type mismatch for non-uint/int", async () => {
+    const result = await formatNativeAmount(str("not a number"), 1);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("falls back to raw with UNKNOWN_CHAIN when provider is absent", async () => {
+    const result = await formatNativeAmount(uint(10n ** 18n), 1);
+    expect(result.rendered).toBe("1,000,000,000,000,000,000");
+    expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
+  });
+
+  it("falls back to raw with UNKNOWN_CHAIN when chainId is undefined", async () => {
+    const result = await formatNativeAmount(
+      uint(10n ** 18n),
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe("1,000,000,000,000,000,000");
+    expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
   });
 });
 
@@ -704,6 +740,12 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
   const ethSentinel = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
   const ethBytes = hexToBytes(ethSentinel);
 
+  const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] =
+    async () => ({
+      name: "Ethereum Mainnet",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    });
+
   const resolve: ResolvePath = (path) => {
     if (path === "tokenAddr") {
       return { type: "address", bytes: ethBytes };
@@ -727,6 +769,7 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
       resolve,
       1,
       undefined,
+      { resolveChainInfo },
     );
     expect(result.rendered).toBe("5 ETH");
     expect(result.tokenAddress).toBe(
@@ -749,8 +792,29 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
     };
     await formatTokenAmount(field, uint(10n ** 18n), resolve, 1, undefined, {
       resolveToken: spy,
+      resolveChainInfo,
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to raw with UNKNOWN_CHAIN when nativeCurrencyAddress matches but no provider", async () => {
+    const field = {
+      params: {
+        tokenPath: "tokenAddr",
+        nativeCurrencyAddress: ethSentinel,
+      },
+    };
+    const result = await formatTokenAmount(
+      field,
+      uint(10n ** 18n),
+      resolve,
+      1,
+      undefined,
+    );
+    expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
+    expect(result.tokenAddress).toBe(
+      "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    );
   });
 
   it("falls through to resolveToken when tokenAddress does not match", async () => {
@@ -793,6 +857,7 @@ describe("formatTokenAmount with nativeCurrencyAddress", () => {
       resolve,
       1,
       undefined,
+      { resolveChainInfo },
     );
     expect(result.rendered).toBe("Unlimited ETH");
   });
@@ -1077,6 +1142,103 @@ describe("formatDate", () => {
 });
 
 // ---------------------------------------------------------------------------
+// duration format: formatDuration
+// ---------------------------------------------------------------------------
+
+describe("formatDuration", () => {
+  it("formats seconds as HH:MM:ss", () => {
+    const result = formatDuration(uint(8250n));
+    expect(result.rendered).toBe("02:17:30");
+  });
+
+  it("formats zero", () => {
+    const result = formatDuration(uint(0n));
+    expect(result.rendered).toBe("00:00:00");
+  });
+
+  it("formats values under a minute", () => {
+    const result = formatDuration(uint(45n));
+    expect(result.rendered).toBe("00:00:45");
+  });
+
+  it("formats exactly one hour", () => {
+    const result = formatDuration(uint(3600n));
+    expect(result.rendered).toBe("01:00:00");
+  });
+
+  it("handles large values (over 99 hours)", () => {
+    const result = formatDuration(uint(360000n));
+    expect(result.rendered).toBe("100:00:00");
+  });
+
+  it("accepts int type", () => {
+    const result = formatDuration(int(8250n));
+    expect(result.rendered).toBe("02:17:30");
+  });
+
+  it("returns type mismatch for non-numeric types", () => {
+    const result = formatDuration(str("hello"));
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unit format: formatUnit
+// ---------------------------------------------------------------------------
+
+describe("formatUnit", () => {
+  it("formats integer with base unit (no decimals)", () => {
+    const result = formatUnit(uint(10n), { params: { base: "h" } });
+    expect(result.rendered).toBe("10h");
+  });
+
+  it("formats with decimals", () => {
+    const result = formatUnit(uint(15n), {
+      params: { base: "d", decimals: 1 },
+    });
+    expect(result.rendered).toBe("1.5d");
+  });
+
+  it("formats percentage with decimals", () => {
+    const result = formatUnit(uint(5000n), {
+      params: { base: "%", decimals: 2 },
+    });
+    expect(result.rendered).toBe("50%");
+  });
+
+  it("formats with SI prefix", () => {
+    const result = formatUnit(uint(36000n), {
+      params: { base: "s", prefix: true },
+    });
+    expect(result.rendered).toBe("36ks");
+  });
+
+  it("formats with SI prefix and decimals", () => {
+    const result = formatUnit(uint(1500000n), {
+      params: { base: "W", decimals: 3, prefix: true },
+    });
+    expect(result.rendered).toBe("1.5kW");
+  });
+
+  it("falls back to no prefix when value is too small", () => {
+    const result = formatUnit(uint(500n), {
+      params: { base: "s", prefix: true },
+    });
+    expect(result.rendered).toBe("500s");
+  });
+
+  it("returns type mismatch for non-numeric values", () => {
+    const result = formatUnit(str("hello"), { params: { base: "m" } });
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("defaults decimals to 0 and base to empty", () => {
+    const result = formatUnit(uint(42n), {});
+    expect(result.rendered).toBe("42");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // enum format: resolveEnumLabel
 // ---------------------------------------------------------------------------
 
@@ -1154,98 +1316,44 @@ describe("formatEnum", () => {
 });
 
 // ---------------------------------------------------------------------------
-// unit format: formatUnit
+// chainId format: formatChainId
 // ---------------------------------------------------------------------------
 
-describe("formatUnit", () => {
-  it("formats integer with base unit (no decimals)", () => {
-    const result = formatUnit(uint(10n), { params: { base: "h" } });
-    expect(result.rendered).toBe("10h");
+describe("formatChainId", () => {
+  const provider: ExternalDataProvider = {
+    resolveChainInfo: async () => ({
+      name: "Ethereum Mainnet",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    }),
+  };
+
+  it("renders chain name from resolveChainInfo", async () => {
+    const result = await formatChainId(uint(1n), provider);
+    expect(result.rendered).toBe("Ethereum Mainnet");
+    expect(result.warning).toBeUndefined();
   });
 
-  it("formats with decimals", () => {
-    const result = formatUnit(uint(15n), {
-      params: { base: "d", decimals: 1 },
+  it("accepts int values", async () => {
+    const result = await formatChainId(int(137n), provider);
+    expect(result.rendered).toBe("Ethereum Mainnet");
+  });
+
+  it("falls back to raw with UNKNOWN_CHAIN when provider is absent", async () => {
+    const result = await formatChainId(uint(999n));
+    expect(result.rendered).toBe("999");
+    expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
+  });
+
+  it("falls back to raw with UNKNOWN_CHAIN when provider returns null", async () => {
+    const result = await formatChainId(uint(999n), {
+      resolveChainInfo: async () => null,
     });
-    expect(result.rendered).toBe("1.5d");
+    expect(result.rendered).toBe("999");
+    expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
   });
 
-  it("formats percentage with decimals", () => {
-    const result = formatUnit(uint(5000n), {
-      params: { base: "%", decimals: 2 },
-    });
-    expect(result.rendered).toBe("50%");
-  });
-
-  it("formats with SI prefix", () => {
-    const result = formatUnit(uint(36000n), {
-      params: { base: "s", prefix: true },
-    });
-    expect(result.rendered).toBe("36ks");
-  });
-
-  it("formats with SI prefix and decimals", () => {
-    const result = formatUnit(uint(1500000n), {
-      params: { base: "W", decimals: 3, prefix: true },
-    });
-    expect(result.rendered).toBe("1.5kW");
-  });
-
-  it("falls back to no prefix when value is too small", () => {
-    const result = formatUnit(uint(500n), {
-      params: { base: "s", prefix: true },
-    });
-    expect(result.rendered).toBe("500s");
-  });
-
-  it("returns type mismatch for non-numeric values", () => {
-    const result = formatUnit(str("hello"), { params: { base: "m" } });
-    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
-  });
-
-  it("defaults decimals to 0 and base to empty", () => {
-    const result = formatUnit(uint(42n), {});
-    expect(result.rendered).toBe("42");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// duration format: formatDuration
-// ---------------------------------------------------------------------------
-
-describe("formatDuration", () => {
-  it("formats seconds as HH:MM:ss", () => {
-    const result = formatDuration(uint(8250n));
-    expect(result.rendered).toBe("02:17:30");
-  });
-
-  it("formats zero", () => {
-    const result = formatDuration(uint(0n));
-    expect(result.rendered).toBe("00:00:00");
-  });
-
-  it("formats values under a minute", () => {
-    const result = formatDuration(uint(45n));
-    expect(result.rendered).toBe("00:00:45");
-  });
-
-  it("formats exactly one hour", () => {
-    const result = formatDuration(uint(3600n));
-    expect(result.rendered).toBe("01:00:00");
-  });
-
-  it("handles large values (over 99 hours)", () => {
-    const result = formatDuration(uint(360000n));
-    expect(result.rendered).toBe("100:00:00");
-  });
-
-  it("accepts int type", () => {
-    const result = formatDuration(int(8250n));
-    expect(result.rendered).toBe("02:17:30");
-  });
-
-  it("returns type mismatch for non-numeric types", () => {
-    const result = formatDuration(str("hello"));
+  it("returns type mismatch for non-uint/int", async () => {
+    const result = await formatChainId(str("not a number"));
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
 });
@@ -1507,6 +1615,13 @@ describe("typeMismatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderField", () => {
+  const provider: ExternalDataProvider = {
+    resolveChainInfo: async () => ({
+      name: "Ethereum Mainnet",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    }),
+  };
+
   it("dispatches 'raw' format", async () => {
     const result = await renderField(
       uint(42n),
@@ -1527,8 +1642,22 @@ describe("renderField", () => {
       noopResolvePath,
       1,
       undefined,
+      provider,
     );
     expect(result.rendered).toBe("1 ETH");
+  });
+
+  it("dispatches 'chainId' format", async () => {
+    const result = await renderField(
+      uint(1n),
+      "chainId",
+      {},
+      noopResolvePath,
+      1,
+      undefined,
+      provider,
+    );
+    expect(result.rendered).toBe("Ethereum Mainnet");
   });
 
   it("dispatches 'date' format with encoding=timestamp", async () => {

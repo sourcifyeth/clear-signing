@@ -127,7 +127,7 @@ interface FormatOptions {
 
 ### `ExternalDataProvider`
 
-The library delegates all external data resolution to the wallet. The wallet may use RPC calls to resolve the data.
+The library delegates all external data resolution to the wallet. The wallet may use RPC calls to resolve the data. See [`src/types.ts`](src/types.ts) for the full return type definitions (e.g. `TokenResult`, `ChainInfoResult`, etc.).
 
 ```typescript
 interface ExternalDataProvider {
@@ -171,6 +171,9 @@ interface ExternalDataProvider {
     chainId: number,
     blockHeight: bigint,
   ) => Promise<BlockTimestampResult | null>;
+
+  /** Resolution for chainId and amount formats. */
+  resolveChainInfo?: (chainId: number) => Promise<ChainInfoResult | null>;
 }
 ```
 

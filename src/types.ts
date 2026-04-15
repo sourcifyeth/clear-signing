@@ -69,7 +69,8 @@ export type WarningCode =
   | "BUNDLED_ARRAY_SIZE_MISMATCH"
   | "FORMAT_PARAM_RESOLUTION_ERROR"
   | "UNKNOWN_ENCODING"
-  | "UNKNOWN_BLOCK";
+  | "UNKNOWN_BLOCK"
+  | "UNKNOWN_CHAIN";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
@@ -230,6 +231,18 @@ export interface BlockTimestampResult {
   timestamp: number;
 }
 
+/** Result of resolving chain information by chain ID. */
+export interface ChainInfoResult {
+  /** Human-readable chain name, e.g. "Ethereum Mainnet". */
+  name: string;
+  /** Native currency metadata. */
+  nativeCurrency: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+}
+
 /** Wallet-provided async resolvers for external data. */
 export interface ExternalDataProvider {
   /**
@@ -272,6 +285,9 @@ export interface ExternalDataProvider {
     chainId: number,
     blockHeight: bigint,
   ) => Promise<BlockTimestampResult | null>;
+
+  /** Resolution for chainId and amount formats. */
+  resolveChainInfo?: (chainId: number) => Promise<ChainInfoResult | null>;
 }
 
 export interface FormatOptions {
