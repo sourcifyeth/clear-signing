@@ -32,6 +32,18 @@ describe("example-array-iteration.json — distribute", () => {
     return null;
   };
 
+  const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] = async (
+    chainId,
+  ) => {
+    if (chainId === CHAIN_ID) {
+      return {
+        name: "Ethereum Mainnet",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      };
+    }
+    return null;
+  };
+
   // ABI-encoded: distribute([RECIPIENT_1, RECIPIENT_2], [9901, 99])
   // selector: 0x2929abe6
   // head: offset1=64, offset2=160
@@ -97,10 +109,7 @@ describe("example-array-iteration.json — distribute", () => {
 
     const opts = buildOpts({
       resolveLocalName,
-      resolveChainInfo: async () => ({
-        name: "Ethereum Mainnet",
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-      }),
+      resolveChainInfo,
     });
     const result = await format(tx, opts);
 
