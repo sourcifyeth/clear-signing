@@ -8,9 +8,12 @@ import type {
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
   DescriptorMetadata,
+  DisplayModel,
   ExternalDataProvider,
+  FormatCalldata,
   NftCollectionNameResult,
   TokenResult,
+  Transaction,
   Warning,
 } from "./types";
 import type { ArgumentValue, ResolvePath } from "./descriptor";
@@ -24,6 +27,8 @@ import {
   bytesToHex,
   formatAmountWithDecimals,
   hexToBytes,
+  isAddressString,
+  keccak256,
   parseBigInt,
   toChecksumAddress,
   warn,
@@ -36,6 +41,7 @@ export type FieldFormatOptions = Pick<
 
 export type RenderFieldResult = {
   rendered: string;
+  calldataDisplay?: DisplayModel;
   warning?: Warning;
   tokenAddress?: string;
   rawAddress?: string;
@@ -55,6 +61,7 @@ export async function renderField(
   chainId: number | undefined,
   metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
+  formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<RenderFieldResult> {
   switch (format) {
     case "raw":
@@ -93,6 +100,14 @@ export async function renderField(
       return formatEnum(fieldOptions, value, metadata);
     case "chainId":
       return await formatChainId(value, externalDataProvider);
+    case "calldata":
+      return await formatCalldata(
+        value,
+        fieldOptions,
+        resolvePath,
+        chainId,
+        formatEmbeddedCalldata,
+      );
     case "addressName":
       return await formatAddressName(
         value,
@@ -394,7 +409,7 @@ export function resolveTokenAddress(
   if (!token) return undefined;
 
   // Constant address
-  if (token.startsWith("0x") && token.length === 42) {
+  if (isAddressString(token)) {
     return token.toLowerCase();
   }
 
@@ -430,7 +445,7 @@ export function isNativeCurrencyAddress(
     if (typeof candidate !== "string") continue;
 
     // Literal address
-    if (candidate.startsWith("0x") && candidate.length === 42) {
+    if (isAddressString(candidate)) {
       if (candidate.toLowerCase() === tokenAddress) return true;
       continue;
     }
@@ -525,7 +540,7 @@ export function resolveCollectionAddress(
   if (!collection) return undefined;
 
   // Constant address
-  if (collection.startsWith("0x") && collection.length === 42) {
+  if (isAddressString(collection)) {
     return collection.toLowerCase();
   }
 
@@ -777,6 +792,191 @@ export async function formatChainId(
 }
 
 // ---------------------------------------------------------------------------
+// calldata format (embedded calldata)
+// ---------------------------------------------------------------------------
+
+async function formatCalldata(
+  value: ArgumentValue,
+  fieldOptions: FieldFormatOptions,
+  resolvePath: ResolvePath,
+  containerChainId: number | undefined,
+  formatCalldata?: FormatCalldata,
+): Promise<RenderFieldResult> {
+  if (value.type !== "bytes") {
+    return typeMismatch(value, "bytes", "calldata");
+  }
+
+  const callee = resolveCallee(fieldOptions, resolvePath);
+  if (!callee) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "callee or calleePath param could not be resolved",
+      ),
+    };
+  }
+
+  const chainIdResult = resolveChainId(fieldOptions, resolvePath);
+  if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "FORMAT_PARAM_RESOLUTION_ERROR",
+        "chainId or chainIdPath param could not be resolved",
+      ),
+    };
+  }
+
+  const chainId = chainIdResult.hasChainIdParam
+    ? chainIdResult.value
+    : containerChainId;
+
+  if (chainId === undefined) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "CONTAINER_MISSING_CHAIN_ID",
+        "Cannot format embedded calldata without a chainId on the container",
+      ),
+    };
+  }
+
+  if (!formatCalldata) {
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "EMBEDDED_CALLDATA_NOT_SUPPORTED",
+        "Embedded calldata formatting is not available",
+      ),
+    };
+  }
+
+  const rendered = bytesToHex(keccak256(value.bytes));
+
+  const selector = resolveSelectorParam(fieldOptions, resolvePath);
+  const data = selector
+    ? bytesToHex(new Uint8Array([...selector, ...value.bytes]))
+    : bytesToHex(value.bytes);
+  const amount = resolveAmountParam(fieldOptions, resolvePath);
+  const spender = resolveSpenderParam(fieldOptions, resolvePath);
+
+  const tx: Transaction = { chainId, to: callee, data };
+  if (amount !== undefined) tx.value = amount;
+  if (spender !== undefined) tx.from = spender;
+
+  const result = await formatCalldata(tx);
+
+  return { rendered, calldataDisplay: result };
+}
+
+/**
+ * Resolve the callee address for an embedded calldata field.
+ * Accepts `callee` or `calleePath` as a constant address or path reference.
+ */
+function resolveCallee(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): string | undefined {
+  const params = field.params ?? {};
+  const spec = params.callee ?? params.calleePath;
+  if (!spec) return undefined;
+
+  if (isAddressString(spec)) {
+    return spec.toLowerCase();
+  }
+
+  let resolved = resolvePath(spec);
+  if (resolved?.type === "bytes-slice") {
+    resolved = bytesToAddressArgumentValue(resolved.bytes);
+  }
+  if (resolved?.type === "address") {
+    return bytesToHex(resolved.bytes).toLowerCase();
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolve the native currency amount for embedded calldata.
+ * Maps to `@.value` in the nested transaction's container paths.
+ */
+function resolveAmountParam(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): bigint | undefined {
+  const params = field.params ?? {};
+  const spec = params.amount ?? params.amountPath;
+  if (!spec) return undefined;
+
+  const resolved = resolvePath(spec);
+  if (resolved === undefined) {
+    return parseBigInt(spec);
+  }
+  if (resolved?.type === "uint" || resolved?.type === "int") {
+    return resolved.value;
+  }
+  if (resolved?.type === "string") {
+    return parseBigInt(resolved.value);
+  }
+  if (resolved?.type === "bytes-slice") {
+    return bytesToUnsignedBigInt(resolved.bytes);
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolve the spender address for embedded calldata.
+ * Maps to `@.from` in the nested transaction's container paths.
+ */
+function resolveSpenderParam(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): string | undefined {
+  const params = field.params ?? {};
+  const spec = params.spender ?? params.spenderPath;
+  if (!spec) return undefined;
+
+  if (isAddressString(spec)) {
+    return spec.toLowerCase();
+  }
+
+  let resolved = resolvePath(spec);
+  if (resolved?.type === "bytes-slice") {
+    resolved = bytesToAddressArgumentValue(resolved.bytes);
+  }
+  if (resolved?.type === "address") {
+    return bytesToHex(resolved.bytes).toLowerCase();
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolve the selector for embedded calldata.
+ * Returns 4 bytes if specified, or undefined to use the first 4 bytes of the calldata.
+ */
+function resolveSelectorParam(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): Uint8Array | undefined {
+  const params = field.params ?? {};
+  const spec = params.selector ?? params.selectorPath;
+  if (!spec) return undefined;
+
+  if (typeof spec === "string" && spec.startsWith("0x") && spec.length === 10) {
+    return hexToBytes(spec);
+  }
+
+  const resolved = resolvePath(spec);
+  if (resolved?.type === "bytes") return resolved.bytes.slice(0, 4);
+  if (resolved?.type === "bytes-slice") return resolved.bytes.slice(0, 4);
+
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // addressName format
 // ---------------------------------------------------------------------------
 
@@ -887,7 +1087,7 @@ export function isSenderAddress(
     if (typeof candidate !== "string") continue;
 
     // Literal address
-    if (candidate.startsWith("0x") && candidate.length === 42) {
+    if (isAddressString(candidate)) {
       if (candidate.toLowerCase() === address) return true;
       continue;
     }

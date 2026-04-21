@@ -19,10 +19,11 @@
 import { DescriptorResolver } from "./resolver";
 import { formatCalldata, rawPreviewFromCalldata } from "./calldata";
 import { formatEip712 } from "./eip712";
-import { hexToBytes, extractSelector } from "./utils";
+import { hexToBytes, extractSelector, warn } from "./utils";
 import type {
   DisplayModel,
   FormatOptions,
+  FormatCalldata,
   Transaction,
   TypedData,
 } from "./types";
@@ -41,25 +42,37 @@ export async function format(
   tx: Transaction,
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
-  const descriptor = await new DescriptorResolver(
-    opts?.descriptorResolverOptions,
-  ).resolveCalldataDescriptor(tx.chainId, tx.to);
+  try {
+    const descriptor = await new DescriptorResolver(
+      opts?.descriptorResolverOptions,
+    ).resolveCalldataDescriptor(tx.chainId, tx.to);
 
-  if (!descriptor) {
-    const calldata = hexToBytes(tx.data);
-    const selector = extractSelector(calldata);
-    return {
-      rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
-      warnings: [
-        {
-          code: "NO_DESCRIPTOR",
-          message: `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
-        },
-      ],
-    };
+    if (!descriptor) {
+      const calldata = hexToBytes(tx.data);
+      const selector = extractSelector(calldata);
+      return {
+        rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
+        warnings: [
+          warn(
+            "NO_DESCRIPTOR",
+            `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
+          ),
+        ],
+      };
+    }
+
+    const formatEmbeddedCalldata: FormatCalldata = (innerTx) =>
+      format(innerTx, opts);
+
+    return formatCalldata(
+      tx,
+      descriptor,
+      opts?.externalDataProvider,
+      formatEmbeddedCalldata,
+    );
+  } catch (error) {
+    return unexpectedError(error);
   }
-
-  return formatCalldata(tx, descriptor, opts?.externalDataProvider);
 }
 
 /**
@@ -70,28 +83,51 @@ export async function formatTypedData(
   typedData: TypedData,
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
-  const { chainId, verifyingContract } = typedData.domain;
+  try {
+    const { chainId, verifyingContract } = typedData.domain;
 
-  if (!chainId || !verifyingContract) {
-    throw new Error(
-      "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
+    if (!chainId || !verifyingContract) {
+      throw new Error(
+        "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
+      );
+    }
+
+    const descriptor = await new DescriptorResolver(
+      opts?.descriptorResolverOptions,
+    ).resolveTypedDataDescriptor(chainId, verifyingContract);
+
+    if (!descriptor) {
+      return {
+        warnings: [
+          warn(
+            "NO_DESCRIPTOR",
+            `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
+          ),
+        ],
+      };
+    }
+
+    const formatEmbeddedCalldata: FormatCalldata = (innerTx) =>
+      format(innerTx, opts);
+
+    return formatEip712(
+      typedData,
+      descriptor,
+      opts?.externalDataProvider,
+      formatEmbeddedCalldata,
     );
+  } catch (error) {
+    return unexpectedError(error);
   }
+}
 
-  const descriptor = await new DescriptorResolver(
-    opts?.descriptorResolverOptions,
-  ).resolveTypedDataDescriptor(chainId, verifyingContract);
-
-  if (!descriptor) {
-    return {
-      warnings: [
-        {
-          code: "NO_DESCRIPTOR",
-          message: `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
-        },
-      ],
-    };
-  }
-
-  return formatEip712(typedData, descriptor, opts?.externalDataProvider);
+function unexpectedError(error: unknown): DisplayModel {
+  return {
+    warnings: [
+      warn(
+        "UNEXPECTED_LIB_ERROR",
+        `Encountered an unexpected error in @sourcifyeth/clear-signing. Please report to the maintainers: ${String(error)}`,
+      ),
+    ],
+  };
 }

@@ -14,6 +14,7 @@ import type {
   DisplayFieldGroup,
   ExternalDataProvider,
   FieldType,
+  FormatCalldata,
   Warning,
 } from "./types";
 import type {
@@ -51,6 +52,7 @@ interface FieldContext {
   metadata: DescriptorMetadata | undefined;
   renderedValues: Map<string, string>;
   externalDataProvider?: ExternalDataProvider;
+  formatEmbeddedCalldata?: FormatCalldata;
 }
 
 /**
@@ -68,6 +70,7 @@ export async function applyFieldFormats(
   chainId: number | undefined,
   metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
+  formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<
   | {
       fields: (DisplayField | DisplayFieldGroup)[];
@@ -85,6 +88,7 @@ export async function applyFieldFormats(
     metadata,
     renderedValues,
     externalDataProvider,
+    formatEmbeddedCalldata,
   };
 
   const fields: (DisplayField | DisplayFieldGroup)[] = [];
@@ -158,6 +162,7 @@ async function processSingleField(
 
   const {
     rendered,
+    calldataDisplay,
     warning: fieldWarning,
     tokenAddress,
     rawAddress,
@@ -169,6 +174,7 @@ async function processSingleField(
     ctx.chainId,
     ctx.metadata,
     ctx.externalDataProvider,
+    ctx.formatEmbeddedCalldata,
   );
 
   // Apply separator prefix for array elements (e.g. "Recipient {index}" → "Recipient 0")
@@ -195,6 +201,10 @@ async function processSingleField(
 
   if (tokenAddress) {
     displayField.tokenAddress = tokenAddress;
+  }
+
+  if (calldataDisplay) {
+    displayField.calldataDisplay = calldataDisplay;
   }
 
   if (merged.path) ctx.renderedValues.set(merged.path, finalValue);
@@ -287,6 +297,11 @@ async function processChildArrayPaths(
       });
     }
   }
+
+  // Per ERC-7730: when a field param references an array path, it must have
+  // the same length as the field's own array path.
+  const paramMismatch = checkParamArrayLengths(childFields, arrayLengths, ctx);
+  if (paramMismatch) return { warnings: [paramMismatch] };
 
   if (arrayLengths.length === 0 || arrayLengths.every((a) => a.length === 0)) {
     return {
@@ -435,6 +450,41 @@ function joinArrayValues(
       renderedValues.set(path, parts.join(" and "));
     }
   }
+}
+
+/**
+ * Check that parameter array paths referenced by child fields have the same
+ * length as the field's own array path. Per ERC-7730, parameter arrays must
+ * match the formatted array length.
+ */
+function checkParamArrayLengths(
+  childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
+  fieldArrayLengths: { path: string; length: number }[],
+  ctx: FieldContext,
+): Warning | undefined {
+  for (const child of childFields) {
+    if (isFieldGroup(child) || !child.path?.includes(".[]")) continue;
+    const childBasePath = parseGroupBasePath(child.path);
+    const fieldLength = fieldArrayLengths.find(
+      (a) => a.path === childBasePath,
+    )?.length;
+    if (fieldLength === undefined) continue;
+
+    const params = child.params ?? {};
+    for (const paramValue of Object.values(params)) {
+      if (typeof paramValue !== "string" || !paramValue.includes(".[]"))
+        continue;
+      const paramBasePath = parseGroupBasePath(paramValue);
+      const paramLength = ctx.getArrayLength(paramBasePath);
+      if (paramLength > 0 && paramLength !== fieldLength) {
+        return warn(
+          "PARAM_ARRAY_SIZE_MISMATCH",
+          `Parameter array '${paramBasePath}' has length ${paramLength} but field array '${childBasePath}' has length ${fieldLength}`,
+        );
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

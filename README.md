@@ -114,14 +114,6 @@ interface FormatOptions {
    * Also allows to pass descriptors directly via the `embedded` option.
    */
   descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
-
-  /**
-   * For proxy contracts: the resolved implementation address to use for
-   * descriptor lookup. If present the library will use this address to
-   * resolve the descriptor instead of `tx.to`.
-   * This leaves proxy detection up to the user of the library.
-   */
-  resolvedImplementationAddress?: string;
 }
 ```
 

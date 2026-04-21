@@ -22,8 +22,13 @@ export function isFieldGroup(
   return "fields" in field;
 }
 
+/** Check if a string looks like a hex-encoded Ethereum address (0x + 40 hex chars). */
+export function isAddressString(s: string): boolean {
+  return s.startsWith("0x") && s.length === 42;
+}
+
 /** Compute keccak256 hash of input data. */
-function keccak256(data: Uint8Array): Uint8Array {
+export function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 

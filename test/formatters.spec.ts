@@ -30,7 +30,7 @@ import {
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
-import { hexToBytes } from "../src/utils.js";
+import { bytesToHex, hexToBytes, keccak256 } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1355,6 +1355,269 @@ describe("formatChainId", () => {
   it("returns type mismatch for non-uint/int", async () => {
     const result = await formatChainId(str("not a number"));
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// calldata format (embedded calldata)
+// ---------------------------------------------------------------------------
+
+describe("calldata format", () => {
+  const calldataBytes = hexToBytes("0xdeadbeef");
+  const calldataValue: ArgumentValue = { type: "bytes", bytes: calldataBytes };
+  const calleeAddr = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const mockFormatCalldata = vi.fn().mockResolvedValue({ intent: "test" });
+
+  it("returns type mismatch for non-bytes value", async () => {
+    const result = await renderField(
+      uint(42n),
+      "calldata",
+      { params: { callee: calleeAddr } },
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("returns FORMAT_PARAM_RESOLUTION_ERROR when callee is missing", async () => {
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      {},
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
+    expect(result.warning?.message).toContain("callee");
+  });
+
+  it("returns FORMAT_PARAM_RESOLUTION_ERROR when calleePath cannot be resolved", async () => {
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { calleePath: "nonexistent" } },
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
+  });
+
+  it("resolves callee from a path reference", async () => {
+    const resolvePath: ResolvePath = (path: string) => {
+      if (path === "target") return addr(hexToBytes(calleeAddr));
+      return undefined;
+    };
+    await renderField(
+      calldataValue,
+      "calldata",
+      { params: { calleePath: "target" } },
+      resolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+    expect(mockFormatCalldata).toHaveBeenCalledWith(
+      expect.objectContaining({ to: calleeAddr }),
+    );
+  });
+
+  it("returns CONTAINER_MISSING_CHAIN_ID when no chainId available", async () => {
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr } },
+      noopResolvePath,
+      undefined,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+    expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
+  });
+
+  it("returns EMBEDDED_CALLDATA_NOT_SUPPORTED when formatEmbeddedCalldata is absent", async () => {
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr } },
+      noopResolvePath,
+      1,
+      undefined,
+    );
+    expect(result.warning?.code).toBe("EMBEDDED_CALLDATA_NOT_SUPPORTED");
+  });
+
+  it("returns keccak hash and calldataDisplay on success", async () => {
+    const mockDisplay = {
+      intent: "Do something",
+      fields: [],
+    };
+    const mock = vi.fn().mockResolvedValue(mockDisplay);
+
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr } },
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mock,
+    );
+
+    expect(result.calldataDisplay).toEqual(mockDisplay);
+    expect(result.rendered).toBe(bytesToHex(keccak256(calldataBytes)));
+    expect(result.warning).toBeUndefined();
+
+    expect(mock).toHaveBeenCalledWith({
+      chainId: 1,
+      to: calleeAddr,
+      data: "0xdeadbeef",
+    });
+  });
+
+  it("passes amount and spender to the inner transaction", async () => {
+    const mockFormatCalldata = vi.fn().mockResolvedValue({ intent: "test" });
+    const spenderAddr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    const resolvePath: ResolvePath = (path: string) => {
+      if (path === "nativeAmount") return uint(1000n);
+      if (path === "sender") return addr(hexToBytes(spenderAddr));
+      return undefined;
+    };
+
+    await renderField(
+      calldataValue,
+      "calldata",
+      {
+        params: {
+          callee: calleeAddr,
+          amountPath: "nativeAmount",
+          spenderPath: "sender",
+        },
+      },
+      resolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+
+    expect(mockFormatCalldata).toHaveBeenCalledWith({
+      chainId: 1,
+      to: calleeAddr,
+      data: "0xdeadbeef",
+      value: 1000n,
+      from: spenderAddr,
+    });
+  });
+
+  it("uses chainIdPath to override container chainId", async () => {
+    const mockFormatCalldata = vi.fn().mockResolvedValue({ intent: "test" });
+
+    const resolvePath: ResolvePath = (path: string) => {
+      if (path === "destChain") return uint(42n);
+      return undefined;
+    };
+
+    await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr, chainIdPath: "destChain" } },
+      resolvePath,
+      1,
+      undefined,
+      undefined,
+      mockFormatCalldata,
+    );
+
+    expect(mockFormatCalldata).toHaveBeenCalledWith(
+      expect.objectContaining({ chainId: 42 }),
+    );
+  });
+
+  it("returns FORMAT_PARAM_RESOLUTION_ERROR when chainIdPath cannot be resolved", async () => {
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr, chainIdPath: "nonexistent" } },
+      noopResolvePath,
+      1,
+      undefined,
+    );
+    expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
+    expect(result.warning?.message).toContain("chainId");
+  });
+
+  it("prepends selector to data when selector param is provided", async () => {
+    const mock = vi.fn().mockResolvedValue({ intent: "test" });
+
+    await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr, selector: "0x12345678" } },
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mock,
+    );
+
+    expect(mock).toHaveBeenCalledWith(
+      expect.objectContaining({ data: "0x12345678deadbeef" }),
+    );
+  });
+
+  it("prepends selector resolved from selectorPath", async () => {
+    const mock = vi.fn().mockResolvedValue({ intent: "test" });
+    const selectorBytes = hexToBytes("0xaabbccdd");
+    const resolvePath: ResolvePath = (path: string) => {
+      if (path === "funcSelector") return { type: "bytes", bytes: selectorBytes };
+      return undefined;
+    };
+
+    await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr, selectorPath: "funcSelector" } },
+      resolvePath,
+      1,
+      undefined,
+      undefined,
+      mock,
+    );
+
+    expect(mock).toHaveBeenCalledWith(
+      expect.objectContaining({ data: "0xaabbccdddeadbeef" }),
+    );
+  });
+
+  it("does not include selector in the rendered hash", async () => {
+    const mock = vi.fn().mockResolvedValue({ intent: "test" });
+
+    const result = await renderField(
+      calldataValue,
+      "calldata",
+      { params: { callee: calleeAddr, selector: "0x12345678" } },
+      noopResolvePath,
+      1,
+      undefined,
+      undefined,
+      mock,
+    );
+
+    // Hash should be of the raw bytes only, not including the prepended selector
+    expect(result.rendered).toBe(bytesToHex(keccak256(calldataBytes)));
   });
 });
 

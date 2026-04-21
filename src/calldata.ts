@@ -7,6 +7,7 @@ import type {
   DescriptorFormatSpec,
   DisplayModel,
   ExternalDataProvider,
+  FormatCalldata,
   RawCalldataFallback,
   Transaction,
   Warning,
@@ -39,6 +40,7 @@ export async function formatCalldata(
   tx: Transaction,
   descriptor: Descriptor,
   externalDataProvider?: ExternalDataProvider,
+  formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<DisplayModel> {
   const calldata = hexToBytes(tx.data);
   const selector = extractSelector(calldata);
@@ -87,6 +89,7 @@ export async function formatCalldata(
     tx.chainId,
     descriptor.metadata,
     externalDataProvider,
+    formatEmbeddedCalldata,
   );
 
   if ("warnings" in result) {

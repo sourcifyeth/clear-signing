@@ -8,6 +8,7 @@ import type {
   DisplayModel,
   FieldType,
   ExternalDataProvider,
+  FormatCalldata,
   TypedData,
   TypeMember,
   Warning,
@@ -35,6 +36,7 @@ export async function formatEip712(
   typedData: TypedData,
   descriptor: Descriptor,
   externalDataProvider?: ExternalDataProvider,
+  formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<DisplayModel> {
   if (!isEip712DescriptorBoundTo(descriptor, typedData)) {
     return {
@@ -85,6 +87,7 @@ export async function formatEip712(
     typedData.domain.chainId,
     descriptor.metadata,
     externalDataProvider,
+    formatEmbeddedCalldata,
   );
 
   if ("warnings" in result) {

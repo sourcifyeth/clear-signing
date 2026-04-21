@@ -21,6 +21,7 @@ import {
   bigIntToBytes,
   boolToBytes,
   hexToBytes,
+  isAddressString,
   coerceBigInt,
   normalizeAddress,
   parseBigInt,
@@ -109,7 +110,7 @@ export function rawToArgumentValue(
   switch (fieldType) {
     case "address": {
       if (typeof value !== "string") return undefined;
-      if (!value.startsWith("0x") || value.length !== 42) return undefined;
+      if (!isAddressString(value)) return undefined;
       return { type: "address", bytes: hexToBytes(value) };
     }
     case "uint": {
@@ -157,7 +158,7 @@ export function toArgumentValue(value: unknown): ArgumentValue | undefined {
   if (typeof value === "string") {
     // Address check must precede parseBigInt — 42-char hex strings are valid
     // BigInt literals but should be treated as addresses, not numbers.
-    if (value.startsWith("0x") && value.length === 42) {
+    if (isAddressString(value)) {
       return { type: "address", bytes: hexToBytes(value) };
     }
     const n = parseBigInt(value);

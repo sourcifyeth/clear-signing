@@ -386,6 +386,45 @@ describe("applyFieldFormats", () => {
       assert("warnings" in result);
       expect(result.warnings[0].code).toBe("BUNDLED_ARRAY_SIZE_MISMATCH");
     });
+
+    it("returns warning when a parameter array has different length than the field array", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Group",
+            iteration: "sequential",
+            fields: [
+              {
+                path: "amounts.[]",
+                label: "Amount",
+                format: "tokenAmount",
+                params: { tokenPath: "tokens.[]" },
+              },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        "amounts.[0]": UINT(100n),
+        "amounts.[1]": UINT(200n),
+        "tokens.[0]": ADDR("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        "tokens.[1]": ADDR("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        "tokens.[2]": ADDR("0xcccccccccccccccccccccccccccccccccccccccc"),
+      });
+      const getArrayLength = mapArrayLength({ amounts: 2, tokens: 3 });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        getArrayLength,
+        1,
+        undefined,
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings[0].code).toBe("PARAM_ARRAY_SIZE_MISMATCH");
+    });
   });
 
   describe("separator handling", () => {

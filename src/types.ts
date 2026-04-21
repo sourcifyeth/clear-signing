@@ -51,6 +51,7 @@ export interface TypedData {
 
 /** Machine-readable warning code. */
 export type WarningCode =
+  | "UNEXPECTED_LIB_ERROR" // indicates a bug in the library
   | "NO_DESCRIPTOR"
   | "DEPLOYMENT_MISMATCH"
   | "NO_FORMAT_MATCH"
@@ -70,7 +71,9 @@ export type WarningCode =
   | "FORMAT_PARAM_RESOLUTION_ERROR"
   | "UNKNOWN_ENCODING"
   | "UNKNOWN_BLOCK"
-  | "UNKNOWN_CHAIN";
+  | "UNKNOWN_CHAIN"
+  | "PARAM_ARRAY_SIZE_MISMATCH"
+  | "EMBEDDED_CALLDATA_NOT_SUPPORTED";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
@@ -91,15 +94,23 @@ export interface RawCalldataFallback {
  * A single labeled field to display to the user.
  *
  * When clear-signing transactions with embedded calldata (nested
- * transactions), value will be another `DisplayModel` which is
- * formatted via resolving a descriptor file for the embedded
- * calldata.
+ * transactions), a calldata formatted field will have a calldataDisplay
+ * property which is formatted via resolving a descriptor file for the
+ * embedded calldata.
  */
 export interface DisplayField {
   /** Label to show in the UI for this field. */
   label: string;
   /** Value to show in the UI for this field */
-  value: string | DisplayModel;
+  value: string;
+
+  /**
+   * Embedded calldata (format: "calldata") is formatted into a nested
+   * DisplayModel. The value property will be the keccak hash of the embedded
+   * calldata in this case. Wallets should prefer to render the embedded
+   * DisplayModel over the value property.
+   */
+  calldataDisplay?: DisplayModel;
 
   /**
    * The fieldType and format properties can be used to show type-specific
@@ -206,6 +217,9 @@ export interface DisplayModel {
   warnings?: Warning[];
 }
 
+/** Closure for formatting embedded calldata (nested function calls). */
+export type FormatCalldata = (tx: Transaction) => Promise<DisplayModel>;
+
 /** Result of resolving an address name (ENS or local). */
 export interface AddressNameResult {
   name: string;
@@ -308,13 +322,9 @@ export interface FormatOptions {
    */
   descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
 
-  /**
-   * For proxy contracts: the resolved implementation address to use for
-   * descriptor lookup. If present the library will use this address to
-   * resolve the descriptor instead of `tx.to`.
-   * This leaves proxy detection up to the user of the library.
-   */
-  resolvedImplementationAddress?: string;
+  // TODO: resolvedImplementationAddress for proxy contracts — may be replaced
+  // with an ExternalDataProvider method.
+  // resolvedImplementationAddress?: string;
 }
 
 export type GitHubResolverOptions = {
