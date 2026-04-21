@@ -13,7 +13,7 @@ import type {
   Warning,
 } from "./types";
 import {
-  type ResolvePath,
+  type BaseResolvePath,
   toArgumentValue,
   rawToArgumentValue,
   interpolateTemplate,
@@ -59,7 +59,7 @@ export async function formatEip712(
     };
   }
 
-  const resolvePath: ResolvePath = (path: string) => {
+  const resolvePath: BaseResolvePath = (path: string) => {
     if (path.startsWith("@.")) return resolveTypedDataPath(path, typedData);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));

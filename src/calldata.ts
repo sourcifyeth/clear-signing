@@ -11,7 +11,7 @@ import type {
   Transaction,
   Warning,
 } from "./types";
-import type { ArgumentValue, ResolvePath } from "./descriptor";
+import type { ArgumentValue, BaseResolvePath } from "./descriptor";
 import {
   interpolateTemplate,
   isCalldataDescriptorBoundTo,
@@ -20,8 +20,10 @@ import {
   toArgumentValue,
 } from "./descriptor";
 import {
-  bytesToBigInt,
+  bytesToAscii,
+  bytesToUnsignedBigInt,
   bytesToHex,
+  bytesToSignedBigInt,
   extractSelector,
   formatSelectorHex,
   hexToBytes,
@@ -70,7 +72,7 @@ export async function formatCalldata(
   const { fn, spec: format } = match;
   const decoded = decodeArguments(fn, calldata);
 
-  const resolvePath: ResolvePath = (path: string) => {
+  const resolvePath: BaseResolvePath = (path: string) => {
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
@@ -350,7 +352,6 @@ interface DecodedArgument {
   index: number;
   name?: string;
   value: ArgumentValue;
-  word: Uint8Array;
 }
 
 /**
@@ -361,18 +362,13 @@ class DecodedArguments {
   private indexByName = new Map<string, number>();
   private arrayLengths = new Map<string, number>();
 
-  push(
-    name: string | undefined,
-    index: number,
-    value: ArgumentValue,
-    word: Uint8Array,
-  ): void {
+  push(name: string | undefined, index: number, value: ArgumentValue): void {
     const entryIndex = this.ordered.length;
     if (name !== undefined) {
       this.indexByName.set(name, entryIndex);
     }
     this.indexByName.set(`arg${index}`, entryIndex);
-    this.ordered.push({ index, name, value, word });
+    this.ordered.push({ index, name, value });
   }
 
   setArrayLength(name: string, length: number): void {
@@ -395,159 +391,207 @@ class DecodedArguments {
 }
 
 /**
+ * Check if a function input type requires dynamic (offset-based) ABI encoding.
+ */
+function isDynamicInput(input: FunctionInput): boolean {
+  if (input.type === "bytes" || input.type === "string") return true;
+  if (input.type.endsWith("[]")) return true;
+  if (input.type.startsWith("tuple") && input.components) {
+    return input.components.some(isDynamicInput);
+  }
+  return false;
+}
+
+/** Calculate the inline head size in bytes for a static input. */
+function staticHeadSize(input: FunctionInput): number {
+  if (
+    input.type === "tuple" &&
+    input.components &&
+    input.components.length > 0
+  ) {
+    return input.components.reduce((sum, c) => sum + staticHeadSize(c), 0);
+  }
+  return 32;
+}
+
+/**
  * Decode calldata arguments according to function descriptor.
+ * Supports static types, static/dynamic tuples, dynamic arrays (including
+ * tuple[]), and bytes/string dynamic types.
  */
 function decodeArguments(
   fn: ParsedFunctionSignature,
   calldata: Uint8Array,
 ): DecodedArguments {
-  const totalWords = fn.inputs.reduce(
-    (sum, input) => sum + argumentWordCount(input),
-    0,
-  );
-  const expectedLen = 4 + totalWords * 32;
+  const headSize = fn.inputs.reduce((sum, input) => {
+    return sum + (isDynamicInput(input) ? 32 : staticHeadSize(input));
+  }, 0);
 
-  if (calldata.length < expectedLen) {
+  if (calldata.length < 4 + headSize) {
     throw new Error(
-      `calldata length ${calldata.length} too small for ${totalWords} arguments`,
+      `calldata length ${calldata.length} too small (expected at least ${4 + headSize} bytes)`,
     );
   }
 
   const decoded = new DecodedArguments();
-  let cursor = 4;
-  let globalIndex = 0;
-
-  for (const input of fn.inputs) {
-    const result = decodeInput(input, calldata, cursor, undefined, globalIndex);
-    cursor = result.cursor;
-    globalIndex = result.globalIndex;
-
-    for (const arg of result.args) {
-      decoded.push(arg.name, arg.index, arg.value, arg.word);
-    }
-
-    if (result.arrayMeta) {
-      decoded.setArrayLength(result.arrayMeta.name, result.arrayMeta.length);
-    }
-  }
-
+  // Skip the 4-byte selector; offsets in data are relative to params start.
+  const data = calldata.slice(4);
+  decodeTuple(fn.inputs, data, 0, undefined, decoded);
   return decoded;
 }
 
-interface DecodeResult {
-  cursor: number;
-  globalIndex: number;
-  args: Array<{
-    name: string | undefined;
-    index: number;
-    value: ArgumentValue;
-    word: Uint8Array;
-  }>;
-  arrayMeta?: { name: string; length: number };
+/**
+ * Decode a sequence of ABI-encoded inputs using head-tail encoding.
+ * Each dynamic input has an offset word in the head pointing to tail data.
+ * Each static input is encoded inline in the head.
+ */
+function decodeTuple(
+  inputs: FunctionInput[],
+  data: Uint8Array,
+  baseOffset: number,
+  prefix: string | undefined,
+  decoded: DecodedArguments,
+): void {
+  let headCursor = baseOffset;
+
+  for (const input of inputs) {
+    if (isDynamicInput(input)) {
+      const relOffset = Number(
+        bytesToUnsignedBigInt(data.slice(headCursor, headCursor + 32)),
+      );
+      decodeDynamicInput(input, data, baseOffset + relOffset, prefix, decoded);
+      headCursor += 32;
+    } else {
+      headCursor = decodeStaticInput(input, data, headCursor, prefix, decoded);
+    }
+  }
 }
 
-function decodeInput(
+/**
+ * Decode a static input (basic type or all-static tuple) at the given position.
+ * Returns the cursor position after the decoded data.
+ */
+function decodeStaticInput(
   input: FunctionInput,
-  calldata: Uint8Array,
+  data: Uint8Array,
   cursor: number,
   prefix: string | undefined,
-  globalIndex: number,
-): DecodeResult {
+  decoded: DecodedArguments,
+): number {
   if (
-    input.type.startsWith("tuple") &&
+    input.type === "tuple" &&
     input.components &&
     input.components.length > 0
   ) {
-    const basePrefix =
-      prefix !== undefined
-        ? input.name.trim().length === 0
-          ? prefix
-          : `${prefix}.${input.name.trim()}`
-        : input.name.trim().length === 0
-          ? undefined
-          : input.name.trim();
-
-    const args: DecodeResult["args"] = [];
+    const tuplePrefix = argumentName(prefix, input);
+    let pos = cursor;
     for (const component of input.components) {
-      const result = decodeInput(
-        component,
-        calldata,
-        cursor,
-        basePrefix,
-        globalIndex,
-      );
-      cursor = result.cursor;
-      globalIndex = result.globalIndex;
-      args.push(...result.args);
+      pos = decodeStaticInput(component, data, pos, tuplePrefix, decoded);
     }
-    return { cursor, globalIndex, args };
+    return pos;
   }
 
-  // Dynamic array: head word is an offset pointer to tail section
-  if (isDynamicArrayType(input.type)) {
-    const offsetWord = calldata.slice(cursor, cursor + 32);
-    const offset = Number(bytesToBigInt(offsetWord));
-    const argsStart = 4; // after selector
-    const dataStart = argsStart + offset;
+  const value = decodeWord(input.type, data.slice(cursor, cursor + 32));
+  const name = argumentName(prefix, input);
+  decoded.push(name, decoded.getOrdered().length, value);
+  return cursor + 32;
+}
 
-    const lengthWord = calldata.slice(dataStart, dataStart + 32);
-    const length = Number(bytesToBigInt(lengthWord));
-
-    const elementType = input.type.replace(/\[\]$/, "");
-    const baseName = argumentName(prefix, input);
-
-    const args: DecodeResult["args"] = [];
-    for (let i = 0; i < length; i++) {
-      const elemStart = dataStart + 32 + i * 32;
-      const word = calldata.slice(elemStart, elemStart + 32);
-      const value = decodeWord(elementType, word);
-      const name = baseName ? `${baseName}.[${i}]` : undefined;
-      args.push({ name, index: globalIndex, value, word });
-    }
-
-    return {
-      cursor: cursor + 32,
-      globalIndex: globalIndex + 1,
-      args,
-      arrayMeta: baseName ? { name: baseName, length } : undefined,
-    };
-  }
-
-  // Decode single word
-  const start = cursor;
-  const end = start + 32;
-
-  if (end > calldata.length) {
-    throw new Error(
-      `calldata length ${calldata.length} too small while decoding argument '${input.name}'`,
-    );
-  }
-
-  const word = calldata.slice(start, end);
-  const value = decodeWord(input.type, word);
+/**
+ * Decode a dynamic input (bytes, string, dynamic array, or dynamic tuple)
+ * at the given data offset.
+ */
+function decodeDynamicInput(
+  input: FunctionInput,
+  data: Uint8Array,
+  dataStart: number,
+  prefix: string | undefined,
+  decoded: DecodedArguments,
+): void {
   const name = argumentName(prefix, input);
 
-  return {
-    cursor: end,
-    globalIndex: globalIndex + 1,
-    args: [{ name, index: globalIndex, value, word }],
-  };
-}
+  // bytes or string: length word + raw content
+  if (input.type === "bytes" || input.type === "string") {
+    const length = Number(
+      bytesToUnsignedBigInt(data.slice(dataStart, dataStart + 32)),
+    );
+    const content = data.slice(dataStart + 32, dataStart + 32 + length);
+    const value: ArgumentValue =
+      input.type === "string"
+        ? { type: "string", value: bytesToAscii(content) }
+        : { type: "bytes", bytes: content };
+    decoded.push(name, decoded.getOrdered().length, value);
+    return;
+  }
 
-/** Check if a type is a dynamic array (e.g. address[], uint256[]). */
-function isDynamicArrayType(type: string): boolean {
-  return type.endsWith("[]") && !type.startsWith("tuple");
-}
+  // Dynamic array (type[], including tuple[])
+  if (input.type.endsWith("[]")) {
+    const length = Number(
+      bytesToUnsignedBigInt(data.slice(dataStart, dataStart + 32)),
+    );
+    if (name) decoded.setArrayLength(name, length);
 
-function argumentWordCount(input: FunctionInput): number {
+    if (
+      input.type === "tuple[]" &&
+      input.components &&
+      input.components.length > 0
+    ) {
+      const elementsStart = dataStart + 32;
+
+      if (input.components.some(isDynamicInput)) {
+        // Dynamic tuple elements: each has an offset word
+        for (let i = 0; i < length; i++) {
+          const elemOffset = Number(
+            bytesToUnsignedBigInt(
+              data.slice(elementsStart + i * 32, elementsStart + (i + 1) * 32),
+            ),
+          );
+          const elemPrefix = name ? `${name}.[${i}]` : undefined;
+          decodeTuple(
+            input.components,
+            data,
+            elementsStart + elemOffset,
+            elemPrefix,
+            decoded,
+          );
+        }
+      } else {
+        // Static tuple elements: packed sequentially
+        const elemSize = input.components.reduce(
+          (sum, c) => sum + staticHeadSize(c),
+          0,
+        );
+        for (let i = 0; i < length; i++) {
+          const elemPrefix = name ? `${name}.[${i}]` : undefined;
+          let pos = elementsStart + i * elemSize;
+          for (const component of input.components) {
+            pos = decodeStaticInput(component, data, pos, elemPrefix, decoded);
+          }
+        }
+      }
+    } else {
+      // Simple element type (address[], uint256[], etc.)
+      const elementType = input.type.replace(/\[\]$/, "");
+      for (let i = 0; i < length; i++) {
+        const elemStart = dataStart + 32 + i * 32;
+        const word = data.slice(elemStart, elemStart + 32);
+        const value = decodeWord(elementType, word);
+        const elemName = name ? `${name}.[${i}]` : undefined;
+        decoded.push(elemName, decoded.getOrdered().length, value);
+      }
+    }
+    return;
+  }
+
+  // Dynamic tuple (non-array): has at least one dynamic component
   if (
-    input.type.startsWith("tuple") &&
+    input.type === "tuple" &&
     input.components &&
     input.components.length > 0
   ) {
-    return input.components.reduce((sum, c) => sum + argumentWordCount(c), 0);
+    decodeTuple(input.components, data, dataStart, name, decoded);
+    return;
   }
-  return 1;
 }
 
 function argumentName(
@@ -567,16 +611,12 @@ function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
   }
 
   if (kind.startsWith("uint")) {
-    return { type: "uint", value: bytesToBigInt(word) };
+    return { type: "uint", value: bytesToUnsignedBigInt(word) };
   }
 
   if (kind.startsWith("int")) {
     const bits = kind === "int" ? 256 : parseInt(kind.slice(3), 10);
-    const unsigned = bytesToBigInt(word);
-    const signBit = 1n << BigInt(bits - 1);
-    const value =
-      unsigned & signBit ? unsigned - (1n << BigInt(bits)) : unsigned;
-    return { type: "int", value };
+    return { type: "int", value: bytesToSignedBigInt(word, bits) };
   }
 
   if (kind === "bool") {

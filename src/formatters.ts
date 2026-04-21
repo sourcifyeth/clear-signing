@@ -14,9 +14,13 @@ import type {
   Warning,
 } from "./types";
 import type { ArgumentValue, ResolvePath } from "./descriptor";
-import { resolveMetadataValue } from "./descriptor";
+import {
+  bytesToAddressArgumentValue,
+  resolveMetadataValue,
+} from "./descriptor";
 import {
   addThousandSeparators,
+  bytesToUnsignedBigInt,
   bytesToHex,
   formatAmountWithDecimals,
   hexToBytes,
@@ -34,6 +38,7 @@ export type RenderFieldResult = {
   rendered: string;
   warning?: Warning;
   tokenAddress?: string;
+  rawAddress?: string;
 };
 
 /**
@@ -89,9 +94,10 @@ export async function renderField(
     case "chainId":
       return await formatChainId(value, externalDataProvider);
     case "addressName":
-      return await formatAddressNameField(
+      return await formatAddressName(
         value,
         fieldOptions,
+        resolvePath,
         externalDataProvider,
       );
     case "tokenTicker":
@@ -112,7 +118,11 @@ export async function renderField(
 // ---------------------------------------------------------------------------
 
 export function formatRaw(value: ArgumentValue): RenderFieldResult {
-  return { rendered: renderRaw(value) };
+  const rendered = renderRaw(value);
+  if (value.type === "address") {
+    return { rendered, rawAddress: toChecksumAddress(value.bytes) };
+  }
+  return { rendered };
 }
 
 export function renderRaw(value: ArgumentValue): string {
@@ -321,10 +331,14 @@ export function tokenAmountMessage(
 
   let threshold: bigint | undefined;
   const resolved = resolvePath(thresholdSpec);
-  if (resolved?.type === "uint" || resolved?.type === "int") {
-    threshold = resolved.value;
-  } else {
+  if (resolved === undefined) {
     threshold = parseBigInt(thresholdSpec);
+  } else if (resolved.type === "uint" || resolved.type === "int") {
+    threshold = resolved.value;
+  } else if (resolved.type === "string") {
+    threshold = parseBigInt(resolved.value);
+  } else if (resolved.type === "bytes-slice") {
+    threshold = bytesToUnsignedBigInt(resolved.bytes);
   }
 
   return threshold !== undefined && amount >= threshold ? message : undefined;
@@ -385,7 +399,10 @@ export function resolveTokenAddress(
   }
 
   // Any path ($., @., #., or bare) — resolve via the caller's closure
-  const resolved = resolvePath(token);
+  let resolved = resolvePath(token);
+  if (resolved?.type === "bytes-slice") {
+    resolved = bytesToAddressArgumentValue(resolved.bytes);
+  }
   if (resolved?.type === "address") {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
@@ -420,7 +437,7 @@ export function isNativeCurrencyAddress(
 
     // Path reference — resolve and compare
     const resolved = resolvePath(candidate);
-    if (resolved?.type === "address") {
+    if (resolved?.type === "address" || resolved?.type === "bytes-slice") {
       if (bytesToHex(resolved.bytes).toLowerCase() === tokenAddress)
         return true;
     } else if (resolved?.type === "string") {
@@ -513,7 +530,10 @@ export function resolveCollectionAddress(
   }
 
   // Any path ($., @., #., or bare) — resolve via the caller's closure
-  const resolved = resolvePath(collection);
+  let resolved = resolvePath(collection);
+  if (resolved?.type === "bytes-slice") {
+    resolved = bytesToAddressArgumentValue(resolved.bytes);
+  }
   if (resolved?.type === "address") {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
@@ -760,27 +780,28 @@ export async function formatChainId(
 // addressName format
 // ---------------------------------------------------------------------------
 
-export async function formatAddressNameField(
+export async function formatAddressName(
   value: ArgumentValue,
   field: FieldFormatOptions,
+  resolvePath: ResolvePath,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
   if (value.type !== "address")
     return typeMismatch(value, "address", "addressName");
-  const checksum = toChecksumAddress(value.bytes);
-  return formatAddressName(checksum, field, externalDataProvider);
-}
-
-/**
- * Resolve an address name using local wallet names and ENS.
- * Falls back to the checksum address with a warning when all resolution fails.
- */
-export async function formatAddressName(
-  checksumAddress: string,
-  field: FieldFormatOptions,
-  externalDataProvider?: ExternalDataProvider,
-): Promise<RenderFieldResult> {
+  const checksumAddress = toChecksumAddress(value.bytes);
   const normalized = checksumAddress.toLowerCase();
+
+  // Per ERC-7730: if the address matches senderAddress, display "Sender"
+  // and substitute the address with @.from
+  if (isSenderAddress(normalized, field, resolvePath)) {
+    const fromResolved = resolvePath("@.from");
+    const senderAddress =
+      fromResolved?.type === "address"
+        ? toChecksumAddress(fromResolved.bytes)
+        : checksumAddress;
+    return { rendered: "Sender", rawAddress: senderAddress };
+  }
+
   const params = field.params ?? {};
 
   const types = params.types;
@@ -800,6 +821,7 @@ export async function formatAddressName(
       if (result) {
         return {
           rendered: result.name,
+          rawAddress: checksumAddress,
           warning: result.typeMatch
             ? undefined
             : warn(
@@ -823,6 +845,7 @@ export async function formatAddressName(
       if (result) {
         return {
           rendered: result.name,
+          rawAddress: checksumAddress,
           warning: result.typeMatch
             ? undefined
             : warn(
@@ -839,8 +862,46 @@ export async function formatAddressName(
   // Raw address fallback — resolution was expected but failed
   return {
     rendered: checksumAddress,
+    rawAddress: checksumAddress,
     warning: warn("UNKNOWN_ADDRESS", "Address name could not be resolved"),
   };
+}
+
+/**
+ * Check whether a resolved address matches one of the senderAddress
+ * values in the field params. Per ERC-7730, when the field value equals
+ * a senderAddress, it is interpreted as the sender referenced by @.from.
+ */
+export function isSenderAddress(
+  address: string,
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): boolean {
+  const params = field.params ?? {};
+  const spec = params.senderAddress;
+  if (!spec) return false;
+
+  const candidates = Array.isArray(spec) ? spec : [spec];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+
+    // Literal address
+    if (candidate.startsWith("0x") && candidate.length === 42) {
+      if (candidate.toLowerCase() === address) return true;
+      continue;
+    }
+
+    // Path reference — resolve and compare
+    const resolved = resolvePath(candidate);
+    if (resolved?.type === "address" || resolved?.type === "bytes-slice") {
+      if (bytesToHex(resolved.bytes).toLowerCase() === address) return true;
+    } else if (resolved?.type === "string") {
+      if (resolved.value.toLowerCase() === address) return true;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -930,8 +991,18 @@ function resolveChainId(
       return { hasChainIdParam: true, value: n };
 
     const resolved = resolvePath(spec);
+    let resolvedN: bigint | undefined;
     if (resolved?.type === "uint" || resolved?.type === "int") {
-      return { hasChainIdParam: true, value: Number(resolved.value) };
+      resolvedN = resolved.value;
+    } else if (resolved?.type === "bytes-slice") {
+      resolvedN = bytesToUnsignedBigInt(resolved.bytes);
+    }
+
+    if (resolvedN !== undefined && resolvedN <= Number.MAX_SAFE_INTEGER) {
+      return {
+        hasChainIdParam: true,
+        value: Number(resolvedN),
+      };
     }
   }
 

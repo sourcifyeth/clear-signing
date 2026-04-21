@@ -22,8 +22,8 @@ import {
   formatDuration,
   formatNftName,
   resolveCollectionAddress,
-  formatAddressNameField,
   formatAddressName,
+  isSenderAddress,
   formatTokenTicker,
   isNativeCurrencyAddress,
   resolveMetadataToken,
@@ -1363,11 +1363,15 @@ describe("formatChainId", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatAddressName", () => {
-  const checksumAddr = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+  it("returns type mismatch for non-address", async () => {
+    const result = await formatAddressName(uint(42n), {}, noopResolvePath);
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
 
   it("falls back to checksum address with UNKNOWN_ADDRESS warning when no provider", async () => {
-    const result = await formatAddressName(checksumAddr, {});
-    expect(result.rendered).toBe(checksumAddr);
+    const result = await formatAddressName(addr(), {}, noopResolvePath);
+    expect(result.rendered).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(result.rawAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
     expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
   });
 
@@ -1378,8 +1382,14 @@ describe("formatAddressName", () => {
         typeMatch: true,
       }),
     };
-    const result = await formatAddressName(checksumAddr, {}, provider);
+    const result = await formatAddressName(
+      addr(),
+      {},
+      noopResolvePath,
+      provider,
+    );
     expect(result.rendered).toBe("My Wallet");
+    expect(result.rawAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
     expect(result.warning).toBeUndefined();
   });
 
@@ -1391,7 +1401,12 @@ describe("formatAddressName", () => {
       }),
     };
     const field = { params: { types: ["contract" as const] } };
-    const result = await formatAddressName(checksumAddr, field, provider);
+    const result = await formatAddressName(
+      addr(),
+      field,
+      noopResolvePath,
+      provider,
+    );
     expect(result.rendered).toBe("My Wallet");
     expect(result.warning?.code).toBe("ADDRESS_TYPE_MISMATCH");
   });
@@ -1404,7 +1419,12 @@ describe("formatAddressName", () => {
         typeMatch: true,
       }),
     };
-    const result = await formatAddressName(checksumAddr, {}, provider);
+    const result = await formatAddressName(
+      addr(),
+      {},
+      noopResolvePath,
+      provider,
+    );
     expect(result.rendered).toBe("vitalik.eth");
     expect(result.warning).toBeUndefined();
   });
@@ -1421,7 +1441,12 @@ describe("formatAddressName", () => {
       })),
     };
     const field = { params: { sources: ["ens" as const] } };
-    const result = await formatAddressName(checksumAddr, field, provider);
+    const result = await formatAddressName(
+      addr(),
+      field,
+      noopResolvePath,
+      provider,
+    );
     expect(result.rendered).toBe("ens.eth");
     expect(provider.resolveLocalName).not.toHaveBeenCalled();
   });
@@ -1435,28 +1460,61 @@ describe("formatAddressName", () => {
       })),
     };
     const field = { params: { sources: ["local" as const] } };
-    const result = await formatAddressName(checksumAddr, field, provider);
-    expect(result.rendered).toBe(checksumAddr);
+    const result = await formatAddressName(
+      addr(),
+      field,
+      noopResolvePath,
+      provider,
+    );
+    expect(result.rendered).toMatch(/^0x[0-9a-fA-F]{40}$/);
     expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
     expect(provider.resolveEnsName).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// addressName format: formatAddressNameField
+// addressName format: isSenderAddress
 // ---------------------------------------------------------------------------
 
-describe("formatAddressNameField", () => {
-  it("returns type mismatch for non-address", async () => {
-    const result = await formatAddressNameField(uint(42n), {});
-    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+describe("isSenderAddress", () => {
+  const zeroAddr = "0x0000000000000000000000000000000000000000";
+
+  it("returns false when no senderAddress param", () => {
+    expect(isSenderAddress(zeroAddr, {}, noopResolvePath)).toBe(false);
   });
 
-  it("delegates to formatAddressName for address values", async () => {
-    const result = await formatAddressNameField(addr(), {});
-    expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
-    // It returns a checksum address
-    expect(result.rendered).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  it("matches literal senderAddress", () => {
+    const field = { params: { senderAddress: zeroAddr } };
+    expect(isSenderAddress(zeroAddr, field, noopResolvePath)).toBe(true);
+  });
+
+  it("does not match when address differs", () => {
+    const field = { params: { senderAddress: zeroAddr } };
+    expect(
+      isSenderAddress(
+        "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        field,
+        noopResolvePath,
+      ),
+    ).toBe(false);
+  });
+
+  it("matches senderAddress resolved via path", () => {
+    const field = {
+      params: { senderAddress: "$.metadata.constants.addressAsNull" },
+    };
+    const resolvePath: ResolvePath = (path: string) => {
+      if (path === "$.metadata.constants.addressAsNull") {
+        return { type: "string", value: zeroAddr };
+      }
+      return undefined;
+    };
+    expect(isSenderAddress(zeroAddr, field, resolvePath)).toBe(true);
+  });
+
+  it("matches senderAddress array", () => {
+    const field = { params: { senderAddress: ["0x1234", zeroAddr] } };
+    expect(isSenderAddress(zeroAddr, field, noopResolvePath)).toBe(true);
   });
 });
 

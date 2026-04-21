@@ -28,7 +28,7 @@ function keccak256(data: Uint8Array): Uint8Array {
 }
 
 /** Encode an ASCII string to bytes without relying on TextEncoder (React Native compatible). */
-function asciiToBytes(str: string): Uint8Array {
+export function asciiToBytes(str: string): Uint8Array {
   const bytes = new Uint8Array(str.length);
   for (let i = 0; i < str.length; i++) {
     bytes[i] = str.charCodeAt(i);
@@ -170,10 +170,45 @@ export function extractSelector(calldata: Uint8Array): Uint8Array {
   return calldata.slice(0, 4);
 }
 
-export function bytesToBigInt(bytes: Uint8Array): bigint {
+/** Decode bytes to an ASCII string. */
+export function bytesToAscii(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) {
+    s += String.fromCharCode(b);
+  }
+  return s;
+}
+
+/** Convert a boolean to a single-byte Uint8Array. */
+export function boolToBytes(value: boolean): Uint8Array {
+  return new Uint8Array([value ? 1 : 0]);
+}
+
+/** Convert a bigint to a 32-byte big-endian Uint8Array (two's complement for negative values). */
+export function bigIntToBytes(value: bigint): Uint8Array {
+  const bytes = new Uint8Array(32);
+  let n = value;
+  if (n < 0n) n = (1n << 256n) + n;
+  for (let i = 31; i >= 0; i--) {
+    bytes[i] = Number(n & 0xffn);
+    n >>= 8n;
+  }
+  return bytes;
+}
+
+/** Interpret bytes as an unsigned big-endian integer. */
+export function bytesToUnsignedBigInt(bytes: Uint8Array): bigint {
   let result = 0n;
   for (const byte of bytes) {
     result = (result << 8n) | BigInt(byte);
   }
   return result;
+}
+
+/** Interpret bytes as a signed big-endian integer (two's complement). */
+export function bytesToSignedBigInt(bytes: Uint8Array, bits?: number): bigint {
+  const unsigned = bytesToUnsignedBigInt(bytes);
+  const bitLen = BigInt(bits ?? bytes.length * 8);
+  const signBit = 1n << (bitLen - 1n);
+  return unsigned & signBit ? unsigned - (1n << bitLen) : unsigned;
 }

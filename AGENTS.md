@@ -28,19 +28,27 @@ src/
 - **`descriptor.ts`** — Shared descriptor utilities used by both calldata and EIP-712 paths:
   descriptor binding checks (`isCalldataDescriptorBoundTo`, `isEip712DescriptorBoundTo`),
   path resolution (`resolveTransactionPath`, `resolveTypedDataPath`),
-  value conversion (`ArgumentValue`, `toArgumentValue`, `rawToArgumentValue`),
+  value conversion (`ArgumentValue`, `BytesSliceValue`, `toArgumentValue`, `rawToArgumentValue`,
+  `argumentValueToBytes`), format-to-type mapping (`fieldTypeForFormat`, `bytesSliceToFieldType`),
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
   metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
+  Defines the `BaseResolvePath` (returns `ArgumentValue`) and `ResolvePath`
+  (returns `ArgumentValue | BytesSliceValue`) type aliases.
 
 - **`fields.ts`** — The field processing pipeline. Primary entry point is `applyFieldFormats()`,
   which iterates format fields, merges definitions, resolves values, and renders each field.
   Handles field groups with array iteration (group-level and child-level patterns, sequential
   and bundled modes). Delegates individual field rendering to `formatters.ts`.
+  Contains byte slice support: `parseByteSlice`, `applyByteSlice`, `buildSliceResolvePath`
+  (wraps a `BaseResolvePath` to handle slice paths transparently), and
+  `bytesSliceToArgumentValue` (converts `BytesSliceValue` to `ArgumentValue` using the
+  field format's expected type).
 
 - **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
   Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatNftName`,
   `formatDuration`, `formatUnit`, `formatAddressName`, `formatTokenTicker`,
-  `formatChainId`, `formatNativeAmount`, `resolveEnumLabel`, etc. Also defines `FieldFormatOptions` and `RenderFieldResult`
+  `formatChainId`, `formatNativeAmount`, `resolveEnumLabel`, `isSenderAddress`,
+  `isNativeCurrencyAddress`, etc. Also defines `FieldFormatOptions` and `RenderFieldResult`
   types. Handlers are exported for unit testing. Most format handlers delegate
   `$.metadata.*` path resolution to the `resolvePath` closure rather than calling
   `resolveMetadataValue` directly — only `resolveEnumLabel` uses it since it needs
@@ -48,8 +56,10 @@ src/
 
 - **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
   `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
-  selector-to-format lookup (`getFormatsBySelector`), and ABI calldata decoding
-  (`decodeArguments`, `DecodedArguments`). All parsing/decoding internals are module-private.
+  selector-to-format lookup (`getFormatsBySelector`), and full ABI calldata decoding
+  (`decodeArguments`, `DecodedArguments`) supporting static types, static/dynamic tuples,
+  dynamic arrays (`tuple[]`, `address[]`, etc.), and `bytes`/`string` dynamic types.
+  All parsing/decoding internals are module-private.
 
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
@@ -81,8 +91,9 @@ src/
    ```
 
 Both paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
-Each builds a `ResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
-for its domain (calldata args vs. EIP-712 message fields).
+Each builds a `BaseResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
+for its domain (calldata args vs. EIP-712 message fields). `applyFieldFormats()` internally
+wraps it with `buildSliceResolvePath` to handle byte slice paths (e.g. `srcToken.[-20:]`).
 
 ## Descriptor Sources
 
@@ -209,6 +220,7 @@ Not yet implemented: `calldata`, `interoperableAddressName`
 - `chainId` converts an integer chain ID to a human-readable chain name via `ExternalDataProvider.resolveChainInfo`. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
 - `amount` displays a value as native currency using `ExternalDataProvider.resolveChainInfo` for decimals and ticker. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
 - `tokenAmount` with `nativeCurrencyAddress` also resolves native currency metadata via `resolveChainInfo`.
+- `addressName` supports the `senderAddress` param: when the field value matches a `senderAddress`, it displays `"Sender"` and substitutes `rawAddress` with `@.from`. Checked via `isSenderAddress()`.
 - Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
 
 ### Token Resolution
@@ -295,8 +307,12 @@ npm run test:watch    # Watch mode
 Tests live in `test/`. Current test files:
 
 - `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
+- `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory)
+- `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
+- `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
+- `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 
 ## Build
 
@@ -348,8 +364,12 @@ type RenderFieldResult = {
   rendered: string;
   warning?: Warning;
   tokenAddress?: string;
+  rawAddress?: string;
 };
 ```
+
+`rawAddress` is returned by format handlers that deal with addresses (`formatRaw` for address
+values, `formatAddressName`). When present, `processSingleField` uses it as the `DisplayField.rawAddress`.
 
 When a field value has the wrong type, use `typeMismatch(value, expected)` which returns a
 `RenderFieldResult` with the raw value and an `ARGUMENT_TYPE_MISMATCH` warning.
@@ -378,6 +398,7 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 3. **Selector matching is case-sensitive** on function names
 4. **Address normalization:** Always lowercase for comparisons
 5. **Minimize exports:** Only export symbols that are imported by other modules. Keep internal helpers module-private.
+6. **Check `utils.ts` before writing helpers:** Always check if `utils.ts` already has a function for what you need (e.g. `hexToBytes`, `bytesToHex`, `bytesToAscii`, `asciiToBytes`, `bigIntToBytes`, `bytesToBigInt`, etc.) before writing a new one — in both `src/` and `test/` files.
 
 ## Descriptor Type — Defensive Programming
 
@@ -393,5 +414,4 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 
 - `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
-- Array/slice path selectors (`array.[0]`, `array.[start:end]`)
 - Pre-built registry index (GitHub index is not yet wired up; currently returns empty index)

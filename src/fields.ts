@@ -13,15 +13,30 @@ import type {
   DisplayField,
   DisplayFieldGroup,
   ExternalDataProvider,
+  FieldType,
   Warning,
 } from "./types";
-import type { ResolvePath } from "./descriptor";
+import type {
+  ArgumentValue,
+  BaseResolvePath,
+  BytesSliceValue,
+  ResolvePath,
+} from "./descriptor";
 import {
+  argumentValueToBytes,
+  bytesToAddressArgumentValue,
+  fieldTypeForFormat,
   isFieldGroup,
   mergeDefinitions,
   resolveFieldValue,
 } from "./descriptor";
-import { toChecksumAddress, warn } from "./utils";
+import type { DescriptorFieldFormatType } from "./types";
+import {
+  bytesToAscii,
+  bytesToSignedBigInt,
+  bytesToUnsignedBigInt,
+  warn,
+} from "./utils";
 import { renderField } from "./formatters";
 
 /** Callback to get the length of an array at a given container path. */
@@ -48,7 +63,7 @@ interface FieldContext {
 export async function applyFieldFormats(
   format: DescriptorFormatSpec,
   definitions: Record<string, DescriptorFieldFormat>,
-  resolvePath: ResolvePath,
+  resolvePath: BaseResolvePath,
   getArrayLength: GetArrayLength,
   chainId: number | undefined,
   metadata: DescriptorMetadata | undefined,
@@ -61,9 +76,10 @@ export async function applyFieldFormats(
   | { warnings: Warning[] }
 > {
   const renderedValues = new Map<string, string>();
+  const sliceResolvePath = buildSliceResolvePath(resolvePath);
   const ctx: FieldContext = {
     definitions,
-    resolvePath,
+    resolvePath: sliceResolvePath,
     getArrayLength,
     chainId,
     metadata,
@@ -111,8 +127,8 @@ async function processSingleField(
 
   if (merged.visible === "never") return { field: null };
 
-  const argValue = resolveFieldValue(merged, ctx.resolvePath);
-  if (!argValue) {
+  const resolvedValue = resolveFieldValue(merged, ctx.resolvePath);
+  if (!resolvedValue) {
     return {
       warnings: [
         warn(
@@ -134,10 +150,17 @@ async function processSingleField(
     };
   }
 
+  // Convert bytes-slice to a typed ArgumentValue based on the field format
+  const argValue: ArgumentValue =
+    resolvedValue.type === "bytes-slice"
+      ? bytesSliceToArgumentValue(resolvedValue, merged.format)
+      : resolvedValue;
+
   const {
     rendered,
     warning: fieldWarning,
     tokenAddress,
+    rawAddress,
   } = await renderField(
     argValue,
     merged.format,
@@ -166,8 +189,8 @@ async function processSingleField(
     warning: fieldWarning,
   };
 
-  if (argValue.type === "address") {
-    displayField.rawAddress = toChecksumAddress(argValue.bytes);
+  if (rawAddress) {
+    displayField.rawAddress = rawAddress;
   }
 
   if (tokenAddress) {
@@ -422,4 +445,110 @@ function parseGroupBasePath(path: string | undefined): string {
   if (!path) return "";
   if (path.endsWith(".[]")) return path.slice(0, -3);
   return path;
+}
+
+// ---------------------------------------------------------------------------
+// Byte Slice Support
+// ---------------------------------------------------------------------------
+
+/** Parsed byte range from a path like "foo.[-20:]" or "bar.[0:20]". */
+export interface ByteSlice {
+  start?: number;
+  end?: number;
+}
+
+/**
+ * Parse a byte range slice from the end of a path.
+ * Byte ranges contain a colon: .[start:end], .[-20:], .[:1], .[292:324].
+ * Single array indices like .[0] or .[-1] are NOT byte slices (no colon).
+ * Returns null if no byte slice is found.
+ */
+export function parseByteSlice(
+  path: string,
+): { basePath: string; slice: ByteSlice } | null {
+  const match = path.match(/^(.+)\.\[(-?\d*):(-?\d*)\]$/);
+  if (!match) return null;
+  return {
+    basePath: match[1],
+    slice: {
+      start: match[2].length > 0 ? parseInt(match[2], 10) : undefined,
+      end: match[3].length > 0 ? parseInt(match[3], 10) : undefined,
+    },
+  };
+}
+
+/**
+ * Apply a byte slice and return the raw sliced bytes.
+ */
+export function applyByteSlice(
+  rawBytes: Uint8Array,
+  slice: ByteSlice,
+): Uint8Array {
+  const len = rawBytes.length;
+  let start = slice.start ?? 0;
+  let end = slice.end ?? len;
+  if (start < 0) start = Math.max(0, len + start);
+  if (end < 0) end = Math.max(0, len + end);
+  start = Math.min(start, len);
+  end = Math.min(end, len);
+  if (start >= end) return new Uint8Array(0);
+  return rawBytes.slice(start, end);
+}
+
+/**
+ * Build a slice-aware ResolvePath from a BaseResolvePath.
+ * Paths with byte slice notation (e.g. "srcToken.[-20:]") are resolved by
+ * fetching the base value and returning a BytesSliceValue with the raw bytes.
+ */
+export function buildSliceResolvePath(resolve: BaseResolvePath): ResolvePath {
+  return (path: string) => {
+    const parsed = parseByteSlice(path);
+    if (!parsed) return resolve(path);
+    const baseValue = resolve(parsed.basePath);
+    if (!baseValue) return undefined;
+    const rawBytes = argumentValueToBytes(baseValue);
+    const sliced = applyByteSlice(rawBytes, parsed.slice);
+    return { type: "bytes-slice", bytes: sliced } as BytesSliceValue;
+  };
+}
+
+/**
+ * Convert raw slice bytes to an ArgumentValue for a given FieldType.
+ */
+export function bytesSliceToFieldType(
+  bytes: Uint8Array,
+  fieldType: FieldType,
+): ArgumentValue {
+  switch (fieldType) {
+    case "address":
+      // Try to parse as address, but fall back to bytes if it doesn't fit
+      return bytesToAddressArgumentValue(bytes) ?? { type: "bytes", bytes };
+    case "uint":
+      return { type: "uint", value: bytesToUnsignedBigInt(bytes) };
+    case "int":
+      return { type: "int", value: bytesToSignedBigInt(bytes) };
+    case "bool":
+      return {
+        type: "bool",
+        value: bytes.length > 0 && bytes[bytes.length - 1] !== 0,
+      };
+    case "string":
+      return { type: "string", value: bytesToAscii(bytes) };
+    case "bytes":
+    default:
+      return { type: "bytes", bytes };
+  }
+}
+
+/**
+ * Convert a BytesSliceValue to an ArgumentValue based on the field format's
+ * expected type. Uses the ERC-7730 format→type mapping to determine how to
+ * interpret the raw slice bytes.
+ */
+export function bytesSliceToArgumentValue(
+  slice: BytesSliceValue,
+  format: DescriptorFieldFormatType,
+): ArgumentValue {
+  const fieldType = fieldTypeForFormat(format);
+  return bytesSliceToFieldType(slice.bytes, fieldType);
 }

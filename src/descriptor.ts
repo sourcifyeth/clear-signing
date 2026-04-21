@@ -9,6 +9,7 @@ import type {
   Descriptor,
   DescriptorFieldFormat,
   DescriptorFieldFormatParams,
+  DescriptorFieldFormatType,
   DescriptorFieldGroup,
   DescriptorMetadata,
   FieldType,
@@ -16,6 +17,9 @@ import type {
   TypedData,
 } from "./types";
 import {
+  asciiToBytes,
+  bigIntToBytes,
+  boolToBytes,
   hexToBytes,
   coerceBigInt,
   normalizeAddress,
@@ -91,6 +95,8 @@ export type ArgumentValue =
   | { type: "bool"; value: boolean }
   | { type: "string"; value: string }
   | { type: "bytes"; bytes: Uint8Array };
+
+export type BytesSliceValue = { type: "bytes-slice"; bytes: Uint8Array };
 
 /**
  * Convert a raw JS value (e.g. from an EIP-712 message) to an ArgumentValue
@@ -168,11 +174,85 @@ export function toArgumentValue(value: unknown): ArgumentValue | undefined {
   return undefined;
 }
 
+export function bytesToAddressArgumentValue(
+  bytes: Uint8Array,
+): { type: "address"; bytes: Uint8Array } | undefined {
+  if (bytes.length === 20) {
+    return { type: "address", bytes };
+  }
+  if (bytes.length > 20) {
+    return { type: "address", bytes: bytes.slice(bytes.length - 20) };
+  }
+  return undefined;
+}
+
+/**
+ * Convert an ArgumentValue to its raw byte representation for byte slicing.
+ * - uint/int → 32-byte big-endian (two's complement for negative int)
+ * - address → 20 bytes
+ * - bytes → raw bytes
+ * - string → ASCII bytes
+ * - bool → 1 byte
+ */
+export function argumentValueToBytes(value: ArgumentValue): Uint8Array {
+  switch (value.type) {
+    case "address":
+      return value.bytes;
+    case "uint":
+    case "int":
+      return bigIntToBytes(value.value);
+    case "bytes":
+      return value.bytes;
+    case "string":
+      return asciiToBytes(value.value);
+    case "bool":
+      return boolToBytes(value.value);
+  }
+}
+
+/**
+ * Map a field format to the expected FieldType of its primary value.
+ *
+ * Based on the ERC-7730 spec field format reference:
+ * - raw → bytes (fallback, any type is accepted by raw)
+ * - amount, tokenAmount, date, duration, unit, enum, nftName, chainId → uint
+ * - addressName, tokenTicker → address
+ * - calldata → bytes
+ * - interoperableAddressName → address
+ */
+export function fieldTypeForFormat(
+  format: DescriptorFieldFormatType,
+): FieldType {
+  switch (format) {
+    case "amount":
+    case "tokenAmount":
+    case "date":
+    case "duration":
+    case "unit":
+    case "enum":
+    case "nftName":
+    case "chainId":
+      return "uint";
+    case "addressName":
+    case "tokenTicker":
+    case "interoperableAddressName":
+      return "address";
+    case "calldata":
+    case "raw":
+    default:
+      return "bytes";
+  }
+}
+
 /**
  * Resolves an ERC-7730 path to an ArgumentValue.
  * Handles `@.` (container), `$.` (metadata), `#.` (structured data), and bare paths.
  */
-export type ResolvePath = (path: string) => ArgumentValue | undefined;
+export type ResolvePath = (
+  path: string,
+) => ArgumentValue | BytesSliceValue | undefined;
+
+export type BaseResolvePath = (path: string) => ArgumentValue | undefined;
 
 export function isFieldGroup(
   field: DescriptorFieldFormat | DescriptorFieldGroup,
@@ -227,7 +307,7 @@ export function mergeDefinitions(
 export function resolveFieldValue(
   field: DescriptorFieldFormat,
   resolvePath: ResolvePath,
-): ArgumentValue | undefined {
+): ArgumentValue | BytesSliceValue | undefined {
   if (field.value !== undefined) return toArgumentValue(field.value);
   if (field.path !== undefined) return resolvePath(field.path);
   return undefined;
@@ -327,6 +407,10 @@ export function resolveMetadataValue(
 
   return current;
 }
+
+// ---------------------------------------------------------------------------
+// Interpolation
+// ---------------------------------------------------------------------------
 
 /**
  * Interpolate {placeholder} tokens in a template string from a values map.
