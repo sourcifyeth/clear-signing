@@ -56,10 +56,10 @@ src/
 
 - **`calldata.ts`** — Everything specific to calldata formatting. Contains the top-level
   `formatCalldata()` entry point, function signature parsing (`parseFunctionSignatureKey`),
-  selector-to-format lookup (`getFormatsBySelector`), and full ABI calldata decoding
-  (`decodeArguments`, `DecodedArguments`) supporting static types, static/dynamic tuples,
-  dynamic arrays (`tuple[]`, `address[]`, etc.), and `bytes`/`string` dynamic types.
-  All parsing/decoding internals are module-private.
+  selector-to-format lookup (`findFormatBySelector`), and a unified recursive ABI decoder
+  (`decodeArguments` → `decodeComponents`/`decodeValue`) supporting all ABI types: static
+  and dynamic tuples, dynamic arrays (`T[]`), fixed-size arrays (`T[k]`), nested arrays,
+  `bytes`/`string`, and `bytesN`. All parsing/decoding internals are module-private.
 
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
@@ -74,8 +74,8 @@ src/
    format(tx, opts?)
    → DescriptorResolver.resolveCalldataDescriptor()
    → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
-       → getFormatsBySelector() builds selector→format map from display.formats keys
-       → decodeArguments() decodes calldata into DecodedArguments
+       → findFormatBySelector() matches selector to a display.formats entry
+       → decodeArguments() decodes calldata into { values, arrayLengths } maps
        → applyFieldFormats() (from fields.ts) renders each field
    → returns DisplayModel
    ```
