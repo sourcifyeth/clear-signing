@@ -25,7 +25,6 @@ import {
   bytesToHex,
   bytesToSignedBigInt,
   extractSelector,
-  formatSelectorHex,
   hexToBytes,
   selectorForSignature,
   warn,
@@ -56,9 +55,8 @@ export async function formatCalldata(
     };
   }
 
-  const formatsBySelector = getFormatsBySelector(descriptor);
-  const selectorHex = formatSelectorHex(selector);
-  const match = formatsBySelector.get(selectorHex);
+  const selectorHex = bytesToHex(selector);
+  const match = findFormatBySelector(descriptor, selectorHex);
 
   if (!match) {
     return {
@@ -69,15 +67,15 @@ export async function formatCalldata(
     };
   }
 
-  const { fn, spec: format } = match;
-  const decoded = decodeArguments(fn, calldata);
+  const { inputs, spec: format } = match;
+  const decoded = decodeArguments(inputs, calldata);
 
   const resolvePath: BaseResolvePath = (path: string) => {
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
     const key = path.startsWith("#.") ? path.slice(2) : path;
-    return decoded.get(key);
+    return decoded.values.get(key);
   };
 
   const definitions = descriptor.display?.definitions ?? {};
@@ -85,7 +83,7 @@ export async function formatCalldata(
     format,
     definitions,
     resolvePath,
-    (path: string) => decoded.getArrayLength(path),
+    (path: string) => decoded.arrayLengths.get(path) ?? 0,
     tx.chainId,
     descriptor.metadata,
     externalDataProvider,
@@ -141,32 +139,27 @@ export function rawPreviewFromCalldata(
   }
 
   return {
-    selector: formatSelectorHex(selector),
+    selector: bytesToHex(selector),
     args,
   };
 }
 
-/**
- * Build a map from hex selector (e.g. "0x095ea7b3") to the parsed function descriptor
- * and its display format spec. Parses display.formats keys as function signatures —
- * no separate ABI needed.
- */
-function getFormatsBySelector(
+/** Find the format spec whose parsed function selector matches the given hex. */
+function findFormatBySelector(
   descriptor: Descriptor,
-): Map<string, { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }> {
-  const map = new Map<
-    string,
-    { fn: ParsedFunctionSignature; spec: DescriptorFormatSpec }
-  >();
+  selectorHex: string,
+): { inputs: FunctionInput[]; spec: DescriptorFormatSpec } | undefined {
   const formats = descriptor.display?.formats;
-  if (!formats) return map;
+  if (!formats) return undefined;
 
   for (const [key, spec] of Object.entries(formats)) {
-    const fn = parseFunctionSignatureKey(key);
-    if (!fn) continue;
-    map.set(bytesToHex(fn.selector), { fn, spec });
+    const parsed = parseFunctionSignatureKey(key);
+    if (!parsed) continue;
+    if (bytesToHex(parsed.selector) === selectorHex) {
+      return { inputs: parsed.inputs, spec };
+    }
   }
-  return map;
+  return undefined;
 }
 
 /** ABI function input parameter. */
@@ -176,14 +169,9 @@ interface FunctionInput {
   components?: FunctionInput[];
 }
 
-/** Parsed function signature with computed selector. */
-interface ParsedFunctionSignature {
-  inputs: FunctionInput[];
-  selector: Uint8Array;
-}
-
 /**
- * Parse a display.formats key as a full function signature into a ParsedFunctionSignature.
+ * Parse a display.formats key as a full function signature.
+ * Returns the parsed inputs and the 4-byte selector.
  *
  * Per ERC-7730, keys MUST include parameter names and use canonical Solidity types.
  * Commas MUST NOT be followed by spaces; exactly one space between type and name.
@@ -195,7 +183,7 @@ interface ParsedFunctionSignature {
  */
 function parseFunctionSignatureKey(
   key: string,
-): ParsedFunctionSignature | undefined {
+): { inputs: FunctionInput[]; selector: Uint8Array } | undefined {
   const openParen = key.indexOf("(");
   if (openParen === -1) return undefined;
 
@@ -204,7 +192,7 @@ function parseFunctionSignatureKey(
 
   // Find the matching closing paren for the top-level param list
   const afterOpen = key.slice(openParen + 1);
-  const closeIdx = findMatchingClose(afterOpen, 0);
+  const closeIdx = findMatchingClose(afterOpen);
   if (closeIdx === -1) return undefined;
 
   const paramsStr = afterOpen.slice(0, closeIdx);
@@ -217,8 +205,8 @@ function parseFunctionSignatureKey(
 }
 
 /** Find the index of the closing ')' that matches the opening '(' at depth 0. */
-function findMatchingClose(s: string, startDepth: number): number {
-  let depth = startDepth;
+function findMatchingClose(s: string): number {
+  let depth = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] === "(") depth++;
     else if (s[i] === ")") {
@@ -266,7 +254,7 @@ function parseParam(param: string): FunctionInput {
 
   if (param.startsWith("(")) {
     // Tuple: find matching close, then check for array suffix and optional name
-    const closeIdx = findMatchingClose(param.slice(1), 0);
+    const closeIdx = findMatchingClose(param.slice(1));
     if (closeIdx === -1) return { name: "", type: "tuple" };
 
     const inner = param.slice(1, closeIdx + 1);
@@ -279,59 +267,19 @@ function parseParam(param: string): FunctionInput {
   }
 
   // Non-tuple: "type" or "type name" or "type[] name"
-  const { arraySuffix, base, name } = extractBaseArrayName(param);
-  return { type: `${base}${arraySuffix}`, name };
+  const spaceIdx = param.indexOf(" ");
+  if (spaceIdx === -1) return { type: param, name: "" };
+  return { type: param.slice(0, spaceIdx), name: param.slice(spaceIdx + 1) };
 }
 
-/**
- * From a string like "[] orders" or "orders" or "" extract array suffix and name.
- * Used after the closing ) of a tuple.
- */
+/** Extract leading array brackets and trailing name from post-tuple remainder. */
 function extractSuffixAndName(rest: string): {
   arraySuffix: string;
   name: string;
 } {
-  // Collect leading array brackets: [], [3], etc.
-  let arraySuffix = "";
-  let i = 0;
-  while (i < rest.length && rest[i] === "[") {
-    const closeB = rest.indexOf("]", i);
-    if (closeB === -1) break;
-    arraySuffix += rest.slice(i, closeB + 1);
-    i = closeB + 1;
-  }
-  const name = rest.slice(i).trim();
-  return { arraySuffix, name };
-}
-
-/**
- * From a non-tuple param string like "address", "address spender", "uint256[]",
- * "uint256[] values" — extract base type, array suffix, and name.
- */
-function extractBaseArrayName(param: string): {
-  base: string;
-  arraySuffix: string;
-  name: string;
-} {
-  // Split by whitespace
-  const parts = param.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { base: "", arraySuffix: "", name: "" };
-
-  // Check if last token could be an identifier name (purely alphanumeric/underscore, not a type)
-  const last = parts[parts.length - 1];
-  const rest = parts.slice(0, -1).join("");
-
-  const looksLikeName = /^[a-zA-Z_]\w*$/.test(last) && parts.length > 1;
-
-  const typeStr = looksLikeName ? rest : parts.join("");
-  const name = looksLikeName ? last : "";
-
-  // Separate base type from trailing array suffixes like "[]", "[3]"
-  const arrayMatch = typeStr.match(/^(.*?)(\[[\d,\s]*\](?:\[[\d,\s]*\])*)$/);
-  if (arrayMatch) {
-    return { base: arrayMatch[1], arraySuffix: arrayMatch[2], name };
-  }
-  return { base: typeStr, arraySuffix: "", name };
+  const match = rest.match(/^((?:\[\d*\])*)\s*(.*)/);
+  if (!match) return { arraySuffix: "", name: rest.trim() };
+  return { arraySuffix: match[1], name: match[2] };
 }
 
 /** Build canonical (selector-compatible) param list — types only, no names. */
@@ -347,56 +295,52 @@ function canonicalParam(input: FunctionInput): string {
   return input.type;
 }
 
-/** Decoded argument value. */
-interface DecodedArgument {
-  index: number;
-  name?: string;
-  value: ArgumentValue;
+/**
+ * Parse an array type string into its element type and optional fixed size.
+ * Returns undefined for non-array types.
+ *
+ * Examples:
+ *   "uint256[]"   → { elementType: "uint256",   size: undefined }
+ *   "uint256[3]"  → { elementType: "uint256",   size: 3 }
+ *   "tuple[]"     → { elementType: "tuple",     size: undefined }
+ *   "uint256[][]" → { elementType: "uint256[]", size: undefined }
+ *   "address"     → undefined
+ */
+function parseArrayType(
+  type: string,
+): { elementType: string; size: number | undefined } | undefined {
+  const match = type.match(/^(.+)\[(\d*)\]$/);
+  if (!match) return undefined;
+  return {
+    elementType: match[1],
+    size: match[2].length > 0 ? parseInt(match[2], 10) : undefined,
+  };
 }
 
-/**
- * Collection of decoded arguments with name-based lookup.
- */
-class DecodedArguments {
-  private ordered: DecodedArgument[] = [];
-  private indexByName = new Map<string, number>();
-  private arrayLengths = new Map<string, number>();
-
-  push(name: string | undefined, index: number, value: ArgumentValue): void {
-    const entryIndex = this.ordered.length;
-    if (name !== undefined) {
-      this.indexByName.set(name, entryIndex);
-    }
-    this.indexByName.set(`arg${index}`, entryIndex);
-    this.ordered.push({ index, name, value });
-  }
-
-  setArrayLength(name: string, length: number): void {
-    this.arrayLengths.set(name, length);
-  }
-
-  getArrayLength(name: string): number {
-    return this.arrayLengths.get(name) ?? 0;
-  }
-
-  get(key: string): ArgumentValue | undefined {
-    const idx = this.indexByName.get(key);
-    if (idx === undefined) return undefined;
-    return this.ordered[idx]?.value;
-  }
-
-  getOrdered(): DecodedArgument[] {
-    return this.ordered;
-  }
+/** Decoded calldata: name-based value lookup and array lengths. */
+interface DecodedArguments {
+  values: Map<string, ArgumentValue>;
+  arrayLengths: Map<string, number>;
 }
 
 /**
  * Check if a function input type requires dynamic (offset-based) ABI encoding.
+ * Per ABI spec: bytes, string, T[], T[k] where T is dynamic, and tuples with
+ * any dynamic component are dynamic. Everything else is static.
  */
 function isDynamicInput(input: FunctionInput): boolean {
   if (input.type === "bytes" || input.type === "string") return true;
-  if (input.type.endsWith("[]")) return true;
-  if (input.type.startsWith("tuple") && input.components) {
+  const arr = parseArrayType(input.type);
+  if (arr) {
+    // T[] is always dynamic; T[k] is dynamic iff T is dynamic
+    if (arr.size === undefined) return true;
+    return isDynamicInput({
+      name: "",
+      type: arr.elementType,
+      components: input.components,
+    });
+  }
+  if (input.type === "tuple" && input.components) {
     return input.components.some(isDynamicInput);
   }
   return false;
@@ -411,19 +355,30 @@ function staticHeadSize(input: FunctionInput): number {
   ) {
     return input.components.reduce((sum, c) => sum + staticHeadSize(c), 0);
   }
+  const arr = parseArrayType(input.type);
+  if (arr && arr.size !== undefined) {
+    return (
+      arr.size *
+      staticHeadSize({
+        name: "",
+        type: arr.elementType,
+        components: input.components,
+      })
+    );
+  }
   return 32;
 }
 
 /**
  * Decode calldata arguments according to function descriptor.
- * Supports static types, static/dynamic tuples, dynamic arrays (including
- * tuple[]), and bytes/string dynamic types.
+ * Supports all ABI types: static/dynamic tuples, dynamic arrays (T[]),
+ * fixed-size arrays (T[k]), nested arrays, bytes/string, and bytesN.
  */
 function decodeArguments(
-  fn: ParsedFunctionSignature,
+  inputs: FunctionInput[],
   calldata: Uint8Array,
 ): DecodedArguments {
-  const headSize = fn.inputs.reduce((sum, input) => {
+  const headSize = inputs.reduce((sum, input) => {
     return sum + (isDynamicInput(input) ? 32 : staticHeadSize(input));
   }, 0);
 
@@ -433,19 +388,22 @@ function decodeArguments(
     );
   }
 
-  const decoded = new DecodedArguments();
+  const decoded: DecodedArguments = {
+    values: new Map(),
+    arrayLengths: new Map(),
+  };
   // Skip the 4-byte selector; offsets in data are relative to params start.
   const data = calldata.slice(4);
-  decodeTuple(fn.inputs, data, 0, undefined, decoded);
+  decodeComponents(inputs, data, 0, undefined, decoded);
   return decoded;
 }
 
 /**
  * Decode a sequence of ABI-encoded inputs using head-tail encoding.
- * Each dynamic input has an offset word in the head pointing to tail data.
- * Each static input is encoded inline in the head.
+ * Dynamic inputs have an offset word in the head pointing to tail data;
+ * static inputs are encoded inline in the head.
  */
-function decodeTuple(
+function decodeComponents(
   inputs: FunctionInput[],
   data: Uint8Array,
   baseOffset: number,
@@ -459,52 +417,24 @@ function decodeTuple(
       const relOffset = Number(
         bytesToUnsignedBigInt(data.slice(headCursor, headCursor + 32)),
       );
-      decodeDynamicInput(input, data, baseOffset + relOffset, prefix, decoded);
+      decodeValue(input, data, baseOffset + relOffset, prefix, decoded);
       headCursor += 32;
     } else {
-      headCursor = decodeStaticInput(input, data, headCursor, prefix, decoded);
+      decodeValue(input, data, headCursor, prefix, decoded);
+      headCursor += staticHeadSize(input);
     }
   }
 }
 
 /**
- * Decode a static input (basic type or all-static tuple) at the given position.
- * Returns the cursor position after the decoded data.
+ * Decode a single ABI-encoded value at the given offset.
+ * Handles all type categories: bytes/string, arrays (T[] and T[k]),
+ * tuples, and elementary types.
  */
-function decodeStaticInput(
+function decodeValue(
   input: FunctionInput,
   data: Uint8Array,
-  cursor: number,
-  prefix: string | undefined,
-  decoded: DecodedArguments,
-): number {
-  if (
-    input.type === "tuple" &&
-    input.components &&
-    input.components.length > 0
-  ) {
-    const tuplePrefix = argumentName(prefix, input);
-    let pos = cursor;
-    for (const component of input.components) {
-      pos = decodeStaticInput(component, data, pos, tuplePrefix, decoded);
-    }
-    return pos;
-  }
-
-  const value = decodeWord(input.type, data.slice(cursor, cursor + 32));
-  const name = argumentName(prefix, input);
-  decoded.push(name, decoded.getOrdered().length, value);
-  return cursor + 32;
-}
-
-/**
- * Decode a dynamic input (bytes, string, dynamic array, or dynamic tuple)
- * at the given data offset.
- */
-function decodeDynamicInput(
-  input: FunctionInput,
-  data: Uint8Array,
-  dataStart: number,
+  offset: number,
   prefix: string | undefined,
   decoded: DecodedArguments,
 ): void {
@@ -513,85 +443,61 @@ function decodeDynamicInput(
   // bytes or string: length word + raw content
   if (input.type === "bytes" || input.type === "string") {
     const length = Number(
-      bytesToUnsignedBigInt(data.slice(dataStart, dataStart + 32)),
+      bytesToUnsignedBigInt(data.slice(offset, offset + 32)),
     );
-    const content = data.slice(dataStart + 32, dataStart + 32 + length);
+    const content = data.slice(offset + 32, offset + 32 + length);
     const value: ArgumentValue =
       input.type === "string"
         ? { type: "string", value: bytesToAscii(content) }
         : { type: "bytes", bytes: content };
-    decoded.push(name, decoded.getOrdered().length, value);
+    if (name) decoded.values.set(name, value);
     return;
   }
 
-  // Dynamic array (type[], including tuple[])
-  if (input.type.endsWith("[]")) {
-    const length = Number(
-      bytesToUnsignedBigInt(data.slice(dataStart, dataStart + 32)),
-    );
-    if (name) decoded.setArrayLength(name, length);
+  // Array types: T[] (dynamic) and T[k] (fixed-size)
+  const arr = parseArrayType(input.type);
+  if (arr) {
+    let count: number;
+    let elementsStart: number;
 
-    if (
-      input.type === "tuple[]" &&
-      input.components &&
-      input.components.length > 0
-    ) {
-      const elementsStart = dataStart + 32;
-
-      if (input.components.some(isDynamicInput)) {
-        // Dynamic tuple elements: each has an offset word
-        for (let i = 0; i < length; i++) {
-          const elemOffset = Number(
-            bytesToUnsignedBigInt(
-              data.slice(elementsStart + i * 32, elementsStart + (i + 1) * 32),
-            ),
-          );
-          const elemPrefix = name ? `${name}.[${i}]` : undefined;
-          decodeTuple(
-            input.components,
-            data,
-            elementsStart + elemOffset,
-            elemPrefix,
-            decoded,
-          );
-        }
-      } else {
-        // Static tuple elements: packed sequentially
-        const elemSize = input.components.reduce(
-          (sum, c) => sum + staticHeadSize(c),
-          0,
-        );
-        for (let i = 0; i < length; i++) {
-          const elemPrefix = name ? `${name}.[${i}]` : undefined;
-          let pos = elementsStart + i * elemSize;
-          for (const component of input.components) {
-            pos = decodeStaticInput(component, data, pos, elemPrefix, decoded);
-          }
-        }
-      }
+    if (arr.size === undefined) {
+      // Dynamic array T[]: length prefix + elements
+      count = Number(bytesToUnsignedBigInt(data.slice(offset, offset + 32)));
+      elementsStart = offset + 32;
     } else {
-      // Simple element type (address[], uint256[], etc.)
-      const elementType = input.type.replace(/\[\]$/, "");
-      for (let i = 0; i < length; i++) {
-        const elemStart = dataStart + 32 + i * 32;
-        const word = data.slice(elemStart, elemStart + 32);
-        const value = decodeWord(elementType, word);
-        const elemName = name ? `${name}.[${i}]` : undefined;
-        decoded.push(elemName, decoded.getOrdered().length, value);
-      }
+      // Fixed-size array T[k]: no length prefix
+      count = arr.size;
+      elementsStart = offset;
     }
+
+    if (name) decoded.arrayLengths.set(name, count);
+
+    // Build synthetic element inputs and decode as a tuple
+    const elemInputs: FunctionInput[] = [];
+    for (let i = 0; i < count; i++) {
+      elemInputs.push({
+        name: `[${i}]`,
+        type: arr.elementType,
+        components: input.components,
+      });
+    }
+    decodeComponents(elemInputs, data, elementsStart, name, decoded);
     return;
   }
 
-  // Dynamic tuple (non-array): has at least one dynamic component
+  // Tuple (non-array)
   if (
     input.type === "tuple" &&
     input.components &&
     input.components.length > 0
   ) {
-    decodeTuple(input.components, data, dataStart, name, decoded);
+    decodeComponents(input.components, data, offset, name, decoded);
     return;
   }
+
+  // Elementary type (address, uint*, int*, bool, bytesN)
+  const value = decodeWord(input.type, data.slice(offset, offset + 32));
+  if (name) decoded.values.set(name, value);
 }
 
 function argumentName(
@@ -621,6 +527,13 @@ function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
 
   if (kind === "bool") {
     return { type: "bool", value: word[31] !== 0 };
+  }
+
+  // bytesN (e.g. bytes4, bytes32): left-aligned, return only N bytes
+  const bytesNMatch = kind.match(/^bytes(\d+)$/);
+  if (bytesNMatch) {
+    const n = parseInt(bytesNMatch[1], 10);
+    return { type: "bytes", bytes: word.slice(0, n) };
   }
 
   return { type: "bytes", bytes: word };
