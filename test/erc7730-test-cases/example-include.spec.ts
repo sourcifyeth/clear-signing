@@ -96,6 +96,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
       toChecksumAddress(hexToBytes(SPENDER)),
     );
     expect(spenderField.tokenAddress).toBeUndefined();
+    expect(spenderField.calldataDisplay).toBeUndefined();
     expect(spenderField.warning).toBeUndefined();
 
     // Amount field — merged: inherited tokenPath from erc20 + threshold from include
@@ -108,6 +109,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
@@ -151,6 +153,7 @@ describe("example-include.json — approve(address spender, uint256 value)", () 
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 

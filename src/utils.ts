@@ -32,6 +32,11 @@ export function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 
+/** Compute keccak256 hash of a hex string and return the result as a hex string. */
+export function keccak256Str(hex: string): string {
+  return bytesToHex(keccak256(hexToBytes(hex)));
+}
+
 /** Encode an ASCII string to bytes without relying on TextEncoder (React Native compatible). */
 export function asciiToBytes(str: string): Uint8Array {
   const bytes = new Uint8Array(str.length);

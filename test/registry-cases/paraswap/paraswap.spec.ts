@@ -136,6 +136,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(selectorField.fieldType).toBe("uint");
       expect(selectorField.format).toBe("enum");
       expect(selectorField.tokenAddress).toBeUndefined();
+      expect(selectorField.calldataDisplay).toBeUndefined();
       expect(selectorField.rawAddress).toBeUndefined();
       expect(selectorField.warning).toBeUndefined();
 
@@ -147,6 +148,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
+      expect(sendField.calldataDisplay).toBeUndefined();
       expect(sendField.rawAddress).toBeUndefined();
       expect(sendField.warning).toBeUndefined();
 
@@ -160,6 +162,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(receiveField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(DAI)),
       );
+      expect(receiveField.calldataDisplay).toBeUndefined();
       expect(receiveField.rawAddress).toBeUndefined();
       expect(receiveField.warning).toBeUndefined();
 
@@ -174,6 +177,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
         toChecksumAddress(hexToBytes(BENEFICIARY)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.calldataDisplay).toBeUndefined();
       expect(beneficiaryField.warning).toBeUndefined();
 
       // Metadata
@@ -262,6 +266,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
+      expect(sendField.calldataDisplay).toBeUndefined();
       expect(sendField.rawAddress).toBeUndefined();
       expect(sendField.warning).toBeUndefined();
 
@@ -275,6 +280,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(receiveField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(DAI)),
       );
+      expect(receiveField.calldataDisplay).toBeUndefined();
       expect(receiveField.rawAddress).toBeUndefined();
       expect(receiveField.warning).toBeUndefined();
 
@@ -289,6 +295,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
         toChecksumAddress(hexToBytes(BENEFICIARY)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.calldataDisplay).toBeUndefined();
       expect(beneficiaryField.warning).toBeUndefined();
 
       // Metadata
@@ -371,6 +378,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(CRV)));
+      expect(sendField.calldataDisplay).toBeUndefined();
       expect(sendField.rawAddress).toBeUndefined();
       expect(sendField.warning).toBeUndefined();
 
@@ -384,6 +392,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(receiveField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(USDC)),
       );
+      expect(receiveField.calldataDisplay).toBeUndefined();
       expect(receiveField.rawAddress).toBeUndefined();
       expect(receiveField.warning).toBeUndefined();
 
@@ -399,6 +408,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
         toChecksumAddress(hexToBytes(FROM)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.calldataDisplay).toBeUndefined();
       expect(beneficiaryField.warning).toBeUndefined();
 
       // Metadata

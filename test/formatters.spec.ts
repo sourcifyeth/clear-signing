@@ -30,7 +30,7 @@ import {
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
-import { bytesToHex, hexToBytes, keccak256 } from "../src/utils.js";
+import { hexToBytes, keccak256Str } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1476,7 +1476,7 @@ describe("calldata format", () => {
     );
 
     expect(result.calldataDisplay).toEqual(mockDisplay);
-    expect(result.rendered).toBe(bytesToHex(keccak256(calldataBytes)));
+    expect(result.rendered).toBe(keccak256Str("0xdeadbeef"));
     expect(result.warning).toBeUndefined();
 
     expect(mock).toHaveBeenCalledWith({
@@ -1582,7 +1582,8 @@ describe("calldata format", () => {
     const mock = vi.fn().mockResolvedValue({ intent: "test" });
     const selectorBytes = hexToBytes("0xaabbccdd");
     const resolvePath: ResolvePath = (path: string) => {
-      if (path === "funcSelector") return { type: "bytes", bytes: selectorBytes };
+      if (path === "funcSelector")
+        return { type: "bytes", bytes: selectorBytes };
       return undefined;
     };
 
@@ -1617,7 +1618,7 @@ describe("calldata format", () => {
     );
 
     // Hash should be of the raw bytes only, not including the prepended selector
-    expect(result.rendered).toBe(bytesToHex(keccak256(calldataBytes)));
+    expect(result.rendered).toBe(keccak256Str("0xdeadbeef"));
   });
 });
 

@@ -108,6 +108,7 @@ describe("example-eip712.json — PermitSingle", () => {
       toChecksumAddress(hexToBytes(SPENDER)),
     );
     expect(spenderField.tokenAddress).toBeUndefined();
+    expect(spenderField.calldataDisplay).toBeUndefined();
     expect(spenderField.warning).toBeUndefined();
 
     // Amount allowance — tokenAmount format
@@ -120,6 +121,7 @@ describe("example-eip712.json — PermitSingle", () => {
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(TOKEN_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
@@ -132,6 +134,7 @@ describe("example-eip712.json — PermitSingle", () => {
     expect(expirationField.format).toBe("date");
     expect(expirationField.rawAddress).toBeUndefined();
     expect(expirationField.tokenAddress).toBeUndefined();
+    expect(expirationField.calldataDisplay).toBeUndefined();
     expect(expirationField.warning).toBeUndefined();
 
     // No interpolatedIntent defined in this descriptor
@@ -160,6 +163,7 @@ describe("example-eip712.json — PermitSingle", () => {
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(TOKEN_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     assert(amountField.warning);
     expect(amountField.warning.code).toBe("UNKNOWN_TOKEN");
@@ -332,6 +336,7 @@ describe("example-eip712.json — PermitBatch", () => {
       toChecksumAddress(hexToBytes(SPENDER)),
     );
     expect(spenderField.tokenAddress).toBeUndefined();
+    expect(spenderField.calldataDisplay).toBeUndefined();
     expect(spenderField.warning).toBeUndefined();
 
     // Single details group containing all 4 fields (2 per detail, nonce hidden)
@@ -350,6 +355,7 @@ describe("example-eip712.json — PermitBatch", () => {
     expect(amount0.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(USDC_ADDRESS)),
     );
+    expect(amount0.calldataDisplay).toBeUndefined();
     expect(amount0.rawAddress).toBeUndefined();
     expect(amount0.warning).toBeUndefined();
 
@@ -360,6 +366,7 @@ describe("example-eip712.json — PermitBatch", () => {
     expect(exp0.format).toBe("date");
     expect(exp0.rawAddress).toBeUndefined();
     expect(exp0.tokenAddress).toBeUndefined();
+    expect(exp0.calldataDisplay).toBeUndefined();
     expect(exp0.warning).toBeUndefined();
 
     // Detail 1 (DAI)
@@ -371,6 +378,7 @@ describe("example-eip712.json — PermitBatch", () => {
     expect(amount1.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(DAI_ADDRESS)),
     );
+    expect(amount1.calldataDisplay).toBeUndefined();
     expect(amount1.rawAddress).toBeUndefined();
     expect(amount1.warning).toBeUndefined();
 
@@ -381,6 +389,7 @@ describe("example-eip712.json — PermitBatch", () => {
     expect(exp1.format).toBe("date");
     expect(exp1.rawAddress).toBeUndefined();
     expect(exp1.tokenAddress).toBeUndefined();
+    expect(exp1.calldataDisplay).toBeUndefined();
     expect(exp1.warning).toBeUndefined();
 
     expect(result.interpolatedIntent).toBeUndefined();

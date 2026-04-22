@@ -95,6 +95,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(toField.format).toBe("addressName");
     expect(toField.rawAddress).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(toField.tokenAddress).toBeUndefined();
+    expect(toField.calldataDisplay).toBeUndefined();
     expect(toField.warning).toBeUndefined();
 
     const amountField = result.fields[1];
@@ -106,6 +107,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
@@ -216,6 +218,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(amountField.tokenAddress).toBe(
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
+    expect(amountField.calldataDisplay).toBeUndefined();
     expect(amountField.rawAddress).toBeUndefined();
     assert(amountField.warning);
     expect(amountField.warning.code).toBe("UNKNOWN_TOKEN");
@@ -251,6 +254,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(toField.format).toBe("addressName");
     expect(toField.rawAddress).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(toField.tokenAddress).toBeUndefined();
+    expect(toField.calldataDisplay).toBeUndefined();
     expect(toField.warning).toBeUndefined();
 
     expect(result.interpolatedIntent).toBe(
@@ -306,6 +310,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(toField.format).toBe("addressName");
     expect(toField.rawAddress).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(toField.tokenAddress).toBeUndefined();
+    expect(toField.calldataDisplay).toBeUndefined();
     assert(toField.warning);
     expect(toField.warning.code).toBe("UNKNOWN_ADDRESS");
 

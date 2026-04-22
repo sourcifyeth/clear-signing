@@ -314,6 +314,21 @@ Tests live in `test/`. Current test files:
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 
+### Test guidelines
+
+- **Be consistent** with the style and patterns of existing tests in the same file.
+- **Test all properties** of the returned `DisplayModel` and its nested objects:
+  `intent`, `interpolatedIntent`, `fields`, `metadata` (including `owner`, `contractName`, `info`),
+  `rawCalldataFallback`, `warnings`.
+- **Test all properties** of each `DisplayField`:
+  `label`, `value`, `fieldType`, `format`, `warning`, `rawAddress`, `tokenAddress`, `calldataDisplay`.
+  Assert that properties not expected to be present are `undefined`.
+- **Test nested `DisplayModel`s** (e.g. `calldataDisplay`) with the same thoroughness.
+  Extract a helper function (e.g. `assertNestedDistribute`) when the same nested structure
+  is verified in multiple tests.
+- **Each test should verify the actual value**, not just that something exists.
+  Use `toBe`/`toEqual` with computed expected values rather than loose regex patterns.
+
 ## Build
 
 ```bash

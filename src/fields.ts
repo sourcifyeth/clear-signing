@@ -7,6 +7,7 @@
 
 import type {
   DescriptorFieldFormat,
+  DescriptorFieldFormatType,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
   DescriptorMetadata,
@@ -31,7 +32,6 @@ import {
   mergeDefinitions,
   resolveFieldValue,
 } from "./descriptor";
-import type { DescriptorFieldFormatType } from "./types";
 import {
   bytesToAscii,
   bytesToSignedBigInt,
@@ -95,18 +95,59 @@ export async function applyFieldFormats(
 
   for (const fieldSpec of format.fields ?? []) {
     if (isFieldGroup(fieldSpec)) {
-      const groupResult = await processFieldGroup(fieldSpec, ctx);
+      const groupResult = fieldSpec.path?.endsWith(".[]")
+        ? await processGroupArrayPath(fieldSpec, ctx)
+        : await processChildArrayPaths(fieldSpec, ctx);
       if ("warnings" in groupResult) return groupResult;
       fields.push(groupResult.group);
-      continue;
+    } else if (fieldSpec.path?.endsWith(".[]")) {
+      const arrayResult = await processArrayField(fieldSpec, ctx);
+      if ("warnings" in arrayResult) return arrayResult;
+      fields.push(arrayResult.group);
+    } else {
+      const result = await processSingleField(fieldSpec, ctx);
+      if ("warnings" in result) return result;
+      if (result.field) fields.push(result.field);
     }
-
-    const result = await processSingleField(fieldSpec, ctx);
-    if ("warnings" in result) return result;
-    if (result.field) fields.push(result.field);
   }
 
   return { fields, renderedValues };
+}
+
+/**
+ * Process a top-level field with a .[] array path.
+ * Iterates over all array elements, expanding both the path and any .[] param values.
+ */
+async function processArrayField(
+  fieldSpec: DescriptorFieldFormat,
+  ctx: FieldContext,
+): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
+  const basePath = parseGroupBasePath(fieldSpec.path);
+  const length = ctx.getArrayLength(basePath);
+  const fieldArrayLengths = [{ path: basePath, length }];
+
+  const paramMismatch = checkParamArrayLengths(
+    [fieldSpec],
+    fieldArrayLengths,
+    ctx,
+  );
+  if (paramMismatch) return { warnings: [paramMismatch] };
+
+  if (length === 0) {
+    return {
+      group: emptyArrayGroup(
+        fieldSpec.label,
+        `Array at '${basePath}' is empty`,
+      ),
+    };
+  }
+
+  const iterResult = await iterateArrayField(fieldSpec, length, ctx);
+  if ("warnings" in iterResult) return iterResult;
+
+  return {
+    group: { label: fieldSpec.label, fields: iterResult.fields },
+  };
 }
 
 /**
@@ -193,44 +234,13 @@ async function processSingleField(
     fieldType: argValue.type,
     format: merged.format,
     warning: fieldWarning,
+    ...(rawAddress && { rawAddress }),
+    ...(tokenAddress && { tokenAddress }),
+    ...(calldataDisplay && { calldataDisplay }),
   };
-
-  if (rawAddress) {
-    displayField.rawAddress = rawAddress;
-  }
-
-  if (tokenAddress) {
-    displayField.tokenAddress = tokenAddress;
-  }
-
-  if (calldataDisplay) {
-    displayField.calldataDisplay = calldataDisplay;
-  }
 
   if (merged.path) ctx.renderedValues.set(merged.path, finalValue);
   return { field: displayField };
-}
-
-/**
- * Process a field group by iterating over arrays.
- *
- * Two patterns are supported:
- *
- * 1. **Group-level array path** (e.g. PermitBatch): group.path = "details.[]",
- *    children have relative paths within each element.
- *
- * 2. **Child-level array paths** (e.g. distribute): group has no .[] path,
- *    children each have their own .[] paths (e.g. "recipients.[]", "percentages.[]").
- *    In bundled mode, children are paired by index.
- */
-async function processFieldGroup(
-  group: DescriptorFieldGroup,
-  ctx: FieldContext,
-): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
-  if (group.path?.endsWith(".[]")) {
-    return processGroupArrayPath(group, ctx);
-  }
-  return processChildArrayPaths(group, ctx);
 }
 
 /**
@@ -246,11 +256,7 @@ async function processGroupArrayPath(
 
   if (length === 0) {
     return {
-      group: {
-        label: group.label,
-        fields: [],
-        warning: warn("EMPTY_ARRAY", `Array at '${basePath}' is empty`),
-      },
+      group: emptyArrayGroup(group.label, `Array at '${basePath}' is empty`),
     };
   }
 
@@ -305,11 +311,7 @@ async function processChildArrayPaths(
 
   if (arrayLengths.length === 0 || arrayLengths.every((a) => a.length === 0)) {
     return {
-      group: {
-        label: group.label,
-        fields: [],
-        warning: warn("EMPTY_ARRAY", "All arrays in group are empty"),
-      },
+      group: emptyArrayGroup(group.label, "All arrays in group are empty"),
     };
   }
 
@@ -364,15 +366,9 @@ async function processChildArrayPaths(
     if (child.path?.includes(".[]")) {
       const childBasePath = parseGroupBasePath(child.path);
       const len = ctx.getArrayLength(childBasePath);
-      for (let i = 0; i < len; i++) {
-        const indexed = {
-          ...child,
-          path: child.path.replace(".[]", `.[${i}]`),
-        };
-        const result = await processSingleField(indexed, ctx);
-        if ("warnings" in result) return result;
-        if (result.field) allFields.push(result.field);
-      }
+      const iterResult = await iterateArrayField(child, len, ctx);
+      if ("warnings" in iterResult) return iterResult;
+      allFields.push(...iterResult.fields);
     } else {
       const result = await processSingleField(child, ctx);
       if ("warnings" in result) return result;
@@ -414,7 +410,35 @@ async function processFlatFields(
 }
 
 /**
- * Replace .[] with .[index] in child field paths for a given iteration index.
+ * Create an empty DisplayFieldGroup with an EMPTY_ARRAY warning.
+ */
+function emptyArrayGroup(
+  label: string | undefined,
+  message: string,
+): DisplayFieldGroup {
+  return { label, fields: [], warning: warn("EMPTY_ARRAY", message) };
+}
+
+/**
+ * Expand a single field spec for a given array index:
+ * replaces .[] with .[index] in path and all string-valued params.
+ */
+function expandFieldForIndex(
+  field: DescriptorFieldFormat,
+  index: number,
+): DescriptorFieldFormat {
+  return {
+    ...field,
+    path: field.path?.replace(".[]", `.[${index}]`),
+    ...(field.params
+      ? { params: expandParamArrayIndex(field.params, index) }
+      : {}),
+  };
+}
+
+/**
+ * Replace .[] with .[index] in child field paths and param values
+ * for a given iteration index.
  */
 function expandArrayIndex(
   childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
@@ -422,11 +446,47 @@ function expandArrayIndex(
 ): (DescriptorFieldFormat | DescriptorFieldGroup)[] {
   return childFields.map((child) => {
     if (isFieldGroup(child)) return child;
-    if (child.path?.includes(".[]")) {
-      return { ...child, path: child.path.replace(".[]", `.[${index}]`) };
-    }
+    if (child.path?.includes(".[]")) return expandFieldForIndex(child, index);
     return child;
   });
+}
+
+/**
+ * Iterate over array elements, expanding the field spec for each index
+ * and processing it. Shared by processIteratedField and sequential
+ * processChildArrayPaths.
+ */
+async function iterateArrayField(
+  field: DescriptorFieldFormat,
+  length: number,
+  ctx: FieldContext,
+): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
+  const fields: DisplayField[] = [];
+  for (let i = 0; i < length; i++) {
+    const indexed = expandFieldForIndex(field, i);
+    const result = await processSingleField(indexed, ctx);
+    if ("warnings" in result) return result;
+    if (result.field) fields.push(result.field);
+  }
+  return { fields };
+}
+
+/**
+ * Replace .[] with .[index] in all string-valued params.
+ * Per ERC-7730, params referencing array paths are iterated alongside the field.
+ */
+function expandParamArrayIndex(
+  params: DescriptorFieldFormat["params"],
+  index: number,
+): DescriptorFieldFormat["params"] {
+  if (!params) return params;
+  const result: Record<string, unknown> = { ...params };
+  for (const [key, value] of Object.entries(result)) {
+    if (typeof value === "string" && value.includes(".[]")) {
+      result[key] = value.replace(".[]", `.[${index}]`);
+    }
+  }
+  return result as DescriptorFieldFormat["params"];
 }
 
 /**
