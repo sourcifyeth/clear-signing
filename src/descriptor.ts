@@ -20,9 +20,9 @@ import {
   asciiToBytes,
   bigIntToBytes,
   boolToBytes,
+  bytesEqual,
   hexToBytes,
   isAddressString,
-  coerceBigInt,
   normalizeAddress,
   parseBigInt,
 } from "./utils";
@@ -100,53 +100,21 @@ export type ArgumentValue =
 export type BytesSliceValue = { type: "bytes-slice"; bytes: Uint8Array };
 
 /**
- * Convert a raw JS value (e.g. from an EIP-712 message) to an ArgumentValue
- * using the known FieldType from the type tree.
- */
-export function rawToArgumentValue(
-  value: unknown,
-  fieldType: FieldType,
-): ArgumentValue | undefined {
-  switch (fieldType) {
-    case "address": {
-      if (typeof value !== "string") return undefined;
-      if (!isAddressString(value)) return undefined;
-      return { type: "address", bytes: hexToBytes(value) };
-    }
-    case "uint": {
-      const n = coerceBigInt(value);
-      if (n === undefined) return undefined;
-      return { type: "uint", value: n };
-    }
-    case "int": {
-      const n = coerceBigInt(value);
-      if (n === undefined) return undefined;
-      return { type: "int", value: n };
-    }
-    case "bool": {
-      if (typeof value === "boolean") return { type: "bool", value };
-      if (value === "true") return { type: "bool", value: true };
-      if (value === "false") return { type: "bool", value: false };
-      return undefined;
-    }
-    case "string": {
-      if (typeof value !== "string") return undefined;
-      return { type: "string", value };
-    }
-    case "bytes": {
-      if (typeof value !== "string") return undefined;
-      try {
-        return { type: "bytes", bytes: hexToBytes(value) };
-      } catch {
-        return undefined;
-      }
-    }
-  }
-}
-
-/**
- * Convert a descriptor metadata value to an ArgumentValue.
- * Used for `$.metadata.*` path resolution.
+ * Convert a raw JS value (a literal from a parsed descriptor, an EIP-712
+ * message value, or an `ifNotIn`/`mustMatch` candidate) into an ArgumentValue
+ * by inferring its type from the value's shape.
+ *
+ * Inference rules:
+ *   - `number`                       → uint (bigint)
+ *   - `boolean`                      → bool
+ *   - 42-char hex string             → address
+ *   - numeric string (incl. "0x" hex)→ uint
+ *   - other "0x…" hex string         → bytes
+ *   - any other string               → string
+ *   - anything else                  → undefined
+ *
+ * Callers that need a specific type (e.g. `int` or `bytes` with a non-hex
+ * input) must construct the ArgumentValue directly.
  */
 export function toArgumentValue(value: unknown): ArgumentValue | undefined {
   if (typeof value === "number") {
@@ -173,6 +141,37 @@ export function toArgumentValue(value: unknown): ArgumentValue | undefined {
     return { type: "string", value };
   }
   return undefined;
+}
+
+/**
+ * Structural equality for two ArgumentValues.
+ *
+ * `uint` and `int` are compared by their bigint payload, so a candidate
+ * inferred as `uint` (via toArgumentValue) can still match an `int` field.
+ * All other type combinations require matching `type`.
+ */
+export function argumentValueEquals(
+  a: ArgumentValue,
+  b: ArgumentValue,
+): boolean {
+  if (
+    (a.type === "uint" || a.type === "int") &&
+    (b.type === "uint" || b.type === "int")
+  ) {
+    return a.value === b.value;
+  }
+  if (a.type !== b.type) return false;
+  switch (a.type) {
+    case "address":
+      return bytesEqual(a.bytes, (b as { bytes: Uint8Array }).bytes);
+    case "bytes":
+      return bytesEqual(a.bytes, (b as { bytes: Uint8Array }).bytes);
+    case "bool":
+      return a.value === (b as { value: boolean }).value;
+    case "string":
+      return a.value === (b as { value: string }).value;
+  }
+  return false;
 }
 
 export function bytesToAddressArgumentValue(

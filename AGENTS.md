@@ -28,8 +28,9 @@ src/
 - **`descriptor.ts`** — Shared descriptor utilities used by both calldata and EIP-712 paths:
   descriptor binding checks (`isCalldataDescriptorBoundTo`, `isEip712DescriptorBoundTo`),
   path resolution (`resolveTransactionPath`, `resolveTypedDataPath`),
-  value conversion (`ArgumentValue`, `BytesSliceValue`, `toArgumentValue`, `rawToArgumentValue`,
-  `argumentValueToBytes`), format-to-type mapping (`fieldTypeForFormat`, `bytesSliceToFieldType`),
+  value conversion (`ArgumentValue`, `BytesSliceValue`, `toArgumentValue`,
+  `argumentValueToBytes`, `argumentValueEquals`), format-to-type mapping
+  (`fieldTypeForFormat`, `bytesSliceToFieldType`),
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
   metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
   Defines the `BaseResolvePath` (returns `ArgumentValue`) and `ResolvePath`
@@ -427,6 +428,7 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 4. **Address normalization:** Always lowercase for comparisons
 5. **Minimize exports:** Only export symbols that are imported by other modules. Keep internal helpers module-private.
 6. **Check `utils.ts` before writing helpers:** Always check if `utils.ts` already has a function for what you need (e.g. `hexToBytes`, `bytesToHex`, `bytesToAscii`, `asciiToBytes`, `bigIntToBytes`, `bytesToBigInt`, etc.) before writing a new one — in both `src/` and `test/` files.
+7. **Argument value conversion:** To turn a JS literal (descriptor constant, EIP-712 message value, `ifNotIn`/`mustMatch` candidate) into an `ArgumentValue`, use `toArgumentValue` from `descriptor.ts` — it infers the type from the value shape. Compare two `ArgumentValue`s with `argumentValueEquals` (cross-matches `uint`/`int` via bigint). Prefer these over bespoke per-type matching helpers.
 
 ## Descriptor Type — Defensive Programming
 

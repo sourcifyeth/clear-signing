@@ -25,12 +25,14 @@ import type {
   ResolvePath,
 } from "./descriptor";
 import {
+  argumentValueEquals,
   argumentValueToBytes,
   bytesToAddressArgumentValue,
   fieldTypeForFormat,
   isFieldGroup,
   mergeDefinitions,
   resolveFieldValue,
+  toArgumentValue,
 } from "./descriptor";
 import {
   bytesToAscii,
@@ -200,6 +202,10 @@ async function processSingleField(
     resolvedValue.type === "bytes-slice"
       ? bytesSliceToArgumentValue(resolvedValue, merged.format)
       : resolvedValue;
+
+  const visibility = evaluateVisibility(merged.visible, argValue, merged.label);
+  if ("warning" in visibility) return { warnings: [visibility.warning] };
+  if (visibility.hide) return { field: null };
 
   const {
     rendered,
@@ -661,4 +667,59 @@ export function bytesSliceToArgumentValue(
 ): ArgumentValue {
   const fieldType = fieldTypeForFormat(format);
   return bytesSliceToFieldType(slice.bytes, fieldType);
+}
+
+// ---------------------------------------------------------------------------
+// Visibility rules (ERC-7730 `visible` field)
+// ---------------------------------------------------------------------------
+
+type VisibilityResult = { hide: boolean } | { warning: Warning };
+
+/**
+ * Evaluate a field's `visible` rule against its resolved value.
+ * The "never" case is handled earlier in processSingleField before value resolution.
+ *
+ *   - "always" / "optional" / undefined → shown
+ *   - { ifNotIn: [...] }                 → hidden when the value matches any entry
+ *   - { mustMatch: [...] }               → always hidden; emits a MUSTMATCH_VIOLATION
+ *                                          warning when the value does NOT match
+ */
+function evaluateVisibility(
+  visible: DescriptorFieldFormat["visible"],
+  argValue: ArgumentValue,
+  fieldLabel: string,
+): VisibilityResult {
+  if (typeof visible !== "object") {
+    return { hide: false };
+  }
+
+  if ("ifNotIn" in visible && visible.ifNotIn) {
+    return { hide: matchesAnyCandidate(argValue, visible.ifNotIn) };
+  }
+
+  if ("mustMatch" in visible && visible.mustMatch) {
+    if (matchesAnyCandidate(argValue, visible.mustMatch)) {
+      return { hide: true };
+    }
+    return {
+      warning: warn(
+        "MUSTMATCH_VIOLATION",
+        `Field '${fieldLabel}' value does not match any of the required values`,
+      ),
+    };
+  }
+
+  return { hide: false };
+}
+
+function matchesAnyCandidate(
+  argValue: ArgumentValue,
+  candidates: Array<string | number | boolean | null>,
+): boolean {
+  return candidates.some((c) => {
+    const candidateValue = toArgumentValue(c);
+    return candidateValue !== undefined
+      ? argumentValueEquals(argValue, candidateValue)
+      : false;
+  });
 }

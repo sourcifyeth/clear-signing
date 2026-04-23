@@ -79,6 +79,7 @@ export type WarningCode =
   | "DEPLOYMENT_MISMATCH"
   | "NO_FORMAT_MATCH"
   | "CALLDATA_DECODE_ERROR"
+  | "MUSTMATCH_VIOLATION"
   | "UNSUPPORTED_NESTED_FIELD_GROUP"
   | "DEFINITIONS_RESOLUTION_ERROR"
   | "INVALID_DESCRIPTOR"
@@ -466,7 +467,12 @@ export interface DescriptorFieldFormat {
   label?: string;
   format?: DescriptorFieldFormatType;
   params?: DescriptorFieldFormatParams;
-  visible?: "never" | "always" | "optional" | Record<string, unknown>;
+  visible?:
+    | "never"
+    | "always"
+    | "optional"
+    | { ifNotIn?: Array<string | number | boolean | null> }
+    | { mustMatch?: Array<string | number | boolean | null> };
   separator?: string;
   encryption?: DescriptorFieldEncryption;
   $ref?: string;

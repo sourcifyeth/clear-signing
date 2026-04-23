@@ -6,7 +6,6 @@ import type {
   Descriptor,
   DescriptorFormatSpec,
   DisplayModel,
-  FieldType,
   ExternalDataProvider,
   FormatCalldata,
   TypedData,
@@ -16,7 +15,6 @@ import type {
 import {
   type BaseResolvePath,
   toArgumentValue,
-  rawToArgumentValue,
   interpolateTemplate,
   isEip712DescriptorBoundTo,
   resolveMetadataValue,
@@ -68,9 +66,7 @@ export async function formatEip712(
     const key = path.startsWith("#.") ? path.slice(2) : path;
     const raw = getMessageValue(typedData.message, key);
     if (raw === undefined) return undefined;
-    const ft = resolveFieldType(key, typedData.primaryType, typedData.types);
-    if (!ft) return undefined;
-    return rawToArgumentValue(raw, ft);
+    return toArgumentValue(raw);
   };
 
   const getArrayLength = (path: string): number => {
@@ -201,46 +197,4 @@ function getMessageValue(
     }
   }
   return current;
-}
-
-/**
- * Walk the EIP-712 type tree to resolve the leaf Solidity type at a dot-path.
- * Supports array index segments (e.g. `[0]`) which are skipped during type resolution.
- * Returns undefined for struct/array reference types and unresolvable paths.
- */
-function resolveFieldType(
-  path: string,
-  primaryType: string,
-  types: Record<string, TypeMember[]>,
-): FieldType | undefined {
-  const segments = path.split(".");
-  let currentType = primaryType;
-  for (let i = 0; i < segments.length; i++) {
-    // Skip array index segments — type was already resolved via bracket stripping
-    if (/^\[\d+\]$/.test(segments[i])) continue;
-
-    const members = types[currentType];
-    if (!members) return undefined;
-    const member = members.find((m) => m.name === segments[i]);
-    if (!member) return undefined;
-    if (i === segments.length - 1) {
-      const baseType = member.type.replace(/(\[.*?\])+$/, "");
-      // Struct references and arrays have no ERC-7730 format category
-      if (baseType in types) return undefined;
-      return toFieldType(baseType);
-    }
-    currentType = member.type.replace(/(\[.*?\])+$/, "");
-  }
-  return undefined;
-}
-
-/** Map an EIP-712 concrete type to its ERC-7730 FieldType category. */
-function toFieldType(type: string): FieldType | undefined {
-  if (type === "address") return "address";
-  if (type === "bool") return "bool";
-  if (type === "string") return "string";
-  if (type === "bytes" || /^bytes\d+$/.test(type)) return "bytes";
-  if (/^uint\d*$/.test(type)) return "uint";
-  if (/^int\d*$/.test(type)) return "int";
-  return undefined;
 }
