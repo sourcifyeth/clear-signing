@@ -42,8 +42,11 @@ export async function formatCalldata(
   externalDataProvider?: ExternalDataProvider,
   formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<DisplayModel> {
-  const calldata = hexToBytes(tx.data);
-  const selector = extractSelector(calldata);
+  const parsed = parseCalldataHex(tx.data);
+  if ("warning" in parsed) {
+    return { warnings: [parsed.warning] };
+  }
+  const { calldata, selector } = parsed;
 
   if (!isCalldataDescriptorBoundTo(descriptor, tx.chainId, tx.to)) {
     return {
@@ -70,7 +73,20 @@ export async function formatCalldata(
   }
 
   const { inputs, spec: format } = match;
-  const decoded = decodeArguments(inputs, calldata);
+  let decoded: DecodedArguments;
+  try {
+    decoded = decodeArguments(inputs, calldata);
+  } catch {
+    return {
+      rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
+      warnings: [
+        warn(
+          "CALLDATA_DECODE_ERROR",
+          `Failed to decode calldata for selector ${selectorHex}`,
+        ),
+      ],
+    };
+  }
 
   const resolvePath: BaseResolvePath = (path: string) => {
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
@@ -124,8 +140,46 @@ export async function formatCalldata(
           info: meta.info,
         }
       : undefined,
-    warnings: warnings.length > 0 ? warnings : undefined,
+    ...(warnings.length > 0 && { warnings }),
   };
+}
+
+/**
+ * Parses a hex-encoded calldata string into its bytes and 4-byte selector.
+ *
+ * Returns `{ calldata, selector }` on success. On failure, returns a single
+ * `{ warning }`:
+ *   - `INVALID_CALLDATA_HEX` when the input is not valid hex
+ *   - `CALLDATA_TOO_SHORT` when the input is shorter than a 4-byte selector
+ */
+export function parseCalldataHex(
+  data: string,
+): { calldata: Uint8Array; selector: Uint8Array } | { warning: Warning } {
+  let calldata: Uint8Array;
+  try {
+    calldata = hexToBytes(data);
+  } catch {
+    return {
+      warning: warn(
+        "INVALID_CALLDATA_HEX",
+        `Calldata is not valid hex: ${data}`,
+      ),
+    };
+  }
+
+  let selector: Uint8Array;
+  try {
+    selector = extractSelector(calldata);
+  } catch {
+    return {
+      warning: warn(
+        "CALLDATA_TOO_SHORT",
+        `Calldata must be at least 4 bytes: ${data}`,
+      ),
+    };
+  }
+
+  return { calldata, selector };
 }
 
 export function rawPreviewFromCalldata(

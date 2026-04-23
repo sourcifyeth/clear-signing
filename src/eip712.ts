@@ -115,7 +115,7 @@ export async function formatEip712(
     metadata: meta
       ? { owner: meta.owner, contractName: meta.contractName, info: meta.info }
       : undefined,
-    warnings: warnings.length > 0 ? warnings : undefined,
+    ...(warnings.length > 0 && { warnings }),
   };
 }
 

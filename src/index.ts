@@ -17,10 +17,15 @@
  */
 
 import { DescriptorResolver } from "./resolver";
-import { formatCalldata, rawPreviewFromCalldata } from "./calldata";
+import {
+  formatCalldata,
+  parseCalldataHex,
+  rawPreviewFromCalldata,
+} from "./calldata";
 import { formatEip712 } from "./eip712";
-import { hexToBytes, extractSelector, warn } from "./utils";
+import { warn } from "./utils";
 import type {
+  Descriptor,
   DisplayModel,
   FormatOptions,
   FormatCalldata,
@@ -28,6 +33,7 @@ import type {
   TypedData,
   BatchDisplayModel,
   Eip5792Batch,
+  Warning,
 } from "./types";
 
 // Re-export types
@@ -52,21 +58,39 @@ export async function format(
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
   try {
-    const descriptor = await new DescriptorResolver(
-      opts?.descriptorResolverOptions,
-    ).resolveCalldataDescriptor(tx.chainId, tx.to);
-
-    if (!descriptor) {
-      const calldata = hexToBytes(tx.data);
-      const selector = extractSelector(calldata);
+    let descriptor: Descriptor | undefined;
+    try {
+      descriptor = await new DescriptorResolver(
+        opts?.descriptorResolverOptions,
+      ).resolveCalldataDescriptor(tx.chainId, tx.to);
+    } catch (error) {
       return {
-        rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
         warnings: [
           warn(
-            "NO_DESCRIPTOR",
-            `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
+            "DESCRIPTOR_FETCH_ERROR",
+            `Failed to resolve descriptor for chain ${tx.chainId} and address ${tx.to}: ${String(error)}`,
           ),
         ],
+      };
+    }
+
+    if (!descriptor) {
+      const noDescriptor = warn(
+        "NO_DESCRIPTOR",
+        `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
+      );
+
+      const parsed = parseCalldataHex(tx.data);
+      if ("warning" in parsed) {
+        return { warnings: [noDescriptor, parsed.warning] };
+      }
+
+      return {
+        rawCalldataFallback: rawPreviewFromCalldata(
+          parsed.selector,
+          parsed.calldata,
+        ),
+        warnings: [noDescriptor],
       };
     }
 
@@ -80,7 +104,7 @@ export async function format(
       formatEmbeddedCalldata,
     );
   } catch (error) {
-    return unexpectedError(error);
+    return { warnings: [unexpectedErrorWarning(error)] };
   }
 }
 
@@ -102,65 +126,69 @@ export async function formatEip5792Batch(
   batch: Eip5792Batch,
   opts?: FormatOptions,
 ): Promise<BatchDisplayModel> {
-  if (batch.calls.length === 0) {
+  try {
+    if (batch.calls.length === 0) {
+      return {
+        callDisplays: [],
+        warnings: [warn("BATCH_EMPTY", "Batch contains no calls")],
+      };
+    }
+
+    const callDisplays: DisplayModel[] = [];
+
+    for (const call of batch.calls) {
+      if (!call.data) {
+        callDisplays.push({
+          warnings: [
+            warn(
+              "BATCH_VALUE_TRANSFER",
+              "Call has no data field — native value transfer cannot be formatted",
+            ),
+          ],
+        });
+        continue;
+      }
+
+      if (!call.to) {
+        callDisplays.push({
+          warnings: [
+            warn(
+              "BATCH_CONTRACT_CREATION",
+              "Call has no to field — contract creation cannot be formatted",
+            ),
+          ],
+        });
+        continue;
+      }
+
+      const tx: Transaction = {
+        chainId: batch.chainId,
+        to: call.to,
+        data: call.data,
+        value: call.value,
+        from: batch.from,
+      };
+
+      callDisplays.push(await format(tx, opts));
+    }
+
+    const intents = callDisplays.map((d) => d.interpolatedIntent);
+    if (intents.every((i): i is string => !!i)) {
+      return { interpolatedIntent: intents.join(" and "), callDisplays };
+    }
+
     return {
-      callDisplays: [],
-      warnings: [warn("BATCH_EMPTY", "Batch contains no calls")],
+      callDisplays,
+      warnings: [
+        warn(
+          "BATCH_INTERPOLATION_INCOMPLETE",
+          "Batch interpolatedIntent is not available because one or more calls could not be interpolated",
+        ),
+      ],
     };
+  } catch (error) {
+    return { callDisplays: [], warnings: [unexpectedErrorWarning(error)] };
   }
-
-  const callDisplays: DisplayModel[] = [];
-
-  for (const call of batch.calls) {
-    if (!call.data) {
-      callDisplays.push({
-        warnings: [
-          warn(
-            "BATCH_VALUE_TRANSFER",
-            "Call has no data field — native value transfer cannot be formatted",
-          ),
-        ],
-      });
-      continue;
-    }
-
-    if (!call.to) {
-      callDisplays.push({
-        warnings: [
-          warn(
-            "BATCH_CONTRACT_CREATION",
-            "Call has no to field — contract creation cannot be formatted",
-          ),
-        ],
-      });
-      continue;
-    }
-
-    const tx: Transaction = {
-      chainId: batch.chainId,
-      to: call.to,
-      data: call.data,
-      value: call.value,
-      from: batch.from,
-    };
-
-    callDisplays.push(await format(tx, opts));
-  }
-
-  const intents = callDisplays.map((d) => d.interpolatedIntent);
-  if (intents.every((i): i is string => !!i)) {
-    return { interpolatedIntent: intents.join(" and "), callDisplays };
-  }
-
-  return {
-    callDisplays,
-    warnings: [
-      warn(
-        "BATCH_INTERPOLATION_INCOMPLETE",
-        "Batch interpolatedIntent is not available because one or more calls could not be interpolated",
-      ),
-    ],
-  };
 }
 
 /**
@@ -184,14 +212,31 @@ export async function formatTypedData(
     const { chainId, verifyingContract } = typedData.domain;
 
     if (!chainId || !verifyingContract) {
-      throw new Error(
-        "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
-      );
+      return {
+        warnings: [
+          warn(
+            "UNSUPPORTED_DOMAIN",
+            "Currently only works on EIP-712 messages with chainId and verifyingContract in the domain",
+          ),
+        ],
+      };
     }
 
-    const descriptor = await new DescriptorResolver(
-      opts?.descriptorResolverOptions,
-    ).resolveTypedDataDescriptor(chainId, verifyingContract);
+    let descriptor: Descriptor | undefined;
+    try {
+      descriptor = await new DescriptorResolver(
+        opts?.descriptorResolverOptions,
+      ).resolveTypedDataDescriptor(chainId, verifyingContract);
+    } catch (error) {
+      return {
+        warnings: [
+          warn(
+            "DESCRIPTOR_FETCH_ERROR",
+            `Failed to resolve descriptor for chain ${chainId} and address ${verifyingContract}: ${String(error)}`,
+          ),
+        ],
+      };
+    }
 
     if (!descriptor) {
       return {
@@ -214,17 +259,13 @@ export async function formatTypedData(
       formatEmbeddedCalldata,
     );
   } catch (error) {
-    return unexpectedError(error);
+    return { warnings: [unexpectedErrorWarning(error)] };
   }
 }
 
-function unexpectedError(error: unknown): DisplayModel {
-  return {
-    warnings: [
-      warn(
-        "UNEXPECTED_LIB_ERROR",
-        `Encountered an unexpected error in @sourcifyeth/clear-signing. Please report to the maintainers: ${String(error)}`,
-      ),
-    ],
-  };
+function unexpectedErrorWarning(error: unknown): Warning {
+  return warn(
+    "UNEXPECTED_LIB_ERROR",
+    `Encountered an unexpected error in @sourcifyeth/clear-signing. Please report to the maintainers: ${String(error)}`,
+  );
 }
