@@ -4,8 +4,12 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index";
-import type { DisplayModel, ExternalDataProvider } from "../../src/types";
+import { format, formatEip5792Batch, isFieldGroup } from "../../src/index";
+import type {
+  DisplayModel,
+  ExternalDataProvider,
+  FormatOptions,
+} from "../../src/types";
 import {
   addThousandSeparators,
   hexToBytes,
@@ -13,63 +17,63 @@ import {
 } from "../../src/utils";
 import { buildEmbeddedResolverOpts } from "../utils";
 
-describe("example-main.json — transfer(address to, uint256 value)", () => {
-  // USDT on mainnet (matches example-main.json deployment)
-  const USDT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-  const CHAIN_ID = 1;
+// USDT on mainnet (matches example-main.json deployment)
+const USDT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+const CHAIN_ID = 1;
 
-  const RECIPIENT = "0x1234567890abcdef1234567890abcdef12345678";
-  const RECIPIENT_LOCAL_NAME = "Alice";
-  const RECIPIENT_ENS_NAME = "alice.eth";
-  const TRANSFER_AMOUNT = 1_000_000n; // 1 USDT
-  const TRANSFER_CALLDATA =
-    // transfer(address,uint256) selector = 0xa9059cbb
-    "0xa9059cbb" +
-    `000000000000000000000000${RECIPIENT.slice(2)}` + // to
-    "00000000000000000000000000000000000000000000000000000000000f4240"; // value = 1000000
+const RECIPIENT = "0x1234567890abcdef1234567890abcdef12345678";
+const RECIPIENT_LOCAL_NAME = "Alice";
+const RECIPIENT_ENS_NAME = "alice.eth";
+const TRANSFER_AMOUNT = 1_000_000n; // 1 USDT
+const TRANSFER_CALLDATA =
+  // transfer(address,uint256) selector = 0xa9059cbb
+  "0xa9059cbb" +
+  `000000000000000000000000${RECIPIENT.slice(2)}` + // to
+  "00000000000000000000000000000000000000000000000000000000000f4240"; // value = 1000000
 
-  const resolveToken: ExternalDataProvider["resolveToken"] = async (
-    chainId,
-    tokenAddress,
-  ) => {
-    if (chainId === CHAIN_ID && tokenAddress === USDT_ADDRESS.toLowerCase()) {
-      return { name: "Tether USD", symbol: "USDT", decimals: 6 };
-    }
-    return null;
-  };
-  const resolveLocalName: ExternalDataProvider["resolveLocalName"] = async (
-    address,
-  ) => {
-    if (address.toLowerCase() === RECIPIENT.toLowerCase()) {
-      return { name: RECIPIENT_LOCAL_NAME, typeMatch: true };
-    }
-    return null;
-  };
-  const resolveEnsName: ExternalDataProvider["resolveEnsName"] = async (
-    address,
-  ) => {
-    if (address.toLowerCase() === RECIPIENT.toLowerCase()) {
-      return { name: RECIPIENT_ENS_NAME, typeMatch: true };
-    }
-    return null;
-  };
-
-  function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
-      __dirname,
-      {
-        calldataDescriptorFiles: [
-          {
-            chainId: CHAIN_ID,
-            address: USDT_ADDRESS,
-            file: "example-main.json",
-          },
-        ],
-      },
-      externalDataProvider,
-    );
+const resolveToken: ExternalDataProvider["resolveToken"] = async (
+  chainId,
+  tokenAddress,
+) => {
+  if (chainId === CHAIN_ID && tokenAddress === USDT_ADDRESS.toLowerCase()) {
+    return { name: "Tether USD", symbol: "USDT", decimals: 6 };
   }
+  return null;
+};
+const resolveLocalName: ExternalDataProvider["resolveLocalName"] = async (
+  address,
+) => {
+  if (address.toLowerCase() === RECIPIENT.toLowerCase()) {
+    return { name: RECIPIENT_LOCAL_NAME, typeMatch: true };
+  }
+  return null;
+};
+const resolveEnsName: ExternalDataProvider["resolveEnsName"] = async (
+  address,
+) => {
+  if (address.toLowerCase() === RECIPIENT.toLowerCase()) {
+    return { name: RECIPIENT_ENS_NAME, typeMatch: true };
+  }
+  return null;
+};
 
+function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
+  return buildEmbeddedResolverOpts(
+    __dirname,
+    {
+      calldataDescriptorFiles: [
+        {
+          chainId: CHAIN_ID,
+          address: USDT_ADDRESS,
+          file: "example-main.json",
+        },
+      ],
+    },
+    externalDataProvider,
+  );
+}
+
+describe("example-main.json — transfer(address to, uint256 value)", () => {
   it("formats a transfer call with all DisplayModel properties", async () => {
     const opts = buildOpts({ resolveToken, resolveLocalName });
 
@@ -317,5 +321,185 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     expect(result.interpolatedIntent).toBe(
       `Send 1 USDT to ${toChecksumAddress(hexToBytes(RECIPIENT))}`,
     );
+  });
+});
+
+describe("example-main.json — EIP-5792 batch formatting", () => {
+  const SECOND_RECIPIENT = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+  const SECOND_RECIPIENT_LOCAL_NAME = "Bob";
+  const SECOND_TRANSFER_CALLDATA =
+    "0xa9059cbb" +
+    `000000000000000000000000${SECOND_RECIPIENT.slice(2)}` +
+    "00000000000000000000000000000000000000000000000000000000001e8480"; // 2 USDT = 2_000_000
+
+  const resolveTokenAndNamesProvider: ExternalDataProvider = {
+    resolveToken,
+    resolveLocalName: async (address) => {
+      const lower = address.toLowerCase();
+      if (lower === RECIPIENT.toLowerCase())
+        return { name: RECIPIENT_LOCAL_NAME, typeMatch: true };
+      if (lower === SECOND_RECIPIENT.toLowerCase())
+        return { name: SECOND_RECIPIENT_LOCAL_NAME, typeMatch: true };
+      return null;
+    },
+  };
+
+  it("formats a batch of two transfer calls with combined interpolatedIntent", async () => {
+    const opts = buildOpts(resolveTokenAndNamesProvider);
+
+    const result = await formatEip5792Batch(
+      {
+        chainId: CHAIN_ID,
+        from: "0x0000000000000000000000000000000000000001",
+        calls: [
+          { to: USDT_ADDRESS, data: TRANSFER_CALLDATA },
+          { to: USDT_ADDRESS, data: SECOND_TRANSFER_CALLDATA },
+        ],
+      },
+      opts,
+    );
+
+    expect(result.callDisplays).toHaveLength(2);
+
+    // First call
+    const first = result.callDisplays[0];
+    expect(first.intent).toBe("Send");
+    expect(first.interpolatedIntent).toBe(
+      `Send 1 USDT to ${RECIPIENT_LOCAL_NAME}`,
+    );
+    assert(first.fields);
+    expect(first.fields).toHaveLength(2);
+
+    // Second call
+    const second = result.callDisplays[1];
+    expect(second.intent).toBe("Send");
+    expect(second.interpolatedIntent).toBe(
+      `Send 2 USDT to ${SECOND_RECIPIENT_LOCAL_NAME}`,
+    );
+    assert(second.fields);
+    expect(second.fields).toHaveLength(2);
+
+    // Combined batch intent
+    expect(result.interpolatedIntent).toBe(
+      `Send 1 USDT to ${RECIPIENT_LOCAL_NAME} and Send 2 USDT to ${SECOND_RECIPIENT_LOCAL_NAME}`,
+    );
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it("returns BATCH_VALUE_TRANSFER when a call has no data", async () => {
+    const opts = buildOpts(resolveTokenAndNamesProvider);
+
+    const result = await formatEip5792Batch(
+      {
+        chainId: CHAIN_ID,
+        calls: [
+          { to: USDT_ADDRESS, data: TRANSFER_CALLDATA },
+          { to: "0x0000000000000000000000000000000000000001", value: 1n },
+        ],
+      },
+      opts,
+    );
+
+    expect(result.callDisplays).toHaveLength(2);
+
+    // First call formatted normally
+    expect(result.callDisplays[0].intent).toBe("Send");
+    expect(result.callDisplays[0].interpolatedIntent).toBe(
+      `Send 1 USDT to ${RECIPIENT_LOCAL_NAME}`,
+    );
+
+    // Second call: value transfer warning
+    const valueTransfer = result.callDisplays[1];
+    expect(valueTransfer.intent).toBeUndefined();
+    expect(valueTransfer.fields).toBeUndefined();
+    expect(valueTransfer.interpolatedIntent).toBeUndefined();
+    assert(valueTransfer.warnings);
+    expect(valueTransfer.warnings).toHaveLength(1);
+    expect(valueTransfer.warnings[0].code).toBe("BATCH_VALUE_TRANSFER");
+
+    // Batch-level: no combined intent, with BATCH_INTERPOLATION_INCOMPLETE
+    expect(result.interpolatedIntent).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("BATCH_INTERPOLATION_INCOMPLETE");
+  });
+
+  it("returns BATCH_CONTRACT_CREATION when a call has no to", async () => {
+    const opts = buildOpts(resolveTokenAndNamesProvider);
+
+    const result = await formatEip5792Batch(
+      {
+        chainId: CHAIN_ID,
+        calls: [
+          { data: "0x60806040" }, // contract creation bytecode (no `to`)
+        ],
+      },
+      opts,
+    );
+
+    expect(result.callDisplays).toHaveLength(1);
+    const creation = result.callDisplays[0];
+    expect(creation.intent).toBeUndefined();
+    expect(creation.fields).toBeUndefined();
+    expect(creation.interpolatedIntent).toBeUndefined();
+    assert(creation.warnings);
+    expect(creation.warnings).toHaveLength(1);
+    expect(creation.warnings[0].code).toBe("BATCH_CONTRACT_CREATION");
+
+    expect(result.interpolatedIntent).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings[0].code).toBe("BATCH_INTERPOLATION_INCOMPLETE");
+  });
+
+  it("returns BATCH_INTERPOLATION_INCOMPLETE when any call lacks interpolatedIntent", async () => {
+    // Use an unknown address so the call gets NO_DESCRIPTOR (no interpolatedIntent)
+    const unknownAddress = "0x0000000000000000000000000000000000000099";
+    const opts = buildOpts(resolveTokenAndNamesProvider);
+
+    const result = await formatEip5792Batch(
+      {
+        chainId: CHAIN_ID,
+        calls: [
+          { to: USDT_ADDRESS, data: TRANSFER_CALLDATA },
+          { to: unknownAddress, data: TRANSFER_CALLDATA },
+        ],
+      },
+      opts,
+    );
+
+    expect(result.callDisplays).toHaveLength(2);
+
+    // First call formatted normally
+    expect(result.callDisplays[0].interpolatedIntent).toBe(
+      `Send 1 USDT to ${RECIPIENT_LOCAL_NAME}`,
+    );
+
+    // Second call: no descriptor → no interpolatedIntent
+    expect(result.callDisplays[1].interpolatedIntent).toBeUndefined();
+    assert(result.callDisplays[1].warnings);
+    expect(
+      result.callDisplays[1].warnings.some((w) => w.code === "NO_DESCRIPTOR"),
+    ).toBe(true);
+
+    // Batch-level: incomplete interpolation
+    expect(result.interpolatedIntent).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("BATCH_INTERPOLATION_INCOMPLETE");
+  });
+
+  it("returns empty callDisplays for an empty batch", async () => {
+    const opts = buildOpts();
+
+    const result = await formatEip5792Batch(
+      { chainId: CHAIN_ID, calls: [] },
+      opts,
+    );
+
+    expect(result.callDisplays).toHaveLength(0);
+    expect(result.interpolatedIntent).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("BATCH_EMPTY");
   });
 });

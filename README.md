@@ -54,7 +54,7 @@ console.log(result.interpolatedIntent); // "Approve 1 USDT to 0x1234..."
 
 ### `format(tx, opts?)`
 
-Resolves the descriptor for a transaction and returns a `DisplayModel` with human-readable information.
+Formats a single transaction's calldata into a `DisplayModel`. Resolves an ERC-7730 descriptor by chain and contract address, decodes the calldata, and renders fields. Falls back to a `rawCalldataFallback` when no descriptor matches.
 
 ```typescript
 async function format(
@@ -75,7 +75,7 @@ interface Transaction {
 
 ### `formatTypedData(typedData, opts?)`
 
-Resolves the descriptor for an EIP-712 message and returns a `DisplayModel`.
+Formats an EIP-712 typed data message into a `DisplayModel`. Resolves an ERC-7730 descriptor by domain chain and verifying contract, matches the primary type via `encodeType`, and renders fields. Requires `chainId` and `verifyingContract` in the domain.
 
 ```typescript
 async function formatTypedData(
@@ -91,6 +91,31 @@ interface TypedData {
   primaryType: string;
   domain: TypedDataDomain;
   message: Record<string, unknown>;
+}
+```
+
+### `formatEip5792Batch(batch, opts?)`
+
+Formats an [EIP-5792](https://eips.ethereum.org/EIPS/eip-5792) batch of calls into a `BatchDisplayModel`. Each call is formatted independently via `format()`. The batch-level `interpolatedIntent` joins all individual intents with " and " as specified by [ERC-7730](https://eips.ethereum.org/EIPS/eip-7730).
+
+```typescript
+async function formatEip5792Batch(
+  batch: Eip5792Batch,
+  opts?: FormatOptions,
+): Promise<BatchDisplayModel>;
+```
+
+```typescript
+interface Eip5792Batch {
+  from?: string;
+  chainId: number;
+  calls: Eip5792Call[];
+}
+
+interface Eip5792Call {
+  to?: string;
+  data?: string;
+  value?: bigint;
 }
 ```
 
@@ -277,6 +302,22 @@ interface DisplayModel {
    * interpolation failed or why a field could not be formatted.
    */
   warnings?: Warning[];
+}
+```
+
+### Batch Display Model
+
+`formatEip5792Batch` returns a `BatchDisplayModel`:
+
+```typescript
+/**
+ * The `callDisplays` array has the same order as the input `calls`.
+ * The batch `interpolatedIntent` joins all individual intents with " and ".
+ */
+interface BatchDisplayModel {
+  interpolatedIntent?: string;
+  warnings?: Warning[];
+  callDisplays: DisplayModel[];
 }
 ```
 

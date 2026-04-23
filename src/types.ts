@@ -8,6 +8,25 @@ export interface Transaction {
   from?: string;
 }
 
+/**
+ * A single call within an EIP-5792 batch.
+ */
+export interface Eip5792Call {
+  to?: string;
+  data?: string;
+  value?: bigint;
+}
+
+/**
+ * An EIP-5792 batch of calls sharing the same sender and chain.
+ * Pass to {@link formatEip5792Batch} to format all calls at once.
+ */
+export interface Eip5792Batch {
+  from?: string;
+  chainId: number;
+  calls: Eip5792Call[];
+}
+
 /** EIP-712 type member definition. */
 export interface TypeMember {
   name: string;
@@ -73,7 +92,11 @@ export type WarningCode =
   | "UNKNOWN_BLOCK"
   | "UNKNOWN_CHAIN"
   | "PARAM_ARRAY_SIZE_MISMATCH"
-  | "EMBEDDED_CALLDATA_NOT_SUPPORTED";
+  | "EMBEDDED_CALLDATA_NOT_SUPPORTED"
+  | "BATCH_VALUE_TRANSFER"
+  | "BATCH_CONTRACT_CREATION"
+  | "BATCH_INTERPOLATION_INCOMPLETE"
+  | "BATCH_EMPTY";
 
 /** Non-fatal warning from formatting. */
 export interface Warning {
@@ -212,10 +235,30 @@ export interface DisplayModel {
 
   /**
    * Non-fatal warnings providing additional context, e.g. why
-   * interpolation failed or why a field could not be formatted.
+   * interpolation failed.
    */
   warnings?: Warning[];
 }
+
+/**
+ * Display model for an EIP-5792 batch of calls.
+ *
+ * The `callDisplays` array preserves the same order as the `calls`
+ * array passed to {@link formatEip5792Batch}, so wallets can correlate
+ * each display model with its source call by index.
+ *
+ * The batch-level `interpolatedIntent` concatenates all individual
+ * `interpolatedIntent` strings with " and " (per ERC-7730).
+ * It is absent when any call could not produce an `interpolatedIntent`,
+ * in which case `warnings` will contain a `BATCH_INTERPOLATION_INCOMPLETE`
+ * entry.
+ */
+export type BatchDisplayModel = Pick<
+  DisplayModel,
+  "interpolatedIntent" | "warnings"
+> & {
+  callDisplays: DisplayModel[];
+};
 
 /** Closure for formatting embedded calldata (nested function calls). */
 export type FormatCalldata = (tx: Transaction) => Promise<DisplayModel>;

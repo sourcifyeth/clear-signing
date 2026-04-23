@@ -10,7 +10,7 @@ This is a TypeScript implementation of [ERC-7730](https://eips.ethereum.org/EIPS
 
 ```
 src/
-├── index.ts                    # Public API: format(), formatTypedData()
+├── index.ts                    # Public API: format(), formatTypedData(), formatEip5792Batch()
 ├── types.ts                    # TypeScript interfaces and types
 ├── utils.ts                    # Crypto & formatting utilities
 ├── descriptor.ts               # Shared descriptor logic: binding checks, path resolution, field merging
@@ -81,6 +81,7 @@ src/
    ```
 
 2. **EIP-712 formatting:**
+
    ```
    formatTypedData(typedData, opts?)
    → DescriptorResolver.resolveTypedDataDescriptor()
@@ -90,7 +91,19 @@ src/
    → returns DisplayModel
    ```
 
-Both paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
+3. **EIP-5792 batch formatting:**
+   ```
+   formatEip5792Batch(batch, opts?)
+   → for each call in batch.calls:
+       → skip with BATCH_VALUE_TRANSFER warning if call.data is absent
+       → skip with BATCH_CONTRACT_CREATION warning if call.to is absent
+       → format({ chainId, to, data, value, from }, opts)
+   → join interpolatedIntent strings with " and "
+       (or emit BATCH_INTERPOLATION_INCOMPLETE if any call lacks one)
+   → returns BatchDisplayModel
+   ```
+
+Both calldata and EIP-712 paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
 Each builds a `BaseResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
 for its domain (calldata args vs. EIP-712 message fields). `applyFieldFormats()` internally
 wraps it with `buildSliceResolvePath` to handle byte slice paths (e.g. `srcToken.[-20:]`).
@@ -309,7 +322,7 @@ Tests live in `test/`. Current test files:
 - `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
-- `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory)
+- `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
