@@ -235,6 +235,7 @@ Not yet implemented: `calldata`, `interoperableAddressName`
 - `amount` displays a value as native currency using `ExternalDataProvider.resolveChainInfo` for decimals and ticker. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
 - `tokenAmount` with `nativeCurrencyAddress` also resolves native currency metadata via `resolveChainInfo`.
 - `addressName` supports the `senderAddress` param: when the field value matches a `senderAddress`, it displays `"Sender"` and substitutes `rawAddress` with `@.from`. Checked via `isSenderAddress()`.
+- `resolveLocalName` and `resolveEnsName` receive `acceptedTypes?: DescriptorAddressType[]` (from `params.types`). The parameter is absent when the descriptor defines no `types`. Callers should check membership with `acceptedTypes?.includes(...)`. The library emits `ADDRESS_TYPE_MISMATCH` when the resolver returns `typeMatch: false`.
 - Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
 
 ### Token Resolution

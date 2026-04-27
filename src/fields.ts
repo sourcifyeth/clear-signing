@@ -35,9 +35,12 @@ import {
   toArgumentValue,
 } from "./descriptor";
 import {
+  bigIntToBytes,
+  bytesEqual,
   bytesToAscii,
   bytesToSignedBigInt,
   bytesToUnsignedBigInt,
+  stripLeadingZeros,
   warn,
 } from "./utils";
 import { renderField } from "./formatters";
@@ -718,8 +721,19 @@ function matchesAnyCandidate(
 ): boolean {
   return candidates.some((c) => {
     const candidateValue = toArgumentValue(c);
-    return candidateValue !== undefined
-      ? argumentValueEquals(argValue, candidateValue)
-      : false;
+    if (candidateValue === undefined) return false;
+    if (argumentValueEquals(argValue, candidateValue)) return true;
+    // Cross-type: if the candidate is a JS number, compare its big-endian
+    // byte encoding against the argument's bytes (leading zeros stripped on
+    // both sides). This lets `visible: { ifNotIn: [0] }` hide unset `bytes`
+    // fields (initCode, paymasterAndData, etc.) on ERC-4337
+    // PackedUserOperation-style messages, and more generally match any
+    // numeric candidate against the equivalent bytes encoding.
+    if (typeof c === "number" && argValue.type === "bytes") {
+      const candidateBytes = stripLeadingZeros(bigIntToBytes(BigInt(c)));
+      const argBytes = stripLeadingZeros(argValue.bytes);
+      return bytesEqual(candidateBytes, argBytes);
+    }
+    return false;
   });
 }

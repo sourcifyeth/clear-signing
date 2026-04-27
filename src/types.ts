@@ -309,26 +309,26 @@ export interface ChainInfoResult {
 /** Wallet-provided async resolvers for external data. */
 export interface ExternalDataProvider {
   /**
-   * Resolution for addressName formats. The wallet must verify if the
-   * address matches the provided type (e.g., "eoa", "contract", ...)
-   * if able to. If the type does not match, the wallet should indicate
-   * this in the result, such that the library can include a warning
-   * about the resolved field in the DisplayModel.
+   * Resolution for addressName formats. The wallet should verify whether the
+   * address matches any of the provided accepted types (e.g., "eoa", "contract", ...)
+   * if able to. If none of the types match, set typeMatch to false so the library
+   * can include a warning in the DisplayModel. When acceptedTypes is absent, the
+   * descriptor has no type constraint and typeMatch: true can be returned safely.
    */
   resolveLocalName?: (
     address: string,
-    type: string,
+    acceptedTypes?: DescriptorAddressType[],
   ) => Promise<AddressNameResult | null>;
   /**
-   * Resolution for addressName formats. The wallet must verify if the
-   * address matches the provided type (e.g., "eoa", "contract", ...)
-   * if able to. If the type does not match, the wallet should indicate
-   * this in the result, such that the library can include a warning
-   * about the resolved field in the DisplayModel.
+   * Resolution for addressName formats. The wallet should verify whether the
+   * address matches any of the provided accepted types (e.g., "eoa", "contract", ...)
+   * if able to. If none of the types match, set typeMatch to false so the library
+   * can include a warning in the DisplayModel. When acceptedTypes is absent, the
+   * descriptor has no type constraint and typeMatch: true can be returned safely.
    */
   resolveEnsName?: (
     address: string,
-    type: string,
+    acceptedTypes?: DescriptorAddressType[],
   ) => Promise<AddressNameResult | null>;
 
   /** Resolution for tokenAmount formats. */

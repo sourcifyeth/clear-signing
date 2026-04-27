@@ -1004,30 +1004,31 @@ export async function formatAddressName(
 
   const params = field.params ?? {};
 
-  const types = params.types;
+  const acceptedTypes = params.types;
   const sources = params.sources;
-  const expectedType = types?.[0] ?? "";
 
   const tryLocal = !sources || sources.includes("local");
   const tryEns = !sources || sources.includes("ens");
+
+  const typeMismatchWarning = acceptedTypes?.length
+    ? warn(
+        "ADDRESS_TYPE_MISMATCH",
+        `Resolved address type does not match expected types [${acceptedTypes.join(", ")}]`,
+      )
+    : undefined;
 
   // Try local wallet names
   if (tryLocal && externalDataProvider?.resolveLocalName) {
     try {
       const result = await externalDataProvider.resolveLocalName(
         normalized,
-        expectedType,
+        acceptedTypes,
       );
       if (result) {
         return {
           rendered: result.name,
           rawAddress: checksumAddress,
-          warning: result.typeMatch
-            ? undefined
-            : warn(
-                "ADDRESS_TYPE_MISMATCH",
-                `Resolved address type does not match expected type '${expectedType}'`,
-              ),
+          warning: result.typeMatch ? undefined : typeMismatchWarning,
         };
       }
     } catch {
@@ -1040,18 +1041,13 @@ export async function formatAddressName(
     try {
       const result = await externalDataProvider.resolveEnsName(
         normalized,
-        expectedType,
+        acceptedTypes,
       );
       if (result) {
         return {
           rendered: result.name,
           rawAddress: checksumAddress,
-          warning: result.typeMatch
-            ? undefined
-            : warn(
-                "ADDRESS_TYPE_MISMATCH",
-                `Resolved address type does not match expected type '${expectedType}'`,
-              ),
+          warning: result.typeMatch ? undefined : typeMismatchWarning,
         };
       }
     } catch {

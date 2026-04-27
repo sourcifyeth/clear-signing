@@ -24,7 +24,6 @@ import {
   hexToBytes,
   isAddressString,
   normalizeAddress,
-  parseBigInt,
 } from "./utils";
 
 /**
@@ -108,35 +107,42 @@ export type BytesSliceValue = { type: "bytes-slice"; bytes: Uint8Array };
  *   - `number`                       → uint (bigint)
  *   - `boolean`                      → bool
  *   - 42-char hex string             → address
- *   - numeric string (incl. "0x" hex)→ uint
  *   - other "0x…" hex string         → bytes
+ *   - `-`-prefixed decimal string    → int
+ *   - unsigned decimal string        → uint
  *   - any other string               → string
  *   - anything else                  → undefined
  *
- * Callers that need a specific type (e.g. `int` or `bytes` with a non-hex
- * input) must construct the ArgumentValue directly.
+ * Hex-prefixed strings never coerce to numbers — that would hide bytes values
+ * behind a valid BigInt parse. Numeric strings must be plain decimal digits.
  */
 export function toArgumentValue(value: unknown): ArgumentValue | undefined {
   if (typeof value === "number") {
-    return { type: "uint", value: BigInt(value) };
+    return value < 0
+      ? { type: "int", value: BigInt(value) }
+      : { type: "uint", value: BigInt(value) };
   }
   if (typeof value === "boolean") {
     return { type: "bool", value };
   }
   if (typeof value === "string") {
-    // Address check must precede parseBigInt — 42-char hex strings are valid
-    // BigInt literals but should be treated as addresses, not numbers.
     if (isAddressString(value)) {
       return { type: "address", bytes: hexToBytes(value) };
     }
-    const n = parseBigInt(value);
-    if (n !== undefined) return { type: "uint", value: n };
     if (value.startsWith("0x")) {
       try {
         return { type: "bytes", bytes: hexToBytes(value) };
       } catch {
-        /* fall through */
+        // Odd-length or malformed hex — reject rather than falling back to
+        // string: a "0x…" prefix signals an intended hex literal.
+        return undefined;
       }
+    }
+    if (/^-\d+$/.test(value)) {
+      return { type: "int", value: BigInt(value) };
+    }
+    if (/^\d+$/.test(value)) {
+      return { type: "uint", value: BigInt(value) };
     }
     return { type: "string", value };
   }
