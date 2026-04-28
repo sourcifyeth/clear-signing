@@ -196,7 +196,7 @@ interface ExternalDataProvider {
 
 ### Descriptor Sources
 
-Descriptors are fetched from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) on GitHub by default.
+Descriptors are fetched from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry) on GitHub by default.
 
 #### GitHub Registry (default)
 
@@ -207,7 +207,7 @@ const result = await format(tx, {
   descriptorResolverOptions: {
     type: "github",
     githubSource: {
-      repo: "LedgerHQ/clear-signing-erc7730-registry", // default
+      repo: "ethereum/clear-signing-erc7730-registry", // default
       ref: "master", // default
     },
   },
@@ -339,7 +339,7 @@ npm run test:watch # Watch mode
 ## Related
 
 - [EIP-7730 Specification](https://eips.ethereum.org/EIPS/eip-7730)
-- [Ledger Clear Signing Registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry)
+- [Ethereum Clear Signing Registry](https://github.com/ethereum/clear-signing-erc7730-registry)
 
 ## License
 

@@ -115,13 +115,13 @@ The resolver accepts `GitHubResolverOptions` or `EmbeddedResolverOptions` to con
 
 ### `GitHubResolverOptions`
 
-Fetches descriptors lazily from the [Ledger clear-signing registry](https://github.com/LedgerHQ/clear-signing-erc7730-registry) via the GitHub API. This is the default when no options are specified.
+Fetches descriptors lazily from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry) via the GitHub API. This is the default when no options are specified.
 
 ```typescript
 const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "github",
-    repo: "LedgerHQ/clear-signing-erc7730-registry", // optional, default
+    repo: "ethereum/clear-signing-erc7730-registry", // optional, default
     ref: "master", // optional, default
     index: myPrebuiltIndex, // optional: skip GitHub API call
   },

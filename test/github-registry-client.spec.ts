@@ -36,7 +36,7 @@ beforeEach(() => {
 
 describe("fetchRegistryFilePaths", () => {
   const TREE_URL =
-    "https://api.github.com/repos/LedgerHQ/clear-signing-erc7730-registry/git/trees/master?recursive=1";
+    "https://api.github.com/repos/ethereum/clear-signing-erc7730-registry/git/trees/master?recursive=1";
 
   it("returns only calldata-* and eip712-* files under registry/", async () => {
     mockFetch(
@@ -131,7 +131,7 @@ describe("fetchRegistryFilePaths", () => {
 describe("fetchRegistryFile", () => {
   it("fetches a descriptor by repo-relative path using the default source", async () => {
     const url =
-      "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master/registry/tether/calldata-usdt.json";
+      "https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/master/registry/tether/calldata-usdt.json";
     const body = { context: { contract: {} } };
 
     mockFetch(new Map([[url, body]]));

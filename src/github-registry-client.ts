@@ -1,17 +1,17 @@
 /**
- * GitHub-specific client for fetching ERC-7730 descriptors from the Ledger registry.
+ * GitHub-specific client for fetching ERC-7730 descriptors from the registry.
  *
- * Registry: https://github.com/LedgerHQ/clear-signing-erc7730-registry
+ * Registry: https://github.com/ethereum/clear-signing-erc7730-registry
  */
 
 import type { GitHubSource } from "./types";
 
-export const DEFAULT_REPO = "LedgerHQ/clear-signing-erc7730-registry";
+export const DEFAULT_REPO = "ethereum/clear-signing-erc7730-registry";
 export const DEFAULT_REF = "master";
 
 /**
  * Returns the raw content base URL for a GitHub repo/ref.
- * e.g. "https://raw.githubusercontent.com/LedgerHQ/clear-signing-erc7730-registry/master"
+ * e.g. "https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/master"
  */
 function rawBaseUrl(source: GitHubSource): string {
   return `https://raw.githubusercontent.com/${source.repo}/${source.ref}`;
@@ -19,7 +19,7 @@ function rawBaseUrl(source: GitHubSource): string {
 
 /**
  * Returns the GitHub API base URL for a repo.
- * e.g. "https://api.github.com/repos/LedgerHQ/clear-signing-erc7730-registry"
+ * e.g. "https://api.github.com/repos/ethereum/clear-signing-erc7730-registry"
  */
 function apiBaseUrl(source: GitHubSource): string {
   return `https://api.github.com/repos/${source.repo}`;
