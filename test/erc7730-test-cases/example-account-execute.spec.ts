@@ -364,7 +364,9 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
     expect(toField.value).toBe("Suspicious Contract");
     expect(toField.fieldType).toBe("address");
     expect(toField.format).toBe("addressName");
-    expect(toField.rawAddress).toBe(toChecksumAddress(hexToBytes(USDT_ADDRESS)));
+    expect(toField.rawAddress).toBe(
+      toChecksumAddress(hexToBytes(USDT_ADDRESS)),
+    );
     assert(toField.warning);
     expect(toField.warning.code).toBe("ADDRESS_TYPE_MISMATCH");
   });
