@@ -540,7 +540,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     // Top-level .[] field produces a DisplayFieldGroup
     const group = result.fields[0];
     assert(isFieldGroup(group));
-    expect(group.label).toBe("Nested Calls");
+    expect(group.label).toBeUndefined();
     expect(group.warning).toBeUndefined();
     expect(group.fields).toHaveLength(1);
 
@@ -600,7 +600,7 @@ describe("example-array-iteration.json — batchExecute", () => {
 
     const group = result.fields[0];
     assert(isFieldGroup(group));
-    expect(group.label).toBe("Nested Calls");
+    expect(group.label).toBeUndefined();
     expect(group.warning).toBeUndefined();
     expect(group.fields).toHaveLength(2);
 

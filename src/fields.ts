@@ -151,7 +151,7 @@ async function processArrayField(
   if ("warnings" in iterResult) return iterResult;
 
   return {
-    group: { label: fieldSpec.label, fields: iterResult.fields },
+    group: { fields: iterResult.fields },
   };
 }
 
