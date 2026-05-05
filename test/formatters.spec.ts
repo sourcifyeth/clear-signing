@@ -30,7 +30,7 @@ import {
   typeMismatch,
   renderField,
 } from "../src/formatters.js";
-import { hexToBytes, keccak256Str } from "../src/utils.js";
+import { hexToBytes, toChecksumAddress } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1457,7 +1457,7 @@ describe("calldata format", () => {
     expect(result.warning?.code).toBe("EMBEDDED_CALLDATA_NOT_SUPPORTED");
   });
 
-  it("returns keccak hash and calldataDisplay on success", async () => {
+  it("returns calldata hex and embeddedCalldata on success", async () => {
     const mockDisplay = {
       intent: "Do something",
       fields: [],
@@ -1475,9 +1475,13 @@ describe("calldata format", () => {
       mock,
     );
 
-    expect(result.calldataDisplay).toEqual(mockDisplay);
-    expect(result.rendered).toBe(keccak256Str("0xdeadbeef"));
+    expect(result.rendered).toBe("0xdeadbeef");
     expect(result.warning).toBeUndefined();
+    expect(result.embeddedCalldata?.display).toEqual(mockDisplay);
+    expect(result.embeddedCalldata?.callee).toBe(
+      toChecksumAddress(hexToBytes(calleeAddr)),
+    );
+    expect(result.embeddedCalldata?.chainId).toBeUndefined();
 
     expect(mock).toHaveBeenCalledWith({
       chainId: 1,
@@ -1530,7 +1534,7 @@ describe("calldata format", () => {
       return undefined;
     };
 
-    await renderField(
+    const result = await renderField(
       calldataValue,
       "calldata",
       { params: { callee: calleeAddr, chainIdPath: "destChain" } },
@@ -1544,6 +1548,7 @@ describe("calldata format", () => {
     expect(mockFormatCalldata).toHaveBeenCalledWith(
       expect.objectContaining({ chainId: 42 }),
     );
+    expect(result.embeddedCalldata?.chainId).toBe(42);
   });
 
   it("returns FORMAT_PARAM_RESOLUTION_ERROR when chainIdPath cannot be resolved", async () => {
@@ -1603,7 +1608,7 @@ describe("calldata format", () => {
     );
   });
 
-  it("does not include selector in the rendered hash", async () => {
+  it("includes selector in the rendered value", async () => {
     const mock = vi.fn().mockResolvedValue({ intent: "test" });
 
     const result = await renderField(
@@ -1617,8 +1622,7 @@ describe("calldata format", () => {
       mock,
     );
 
-    // Hash should be of the raw bytes only, not including the prepended selector
-    expect(result.rendered).toBe(keccak256Str("0xdeadbeef"));
+    expect(result.rendered).toBe("0x12345678deadbeef");
   });
 });
 

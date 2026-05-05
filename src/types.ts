@@ -120,26 +120,44 @@ export interface RawCalldataFallback {
 }
 
 /**
+ * Present on a DisplayField when format is "calldata". Contains the formatted
+ * nested transaction, the resolved callee address, and the chain ID if it
+ * differs from the outer transaction.
+ */
+export interface EmbeddedCalldata {
+  /** Formatted display model for the nested transaction. */
+  display: DisplayModel;
+  /** Target address of the nested call (EIP-55 checksum format). */
+  callee?: string;
+  /**
+   * Chain ID of the nested call — present only when it differs from the outer
+   * container's chain ID.
+   */
+  chainId?: number;
+}
+
+/**
  * A single labeled field to display to the user.
  *
  * When clear-signing transactions with embedded calldata (nested
- * transactions), a calldata formatted field will have a calldataDisplay
- * property which is formatted via resolving a descriptor file for the
- * embedded calldata.
+ * transactions), a calldata formatted field will have an embeddedCalldata
+ * property containing the formatted nested transaction and resolved callee.
  */
 export interface DisplayField {
   /** Label to show in the UI for this field. */
   label: string;
-  /** Value to show in the UI for this field */
+  /** Value to show in the UI for this field. */
   value: string;
 
   /**
-   * Embedded calldata (format: "calldata") is formatted into a nested
-   * DisplayModel. The value property will be the keccak hash of the embedded
-   * calldata in this case. Wallets should prefer to render the embedded
-   * DisplayModel over the value property.
+   * Present when format is "calldata". The value property holds the full
+   * embedded calldata as a hex string (including any prepended selector).
+   * Wallets should prefer to render embeddedCalldata.display over the raw
+   * value property. If no matching ERC-7730 descriptor is found or if the
+   * wallet does not support embedded calldata, it MAY display a hash of the
+   * value property (embedded calldata) instead.
    */
-  calldataDisplay?: DisplayModel;
+  embeddedCalldata?: EmbeddedCalldata;
 
   /**
    * The fieldType and format properties can be used to show type-specific

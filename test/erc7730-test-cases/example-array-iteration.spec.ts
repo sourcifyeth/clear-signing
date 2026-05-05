@@ -10,7 +10,6 @@ import type { DisplayModel, ExternalDataProvider } from "../../src/types";
 import {
   bytesToHex,
   hexToBytes,
-  keccak256Str,
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils";
@@ -134,7 +133,7 @@ describe("example-array-iteration.json — distribute", () => {
     expect(amountField.format).toBe("amount");
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.tokenAddress).toBeUndefined();
-    expect(amountField.calldataDisplay).toBeUndefined();
+    expect(amountField.embeddedCalldata).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
     // Single "Recipients and Fees" group containing all 4 indexed fields (index 0 then index 1)
@@ -156,7 +155,7 @@ describe("example-array-iteration.json — distribute", () => {
     expect(recipient0.format).toBe("addressName");
     expect(recipient0.rawAddress).toBe(checksumRecipient1);
     expect(recipient0.tokenAddress).toBeUndefined();
-    expect(recipient0.calldataDisplay).toBeUndefined();
+    expect(recipient0.embeddedCalldata).toBeUndefined();
     expect(recipient0.warning).toBeUndefined();
 
     const percentage0 = group.fields[1];
@@ -167,7 +166,7 @@ describe("example-array-iteration.json — distribute", () => {
     expect(percentage0.format).toBe("unit");
     expect(percentage0.rawAddress).toBeUndefined();
     expect(percentage0.tokenAddress).toBeUndefined();
-    expect(percentage0.calldataDisplay).toBeUndefined();
+    expect(percentage0.embeddedCalldata).toBeUndefined();
     expect(percentage0.warning).toBeUndefined();
 
     // Index 1: recipient[1] + percentage[1]
@@ -179,7 +178,7 @@ describe("example-array-iteration.json — distribute", () => {
     expect(recipient1.format).toBe("addressName");
     expect(recipient1.rawAddress).toBe(checksumRecipient2);
     expect(recipient1.tokenAddress).toBeUndefined();
-    expect(recipient1.calldataDisplay).toBeUndefined();
+    expect(recipient1.embeddedCalldata).toBeUndefined();
     expect(recipient1.warning).toBeUndefined();
 
     const percentage1 = group.fields[3];
@@ -190,7 +189,7 @@ describe("example-array-iteration.json — distribute", () => {
     expect(percentage1.format).toBe("unit");
     expect(percentage1.rawAddress).toBeUndefined();
     expect(percentage1.tokenAddress).toBeUndefined();
-    expect(percentage1.calldataDisplay).toBeUndefined();
+    expect(percentage1.embeddedCalldata).toBeUndefined();
     expect(percentage1.warning).toBeUndefined();
 
     assert(result.metadata);
@@ -470,7 +469,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     expect(amountField.format).toBe("amount");
     expect(amountField.rawAddress).toBeUndefined();
     expect(amountField.tokenAddress).toBeUndefined();
-    expect(amountField.calldataDisplay).toBeUndefined();
+    expect(amountField.embeddedCalldata).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
     // Recipients and Fees group
@@ -490,7 +489,7 @@ describe("example-array-iteration.json — batchExecute", () => {
       toChecksumAddress(hexToBytes(recipientAddr)),
     );
     expect(recipient.tokenAddress).toBeUndefined();
-    expect(recipient.calldataDisplay).toBeUndefined();
+    expect(recipient.embeddedCalldata).toBeUndefined();
     expect(recipient.warning).toBeUndefined();
 
     const percentage = group.fields[1];
@@ -501,7 +500,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     expect(percentage.format).toBe("unit");
     expect(percentage.rawAddress).toBeUndefined();
     expect(percentage.tokenAddress).toBeUndefined();
-    expect(percentage.calldataDisplay).toBeUndefined();
+    expect(percentage.embeddedCalldata).toBeUndefined();
     expect(percentage.warning).toBeUndefined();
 
     assert(nested.metadata);
@@ -547,18 +546,20 @@ describe("example-array-iteration.json — batchExecute", () => {
     const calldataField = group.fields[0];
     assert(!isFieldGroup(calldataField));
     expect(calldataField.label).toBe("Nested Calls");
-    expect(calldataField.value).toBe(
-      `Transaction 0 ${keccak256Str(INNER_DISTRIBUTE_1)}`,
-    );
+    expect(calldataField.value).toBe(`Transaction 0 0x${INNER_DISTRIBUTE_1}`);
     expect(calldataField.fieldType).toBe("bytes");
     expect(calldataField.format).toBe("calldata");
     expect(calldataField.rawAddress).toBeUndefined();
     expect(calldataField.tokenAddress).toBeUndefined();
     expect(calldataField.warning).toBeUndefined();
 
-    assert(calldataField.calldataDisplay);
+    assert(calldataField.embeddedCalldata);
+    expect(calldataField.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
+    );
+    expect(calldataField.embeddedCalldata.chainId).toBeUndefined();
     assertNestedDistribute(
-      calldataField.calldataDisplay,
+      calldataField.embeddedCalldata.display,
       RECIPIENT_1,
       RECIPIENT_1_NAME,
     );
@@ -608,18 +609,20 @@ describe("example-array-iteration.json — batchExecute", () => {
     const field0 = group.fields[0];
     assert(!isFieldGroup(field0));
     expect(field0.label).toBe("Nested Calls");
-    expect(field0.value).toBe(
-      `Transaction 0 ${keccak256Str(INNER_DISTRIBUTE_1)}`,
-    );
+    expect(field0.value).toBe(`Transaction 0 0x${INNER_DISTRIBUTE_1}`);
     expect(field0.fieldType).toBe("bytes");
     expect(field0.format).toBe("calldata");
     expect(field0.rawAddress).toBeUndefined();
     expect(field0.tokenAddress).toBeUndefined();
     expect(field0.warning).toBeUndefined();
 
-    assert(field0.calldataDisplay);
+    assert(field0.embeddedCalldata);
+    expect(field0.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
+    );
+    expect(field0.embeddedCalldata.chainId).toBeUndefined();
     assertNestedDistribute(
-      field0.calldataDisplay,
+      field0.embeddedCalldata.display,
       RECIPIENT_1,
       RECIPIENT_1_NAME,
     );
@@ -628,18 +631,20 @@ describe("example-array-iteration.json — batchExecute", () => {
     const field1 = group.fields[1];
     assert(!isFieldGroup(field1));
     expect(field1.label).toBe("Nested Calls");
-    expect(field1.value).toBe(
-      `Transaction 1 ${keccak256Str(INNER_DISTRIBUTE_2)}`,
-    );
+    expect(field1.value).toBe(`Transaction 1 0x${INNER_DISTRIBUTE_2}`);
     expect(field1.fieldType).toBe("bytes");
     expect(field1.format).toBe("calldata");
     expect(field1.rawAddress).toBeUndefined();
     expect(field1.tokenAddress).toBeUndefined();
     expect(field1.warning).toBeUndefined();
 
-    assert(field1.calldataDisplay);
+    assert(field1.embeddedCalldata);
+    expect(field1.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
+    );
+    expect(field1.embeddedCalldata.chainId).toBeUndefined();
     assertNestedDistribute(
-      field1.calldataDisplay,
+      field1.embeddedCalldata.display,
       RECIPIENT_2,
       RECIPIENT_2_NAME,
     );

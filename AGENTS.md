@@ -221,7 +221,7 @@ spec. Do not add them to `DescriptorFormatSpec`.
 
 Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`, `chainId`
 
-Not yet implemented: `calldata`, `interoperableAddressName`
+Not yet implemented: `interoperableAddressName`
 
 **Spec-compliance notes:**
 
@@ -336,9 +336,10 @@ Tests live in `test/`. Current test files:
   `intent`, `interpolatedIntent`, `fields`, `metadata` (including `owner`, `contractName`, `info`),
   `rawCalldataFallback`, `warnings`.
 - **Test all properties** of each `DisplayField`:
-  `label`, `value`, `fieldType`, `format`, `warning`, `rawAddress`, `tokenAddress`, `calldataDisplay`.
+  `label`, `value`, `fieldType`, `format`, `warning`, `rawAddress`, `tokenAddress`, `embeddedCalldata`.
   Assert that properties not expected to be present are `undefined`.
-- **Test nested `DisplayModel`s** (e.g. `calldataDisplay`) with the same thoroughness.
+- **Test nested `DisplayModel`s** (e.g. `embeddedCalldata.display`) with the same thoroughness.
+  For calldata fields also assert `embeddedCalldata.callee` and `embeddedCalldata.chainId`.
   Extract a helper function (e.g. `assertNestedDistribute`) when the same nested structure
   is verified in multiple tests.
 - **Each test should verify the actual value**, not just that something exists.

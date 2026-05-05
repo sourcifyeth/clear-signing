@@ -8,7 +8,7 @@ import type {
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
   DescriptorMetadata,
-  DisplayModel,
+  EmbeddedCalldata,
   ExternalDataProvider,
   FormatCalldata,
   NftCollectionNameResult,
@@ -28,7 +28,6 @@ import {
   formatAmountWithDecimals,
   hexToBytes,
   isAddressString,
-  keccak256,
   parseBigInt,
   toChecksumAddress,
   warn,
@@ -41,7 +40,7 @@ export type FieldFormatOptions = Pick<
 
 export type RenderFieldResult = {
   rendered: string;
-  calldataDisplay?: DisplayModel;
+  embeddedCalldata?: EmbeddedCalldata;
   warning?: Warning;
   tokenAddress?: string;
   rawAddress?: string;
@@ -852,8 +851,6 @@ async function formatCalldata(
     };
   }
 
-  const rendered = bytesToHex(keccak256(value.bytes));
-
   const selector = resolveSelectorParam(fieldOptions, resolvePath);
   const data = selector
     ? bytesToHex(new Uint8Array([...selector, ...value.bytes]))
@@ -867,7 +864,13 @@ async function formatCalldata(
 
   const result = await formatCalldata(tx);
 
-  return { rendered, calldataDisplay: result };
+  const embedded: EmbeddedCalldata = {
+    display: result,
+    callee: toChecksumAddress(hexToBytes(callee)),
+  };
+  if (chainId !== containerChainId) embedded.chainId = chainId;
+
+  return { rendered: data, embeddedCalldata: embedded };
 }
 
 /**

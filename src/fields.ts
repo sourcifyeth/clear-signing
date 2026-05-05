@@ -212,7 +212,7 @@ async function processSingleField(
 
   const {
     rendered,
-    calldataDisplay,
+    embeddedCalldata,
     warning: fieldWarning,
     tokenAddress,
     rawAddress,
@@ -245,7 +245,7 @@ async function processSingleField(
     warning: fieldWarning,
     ...(rawAddress && { rawAddress }),
     ...(tokenAddress && { tokenAddress }),
-    ...(calldataDisplay && { calldataDisplay }),
+    ...(embeddedCalldata && { embeddedCalldata }),
   };
 
   if (merged.path) ctx.renderedValues.set(merged.path, finalValue);

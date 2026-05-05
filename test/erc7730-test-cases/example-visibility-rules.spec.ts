@@ -148,7 +148,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
     expect(toField.format).toBe("addressName");
     expect(toField.rawAddress).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(toField.tokenAddress).toBeUndefined();
-    expect(toField.calldataDisplay).toBeUndefined();
+    expect(toField.embeddedCalldata).toBeUndefined();
     expect(toField.warning).toBeUndefined();
 
     const amountField = result.fields[1];
@@ -161,7 +161,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
       toChecksumAddress(hexToBytes(CONTRACT_ADDRESS)),
     );
     expect(amountField.rawAddress).toBeUndefined();
-    expect(amountField.calldataDisplay).toBeUndefined();
+    expect(amountField.embeddedCalldata).toBeUndefined();
     expect(amountField.warning).toBeUndefined();
 
     const referrerField = result.fields[2];
@@ -174,7 +174,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
       toChecksumAddress(hexToBytes(REFERRER)),
     );
     expect(referrerField.tokenAddress).toBeUndefined();
-    expect(referrerField.calldataDisplay).toBeUndefined();
+    expect(referrerField.embeddedCalldata).toBeUndefined();
     expect(referrerField.warning).toBeUndefined();
 
     const feeField = result.fields[3];
@@ -185,7 +185,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
     expect(feeField.format).toBe("amount");
     expect(feeField.tokenAddress).toBeUndefined();
     expect(feeField.rawAddress).toBeUndefined();
-    expect(feeField.calldataDisplay).toBeUndefined();
+    expect(feeField.embeddedCalldata).toBeUndefined();
     expect(feeField.warning).toBeUndefined();
 
     expect(result.interpolatedIntent).toBe(

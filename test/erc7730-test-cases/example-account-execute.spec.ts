@@ -15,7 +15,6 @@ import type {
 import {
   bytesToHex,
   hexToBytes,
-  keccak256Str,
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils";
@@ -165,7 +164,7 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
     expect(toField.tokenAddress).toBeUndefined();
-    expect(toField.calldataDisplay).toBeUndefined();
+    expect(toField.embeddedCalldata).toBeUndefined();
     expect(toField.warning).toBeUndefined();
 
     // Field 1 — `value` amount (native currency, 0 wei → 0 ETH)
@@ -177,23 +176,28 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
     expect(valueField.format).toBe("amount");
     expect(valueField.rawAddress).toBeUndefined();
     expect(valueField.tokenAddress).toBeUndefined();
-    expect(valueField.calldataDisplay).toBeUndefined();
+    expect(valueField.embeddedCalldata).toBeUndefined();
     expect(valueField.warning).toBeUndefined();
 
     // Field 2 — `data` calldata: nested display model for inner transfer()
     const dataField = result.fields[2];
     assert(!isFieldGroup(dataField));
     expect(dataField.label).toBe("Call Data");
-    expect(dataField.value).toBe(keccak256Str(innerTransfer));
+    expect(dataField.value).toBe(innerTransfer);
     expect(dataField.fieldType).toBe("bytes");
     expect(dataField.format).toBe("calldata");
     expect(dataField.rawAddress).toBeUndefined();
     expect(dataField.tokenAddress).toBeUndefined();
     expect(dataField.warning).toBeUndefined();
 
+    assert(dataField.embeddedCalldata);
+    expect(dataField.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(USDT_ADDRESS)),
+    );
+    expect(dataField.embeddedCalldata.chainId).toBeUndefined();
+
     // Nested DisplayModel produced by recursively formatting the inner calldata.
-    assert(dataField.calldataDisplay);
-    const nested = dataField.calldataDisplay;
+    const nested = dataField.embeddedCalldata.display;
     expect(nested.intent).toBe("Send");
 
     assert(nested.fields);
@@ -207,7 +211,7 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
     expect(nestedTo.format).toBe("addressName");
     expect(nestedTo.rawAddress).toBe(toChecksumAddress(hexToBytes(RECIPIENT)));
     expect(nestedTo.tokenAddress).toBeUndefined();
-    expect(nestedTo.calldataDisplay).toBeUndefined();
+    expect(nestedTo.embeddedCalldata).toBeUndefined();
     expect(nestedTo.warning).toBeUndefined();
 
     const nestedAmount = nested.fields[1];
@@ -220,7 +224,7 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
     expect(nestedAmount.rawAddress).toBeUndefined();
-    expect(nestedAmount.calldataDisplay).toBeUndefined();
+    expect(nestedAmount.embeddedCalldata).toBeUndefined();
     expect(nestedAmount.warning).toBeUndefined();
 
     expect(nested.interpolatedIntent).toBe(
@@ -306,15 +310,19 @@ describe("example-account-execute.json — execute(address to, uint256 value, by
     const dataField = result.fields[2];
     assert(!isFieldGroup(dataField));
     expect(dataField.label).toBe("Call Data");
-    expect(dataField.value).toBe(keccak256Str(innerData));
+    expect(dataField.value).toBe(innerData);
     expect(dataField.fieldType).toBe("bytes");
     expect(dataField.format).toBe("calldata");
     expect(dataField.rawAddress).toBeUndefined();
     expect(dataField.tokenAddress).toBeUndefined();
     expect(dataField.warning).toBeUndefined();
 
-    assert(dataField.calldataDisplay);
-    const nested = dataField.calldataDisplay;
+    assert(dataField.embeddedCalldata);
+    expect(dataField.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(UNKNOWN_CONTRACT)),
+    );
+    expect(dataField.embeddedCalldata.chainId).toBeUndefined();
+    const nested = dataField.embeddedCalldata.display;
 
     assert(nested.rawCalldataFallback);
     expect(nested.rawCalldataFallback.selector).toBe("0xdeadbeef");

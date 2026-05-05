@@ -123,7 +123,7 @@ describe("1inch AggregationRouterV6", () => {
       expect(sendField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(SRC_TOKEN)),
       );
-      expect(sendField.calldataDisplay).toBeUndefined();
+      expect(sendField.embeddedCalldata).toBeUndefined();
       expect(sendField.rawAddress).toBeUndefined();
       expect(sendField.warning).toBeUndefined();
 
@@ -137,7 +137,7 @@ describe("1inch AggregationRouterV6", () => {
       expect(receiveField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(DST_TOKEN)),
       );
-      expect(receiveField.calldataDisplay).toBeUndefined();
+      expect(receiveField.embeddedCalldata).toBeUndefined();
       expect(receiveField.rawAddress).toBeUndefined();
       expect(receiveField.warning).toBeUndefined();
 
@@ -152,7 +152,7 @@ describe("1inch AggregationRouterV6", () => {
         toChecksumAddress(hexToBytes(BENEFICIARY)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
-      expect(beneficiaryField.calldataDisplay).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
       expect(beneficiaryField.warning).toBeUndefined();
 
       // Metadata — merged from common (owner, info) and main (contractName)
@@ -243,7 +243,7 @@ describe("1inch AggregationRouterV6", () => {
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
-      expect(sendField.calldataDisplay).toBeUndefined();
+      expect(sendField.embeddedCalldata).toBeUndefined();
       expect(sendField.rawAddress).toBeUndefined();
       expect(sendField.warning).toBeUndefined();
 
@@ -257,7 +257,7 @@ describe("1inch AggregationRouterV6", () => {
       expect(receiveField.tokenAddress).toBe(
         toChecksumAddress(hexToBytes(WETH)),
       );
-      expect(receiveField.calldataDisplay).toBeUndefined();
+      expect(receiveField.embeddedCalldata).toBeUndefined();
       expect(receiveField.rawAddress).toBeUndefined();
       expect(receiveField.warning).toBeUndefined();
 
@@ -272,7 +272,7 @@ describe("1inch AggregationRouterV6", () => {
         toChecksumAddress(hexToBytes(BENEFICIARY)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
-      expect(beneficiaryField.calldataDisplay).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
       expect(beneficiaryField.warning).toBeUndefined();
 
       // Field 3: Expiration time — date from goodUntil.[-4:] byte slice
@@ -283,7 +283,7 @@ describe("1inch AggregationRouterV6", () => {
       expect(expirationField.fieldType).toBe("uint");
       expect(expirationField.format).toBe("date");
       expect(expirationField.tokenAddress).toBeUndefined();
-      expect(expirationField.calldataDisplay).toBeUndefined();
+      expect(expirationField.embeddedCalldata).toBeUndefined();
       expect(expirationField.rawAddress).toBeUndefined();
       expect(expirationField.warning).toBeUndefined();
 

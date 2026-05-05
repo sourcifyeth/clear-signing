@@ -16,7 +16,6 @@ import type {
 import {
   bytesToHex,
   hexToBytes,
-  keccak256Str,
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils";
@@ -233,23 +232,28 @@ describe("example-userops-eip712.json — PackedUserOperation", () => {
       toChecksumAddress(hexToBytes(SMART_ACCOUNT)),
     );
     expect(senderField.tokenAddress).toBeUndefined();
-    expect(senderField.calldataDisplay).toBeUndefined();
+    expect(senderField.embeddedCalldata).toBeUndefined();
     expect(senderField.warning).toBeUndefined();
 
     const callDataField = result.fields[1];
     assert(!isFieldGroup(callDataField));
     expect(callDataField.label).toBe("Embedded Call Data");
-    expect(callDataField.value).toBe(keccak256Str(accountCallData));
+    expect(callDataField.value).toBe(accountCallData);
     expect(callDataField.fieldType).toBe("bytes");
     expect(callDataField.format).toBe("calldata");
     expect(callDataField.rawAddress).toBeUndefined();
     expect(callDataField.tokenAddress).toBeUndefined();
     expect(callDataField.warning).toBeUndefined();
 
+    assert(callDataField.embeddedCalldata);
+    expect(callDataField.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(SMART_ACCOUNT)),
+    );
+    expect(callDataField.embeddedCalldata.chainId).toBeUndefined();
+
     // First nested DisplayModel: the UserOperation's callData is executed on
     // the sender (the smart account), and decodes as an execute() call.
-    assert(callDataField.calldataDisplay);
-    const accountDisplay = callDataField.calldataDisplay;
+    const accountDisplay = callDataField.embeddedCalldata.display;
     expect(accountDisplay.intent).toBe("Execute Transaction");
 
     assert(accountDisplay.fields);
@@ -265,7 +269,7 @@ describe("example-userops-eip712.json — PackedUserOperation", () => {
       toChecksumAddress(hexToBytes(USDT_ADDRESS)),
     );
     expect(nestedTo.tokenAddress).toBeUndefined();
-    expect(nestedTo.calldataDisplay).toBeUndefined();
+    expect(nestedTo.embeddedCalldata).toBeUndefined();
     expect(nestedTo.warning).toBeUndefined();
 
     const nestedValue = accountDisplay.fields[1];
@@ -280,12 +284,16 @@ describe("example-userops-eip712.json — PackedUserOperation", () => {
     const nestedData = accountDisplay.fields[2];
     assert(!isFieldGroup(nestedData));
     expect(nestedData.label).toBe("Call Data");
-    expect(nestedData.value).toBe(keccak256Str(innerTransfer));
+    expect(nestedData.value).toBe(innerTransfer);
     expect(nestedData.fieldType).toBe("bytes");
     expect(nestedData.format).toBe("calldata");
 
-    assert(nestedData.calldataDisplay);
-    const transferDisplay = nestedData.calldataDisplay;
+    assert(nestedData.embeddedCalldata);
+    expect(nestedData.embeddedCalldata.callee).toBe(
+      toChecksumAddress(hexToBytes(USDT_ADDRESS)),
+    );
+    expect(nestedData.embeddedCalldata.chainId).toBeUndefined();
+    const transferDisplay = nestedData.embeddedCalldata.display;
     expect(transferDisplay.intent).toBe("Send");
 
     assert(transferDisplay.fields);
@@ -375,7 +383,7 @@ describe("example-userops-eip712.json — PackedUserOperation", () => {
     expect(initCodeField.format).toBe("raw");
     expect(initCodeField.rawAddress).toBeUndefined();
     expect(initCodeField.tokenAddress).toBeUndefined();
-    expect(initCodeField.calldataDisplay).toBeUndefined();
+    expect(initCodeField.embeddedCalldata).toBeUndefined();
     expect(initCodeField.warning).toBeUndefined();
 
     const paymasterField = result.fields[3];
@@ -386,7 +394,7 @@ describe("example-userops-eip712.json — PackedUserOperation", () => {
     expect(paymasterField.format).toBe("raw");
     expect(paymasterField.rawAddress).toBeUndefined();
     expect(paymasterField.tokenAddress).toBeUndefined();
-    expect(paymasterField.calldataDisplay).toBeUndefined();
+    expect(paymasterField.embeddedCalldata).toBeUndefined();
     expect(paymasterField.warning).toBeUndefined();
 
     expect(result.warnings).toBeUndefined();
