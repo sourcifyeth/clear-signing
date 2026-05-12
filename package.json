@@ -1,5 +1,5 @@
 {
-  "name": "@sourcifyeth/clear-signing",
+  "name": "@ethereum-sourcify/clear-signing",
   "version": "0.1.0",
   "description": "Ethereum clear signing library for human-readable transaction previews",
   "type": "module",

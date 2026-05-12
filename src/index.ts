@@ -3,7 +3,7 @@
  *
  * @example
  * ```typescript
- * import { format, formatTypedData } from '@sourcifyeth/clear-signing';
+ * import { format, formatTypedData } from '@ethereum-sourcify/clear-signing';
  *
  * // Format a transaction
  * const result = await format({ chainId: 1, to: '0xdAC17F958D2ee523a2206206994597C13D831ec7', data: '0x095ea7b3...' });
@@ -266,6 +266,6 @@ export async function formatTypedData(
 function unexpectedErrorWarning(error: unknown): Warning {
   return warn(
     "UNEXPECTED_LIB_ERROR",
-    `Encountered an unexpected error in @sourcifyeth/clear-signing. Please report to the maintainers: ${String(error)}`,
+    `Encountered an unexpected error in @ethereum-sourcify/clear-signing. Please report to the maintainers: ${String(error)}`,
   );
 }

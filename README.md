@@ -1,13 +1,14 @@
-# @sourcifyeth/clear-signing
+# @ethereum-sourcify/clear-signing
 
-This library transforms raw transaction calldata and typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
+A TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](https://eips.ethereum.org/EIPS/eip-7730).
 
-<!--
+This library transforms raw transaction calldata and EIP-712 typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
+
 ## Installation
 
 ```bash
-npm install @sourcifyeth/clear-signing
-``` -->
+npm install @ethereum-sourcify/clear-signing
+```
 
 ## Quick Start
 
@@ -16,7 +17,7 @@ import {
   format,
   formatTypedData,
   createGitHubRegistryIndex,
-} from "@sourcifyeth/clear-signing";
+} from "@ethereum-sourcify/clear-signing";
 
 // Build the registry index once at app build time or startup.
 // This fetches the descriptor file tree from GitHub and indexes it
@@ -201,7 +202,7 @@ Descriptors are fetched from the [Ethereum clear-signing registry](https://githu
 #### GitHub Registry (default)
 
 ```typescript
-import { format } from "@sourcifyeth/clear-signing";
+import { format } from "@ethereum-sourcify/clear-signing";
 
 const result = await format(tx, {
   descriptorResolverOptions: {
@@ -219,8 +220,8 @@ const result = await format(tx, {
 For bundled descriptors or testing, build your own index and descriptors will be loaded via JS module resolution:
 
 ```typescript
-import { format } from "@sourcifyeth/clear-signing";
-import type { RegistryIndex } from "@sourcifyeth/clear-signing";
+import { format } from "@ethereum-sourcify/clear-signing";
+import type { RegistryIndex } from "@ethereum-sourcify/clear-signing";
 
 const index: RegistryIndex = {
   calldataIndex: {
