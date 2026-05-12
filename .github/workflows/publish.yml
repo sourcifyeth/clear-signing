@@ -10,13 +10,16 @@ jobs:
   publish:
     runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
@@ -24,6 +27,8 @@ jobs:
       - run: npm run check
 
       - run: npm test
+
+      - run: npm run build
 
       - name: Verify tag matches package.json version
         if: github.event_name == 'push'
@@ -43,6 +48,15 @@ jobs:
             echo "$PKG_NAME@$PKG_VERSION is already published. Skipping."
             exit 0
           fi
-          npm publish --access public
+          npm publish
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists. Skipping."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" --generate-notes
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}

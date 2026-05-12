@@ -19,7 +19,6 @@
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run clean && npm run build",
     "fix": "npm run fix:prettier && npm run fix:eslint",
     "fix:prettier": "prettier \"**/*.{ts,js,md,json}\" --write",
     "fix:eslint": "eslint \"src/**/*.ts\" \"test/**/*.ts\" --fix",
