@@ -137,13 +137,20 @@ function findFormatSpec(
   return formats[encodeTypeStr];
 }
 
+/** Extract the primary type name from an EIP-712 `encodeType` string. */
+export function extractPrimaryType(encodeTypeStr: string): string | undefined {
+  const open = encodeTypeStr.indexOf("(");
+  if (open <= 0) return undefined;
+  return encodeTypeStr.slice(0, open);
+}
+
 /**
  * Compute the EIP-712 encodeType string for a given primary type.
  *
  * encodeType(T) = "TypeName(field0Type field0Name,...)" followed by all
  * referenced struct types sorted alphabetically (EIP-712 spec).
  */
-function computeEncodeType(
+export function computeEncodeType(
   primaryType: string,
   types: Record<string, TypeMember[]>,
 ): string | undefined {

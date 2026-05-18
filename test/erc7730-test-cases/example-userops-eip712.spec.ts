@@ -19,7 +19,7 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+import { buildEmbeddedResolverOpts, computeEncodeTypeOrThrow } from "../utils";
 
 // Smart account implementation address — a valid 20-byte hex (the original spec
 // file used "0xYourImplementationAddress" as a placeholder; swapped here so that
@@ -94,6 +94,11 @@ const PACKED_USER_OPERATION_TYPES = {
     { name: "paymasterAndData", type: "bytes" },
   ],
 };
+
+const PACKED_USER_OPERATION_ENCODE_TYPE = computeEncodeTypeOrThrow(
+  "PackedUserOperation",
+  PACKED_USER_OPERATION_TYPES,
+);
 
 function buildTypedData(overrides: {
   callData: string;
@@ -176,6 +181,7 @@ function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
           chainId: CHAIN_ID,
           address: SMART_ACCOUNT,
           file: "example-userops-eip712.json",
+          encodeTypes: [PACKED_USER_OPERATION_ENCODE_TYPE],
         },
       ],
       calldataDescriptorFiles: [

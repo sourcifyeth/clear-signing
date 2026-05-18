@@ -65,7 +65,9 @@ src/
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
   (`findFormatSpec`, `computeEncodeType`), message value navigation (`getMessageValue`),
-  and type resolution (`resolveFieldType`). All internals are module-private.
+  and type resolution (`resolveFieldType`). Exports `computeEncodeType` and
+  `extractPrimaryType` for `resolver.ts` and `github-registry-index.ts`; the
+  rest is module-private.
 
 ## Key Data Flow
 
@@ -85,7 +87,10 @@ src/
 
    ```
    formatTypedData(typedData, opts?)
-   → DescriptorResolver.resolveTypedDataDescriptor()
+   → DescriptorResolver.resolveTypedDataDescriptor(typedData)
+       → looks up (chainId, verifyingContract, primaryType) in typedDataIndex
+       → disambiguates entries by matching keccak256(encodeType) against
+         each entry's encodeTypeHashes
    → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
        → findFormatSpec() matches display.formats key via encodeType string
        → applyFieldFormats() (from fields.ts) renders each field
@@ -132,13 +137,13 @@ const opts: FormatOptions = {
 
 1. `github-registry-index.ts` fetches the GitHub Git Trees API once and indexes all `calldata-*.json` and `eip712-*.json` descriptor files.
 2. Each descriptor is indexed by CAIP-10 key (`eip155:{chainId}:{address}`) into two maps:
-   - `calldataIndex` — keyed by `context.contract.deployments[].{chainId, address}`
-   - `typedDataIndex` — keyed by `context.eip712.deployments[].{chainId, address}`
+   - `calldataIndex: Record<caip10, path>` — keyed by `context.contract.deployments[].{chainId, address}`
+   - `typedDataIndex: Record<caip10, Record<primaryType, TypedDataIndexEntry[]>>` — keyed by `context.eip712.deployments[].{chainId, address}`, then by primary type. Each entry carries the descriptor `path` and the keccak256 hashes of every `encodeType` it declares (`display.formats` keys), so multiple descriptors at the same `(chainId, verifyingContract, primaryType)` triple can be disambiguated at lookup time.
 3. Lookups return a repo-relative path; the `GitHubPathResolver` fetches and parses the descriptor.
 
 **Known limitation — EIP-712 indexing:**
 
-ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index. Additionally, only one descriptor per `(chainId, verifyingContract)` pair can be indexed — the first one encountered wins.
+ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index.
 
 ### `EmbeddedResolverOptions`
 

@@ -8,7 +8,7 @@ import { describe, it, expect, assert } from "vitest";
 import { formatTypedData, isFieldGroup } from "../../src/index";
 import type { ExternalDataProvider, TypedData } from "../../src/types";
 import { toChecksumAddress, hexToBytes } from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+import { buildEmbeddedResolverOpts, computeEncodeTypeOrThrow } from "../utils";
 
 describe("example-eip712.json — PermitSingle", () => {
   const VERIFYING_CONTRACT = "0x0000000000112233445566778899aabbccddeeff";
@@ -78,6 +78,12 @@ describe("example-eip712.json — PermitSingle", () => {
             chainId: CHAIN_ID,
             address: VERIFYING_CONTRACT,
             file: "example-eip712.json",
+            encodeTypes: [
+              computeEncodeTypeOrThrow(
+                PERMIT_SINGLE.primaryType,
+                PERMIT_SINGLE.types,
+              ),
+            ],
           },
         ],
       },
@@ -188,6 +194,12 @@ describe("example-eip712.json — PermitSingle", () => {
           chainId: 999,
           address: VERIFYING_CONTRACT,
           file: "example-eip712.json",
+          encodeTypes: [
+            computeEncodeTypeOrThrow(
+              wrongChainData.primaryType,
+              wrongChainData.types,
+            ),
+          ],
         },
       ],
     });
@@ -270,6 +282,10 @@ describe("example-eip712.json — PermitBatch", () => {
     return null;
   };
 
+  const PERMIT_BATCH_ENCODE_TYPES = [
+    computeEncodeTypeOrThrow("PermitBatch", PERMIT_BATCH_TYPES),
+  ];
+
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
     return buildEmbeddedResolverOpts(
       __dirname,
@@ -279,6 +295,7 @@ describe("example-eip712.json — PermitBatch", () => {
             chainId: CHAIN_ID,
             address: VERIFYING_CONTRACT,
             file: "example-eip712.json",
+            encodeTypes: PERMIT_BATCH_ENCODE_TYPES,
           },
         ],
       },

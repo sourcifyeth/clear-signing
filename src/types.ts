@@ -408,11 +408,34 @@ export type EmbeddedResolverOptions = {
 
 export interface RegistryIndex {
   /**
-   * Maps CAIP-10 identifiers ("eip155:{chainId}:{address}") to paths.
-   * The type of path depends on the index strategy.
+   * Maps CAIP-10 identifiers ("eip155:{chainId}:{address}") to a single
+   * descriptor path.
    */
   calldataIndex: Record<string, string>;
-  typedDataIndex: Record<string, string>;
+
+  /**
+   * Maps CAIP-10 identifiers to a per-primary-type list of descriptor entries.
+   *
+   * A single (chainId, verifyingContract, primaryType) triple may resolve to
+   * multiple descriptor files (e.g. Uniswap Permit2's `PermitWitnessTransferFrom`
+   * wraps different order shapes). Entries are disambiguated by matching the
+   * EIP-712 `encodeType` hash of the incoming typed data against
+   * `encodeTypeHashes`.
+   *
+   * See https://github.com/ethereum/clear-signing-erc7730-registry/blob/master/index.eip712.json
+   * as an example of the shape of this index in practice.
+   */
+  typedDataIndex: Record<string, Record<string, TypedDataIndexEntry[]>>;
+}
+
+/**
+ * One candidate descriptor for an EIP-712 (chainId, verifyingContract, primaryType)
+ * triple. `encodeTypeHashes` lists the keccak256 hashes of the EIP-712
+ * `encodeType` strings that this descriptor supports.
+ */
+export interface TypedDataIndexEntry {
+  path: string;
+  encodeTypeHashes: string[];
 }
 
 export interface GitHubSource {

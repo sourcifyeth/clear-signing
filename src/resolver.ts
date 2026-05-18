@@ -3,14 +3,16 @@ import {
   DEFAULT_REF,
   fetchRegistryFile,
 } from "./github-registry-client";
+import { computeEncodeType } from "./eip712";
 import type {
   Descriptor,
   EmbeddedResolverOptions,
   GitHubResolverOptions,
   GitHubSource,
   RegistryIndex,
+  TypedData,
 } from "./types";
-import { normalizeAddress } from "./utils";
+import { asciiToBytes, bytesToHex, keccak256, normalizeAddress } from "./utils";
 
 /**
  * Uses the index to resolve a descriptor path, then fetches and returns the
@@ -49,6 +51,7 @@ export class DescriptorResolver {
     }
   }
 
+  /** Resolves a calldata descriptor by `(chainId, contractAddress)`. */
   async resolveCalldataDescriptor(
     chainId: number,
     to: string,
@@ -59,16 +62,37 @@ export class DescriptorResolver {
     return this.resolveWithIncludes(path);
   }
 
+  /**
+   * Resolves a typed-data descriptor for the given EIP-712 message.
+   *
+   * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
+   * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
+   * the message's EIP-712 `encodeType` string. Returns `undefined` when no
+   * candidate matches the computed hash.
+   */
   async resolveTypedDataDescriptor(
-    chainId: number,
-    verifyingContract: string,
+    typedData: TypedData,
   ): Promise<Descriptor | undefined> {
-    const path =
+    const { chainId, verifyingContract } = typedData.domain;
+    if (chainId === undefined || !verifyingContract) return undefined;
+
+    const byPrimaryType =
       this.index.typedDataIndex[
         `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
       ];
-    if (!path) return undefined;
-    return this.resolveWithIncludes(path);
+    const entries = byPrimaryType?.[typedData.primaryType];
+    if (!entries?.length) return undefined;
+
+    const encodeTypeStr = computeEncodeType(
+      typedData.primaryType,
+      typedData.types,
+    );
+    if (!encodeTypeStr) return undefined;
+    const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+
+    const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
+    if (!match) return undefined;
+    return this.resolveWithIncludes(match.path);
   }
 
   private async resolveWithIncludes(path: string): Promise<Descriptor> {

@@ -226,7 +226,7 @@ export async function formatTypedData(
     try {
       descriptor = await new DescriptorResolver(
         opts?.descriptorResolverOptions,
-      ).resolveTypedDataDescriptor(chainId, verifyingContract);
+      ).resolveTypedDataDescriptor(typedData);
     } catch (error) {
       return {
         warnings: [
