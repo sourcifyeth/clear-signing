@@ -3,13 +3,23 @@
   "version": "0.1.2",
   "description": "Ethereum clear signing library for human-readable transaction previews",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "react-native": "./dist/index.cjs",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "react-native": "./dist/index.cjs",
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "repository": {
     "type": "git",
@@ -23,7 +33,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -52,6 +62,7 @@
     "eslint": "9.39.2",
     "eslint-plugin-no-only-tests": "^3.3.0",
     "prettier": "3.8.1",
+    "tsup": "^8.5.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.55.0",
     "vitest": "4.0.18"

@@ -4,7 +4,7 @@ import {
   DEFAULT_REF,
   fetchRegistryFilePaths,
   fetchRegistryFile,
-} from "../src/github-registry-client";
+} from "../src/github-registry-client.js";
 
 // ---------------------------------------------------------------------------
 // Fetch mock helpers

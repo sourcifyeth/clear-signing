@@ -1,12 +1,17 @@
-import type { GitHubSource, RegistryIndex } from "./types";
+import type { GitHubSource, RegistryIndex } from "./types.js";
 import {
   DEFAULT_REPO,
   DEFAULT_REF,
   fetchRegistryFilePaths,
   fetchRegistryFile,
-} from "./github-registry-client";
-import { extractPrimaryType } from "./eip712";
-import { asciiToBytes, bytesToHex, keccak256, normalizeAddress } from "./utils";
+} from "./github-registry-client.js";
+import { extractPrimaryType } from "./eip712.js";
+import {
+  asciiToBytes,
+  bytesToHex,
+  keccak256,
+  normalizeAddress,
+} from "./utils.js";
 
 /** File names of the prebuilt indexes published in the registry root. */
 const CALLDATA_INDEX_FILE = "index.calldata.json";

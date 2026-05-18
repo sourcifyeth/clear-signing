@@ -5,15 +5,15 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index";
-import type { DisplayModel, ExternalDataProvider } from "../../src/types";
+import { format, isFieldGroup } from "../../src/index.js";
+import type { DisplayModel, ExternalDataProvider } from "../../src/types.js";
 import {
   bytesToHex,
   hexToBytes,
   selectorForSignature,
   toChecksumAddress,
-} from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+} from "../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../utils.js";
 
 describe("example-array-iteration.json — distribute", () => {
   const CHAIN_ID = 1;

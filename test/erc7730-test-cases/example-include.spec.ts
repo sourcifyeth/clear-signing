@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index";
-import type { ExternalDataProvider } from "../../src/types";
-import { toChecksumAddress, hexToBytes } from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+import { format, isFieldGroup } from "../../src/index.js";
+import type { ExternalDataProvider } from "../../src/types.js";
+import { toChecksumAddress, hexToBytes } from "../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../utils.js";
 
 describe("example-include.json — approve(address spender, uint256 value)", () => {
   const CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";

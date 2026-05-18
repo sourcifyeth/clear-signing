@@ -5,19 +5,19 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index";
+import { format, isFieldGroup } from "../../src/index.js";
 import type {
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
-} from "../../src/types";
+} from "../../src/types.js";
 import {
   bytesToHex,
   hexToBytes,
   selectorForSignature,
   toChecksumAddress,
-} from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+} from "../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../utils.js";
 
 const CONTRACT_ADDRESS = "0x00112233445566778899AABBCCDDEEFF00112233";
 const CHAIN_ID = 1;

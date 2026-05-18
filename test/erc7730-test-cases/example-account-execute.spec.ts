@@ -6,19 +6,19 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index";
+import { format, isFieldGroup } from "../../src/index.js";
 import type {
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
-} from "../../src/types";
+} from "../../src/types.js";
 import {
   bytesToHex,
   hexToBytes,
   selectorForSignature,
   toChecksumAddress,
-} from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+} from "../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../utils.js";
 
 // Smart account implementation address — a valid 20-byte hex (the original spec
 // file used "0xYourImplementationAddress" as a placeholder; swapped here so that

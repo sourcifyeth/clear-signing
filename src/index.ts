@@ -19,14 +19,14 @@
 import {
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
-} from "./resolver";
+} from "./resolver.js";
 import {
   formatCalldata,
   parseCalldataHex,
   rawPreviewFromCalldata,
-} from "./calldata";
-import { formatEip712 } from "./eip712";
-import { warn } from "./utils";
+} from "./calldata.js";
+import { formatEip712 } from "./eip712.js";
+import { warn } from "./utils.js";
 import type {
   Descriptor,
   DisplayModel,
@@ -37,18 +37,18 @@ import type {
   BatchDisplayModel,
   Eip5792Batch,
   Warning,
-} from "./types";
+} from "./types.js";
 
-export type * from "./types";
+export type * from "./types.js";
 export {
   createGitHubRegistryIndex,
   fetchPrebuiltRegistryIndex,
-} from "./github-registry-index";
-export { isFieldGroup } from "./utils";
+} from "./github-registry-index.js";
+export { isFieldGroup } from "./utils.js";
 export {
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
-} from "./resolver";
+} from "./resolver.js";
 
 /**
  * Formats a single transaction's calldata into a human-readable {@link DisplayModel}.

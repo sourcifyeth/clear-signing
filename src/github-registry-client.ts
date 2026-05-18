@@ -4,7 +4,7 @@
  * Registry: https://github.com/ethereum/clear-signing-erc7730-registry
  */
 
-import type { GitHubSource } from "./types";
+import type { GitHubSource } from "./types.js";
 
 export const DEFAULT_REPO = "ethereum/clear-signing-erc7730-registry";
 export const DEFAULT_REF = "master";

@@ -2,9 +2,9 @@ import {
   DEFAULT_REPO,
   DEFAULT_REF,
   fetchRegistryFile,
-} from "./github-registry-client";
-import { computeEncodeType } from "./eip712";
-import { fetchPrebuiltRegistryIndex } from "./github-registry-index";
+} from "./github-registry-client.js";
+import { computeEncodeType } from "./eip712.js";
+import { fetchPrebuiltRegistryIndex } from "./github-registry-index.js";
 import type {
   Descriptor,
   EmbeddedResolverOptions,
@@ -12,8 +12,13 @@ import type {
   GitHubSource,
   RegistryIndex,
   TypedData,
-} from "./types";
-import { asciiToBytes, bytesToHex, keccak256, normalizeAddress } from "./utils";
+} from "./types.js";
+import {
+  asciiToBytes,
+  bytesToHex,
+  keccak256,
+  normalizeAddress,
+} from "./utils.js";
 
 /**
  * Internal: an index for path lookup plus a closure that fetches and parses

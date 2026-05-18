@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../../src/index";
-import type { ExternalDataProvider } from "../../../src/types";
-import { toChecksumAddress, hexToBytes } from "../../../src/utils";
-import { buildEmbeddedResolverOpts } from "../../utils";
+import { format, isFieldGroup } from "../../../src/index.js";
+import type { ExternalDataProvider } from "../../../src/types.js";
+import { toChecksumAddress, hexToBytes } from "../../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../../utils.js";
 
 describe("Paraswap AugustusSwapper v6.2", () => {
   const CHAIN_ID = 1;

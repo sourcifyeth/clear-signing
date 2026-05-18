@@ -5,10 +5,13 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { formatTypedData, isFieldGroup } from "../../src/index";
-import type { ExternalDataProvider, TypedData } from "../../src/types";
-import { toChecksumAddress, hexToBytes } from "../../src/utils";
-import { buildEmbeddedResolverOpts, computeEncodeTypeOrThrow } from "../utils";
+import { formatTypedData, isFieldGroup } from "../../src/index.js";
+import type { ExternalDataProvider, TypedData } from "../../src/types.js";
+import { toChecksumAddress, hexToBytes } from "../../src/utils.js";
+import {
+  buildEmbeddedResolverOpts,
+  computeEncodeTypeOrThrow,
+} from "../utils.js";
 
 describe("example-eip712.json — PermitSingle", () => {
   const VERIFYING_CONTRACT = "0x0000000000112233445566778899aabbccddeeff";

@@ -1,11 +1,11 @@
-import { computeEncodeType, extractPrimaryType } from "../src/eip712";
+import { computeEncodeType, extractPrimaryType } from "../src/eip712.js";
 import type {
   ExternalDataProvider,
   FormatOptions,
   RegistryIndex,
   TypeMember,
-} from "../src/types";
-import { asciiToBytes, bytesToHex, keccak256 } from "../src/utils";
+} from "../src/types.js";
+import { asciiToBytes, bytesToHex, keccak256 } from "../src/utils.js";
 
 /**
  * Compute the EIP-712 `encodeType` string for a primary type, throwing if

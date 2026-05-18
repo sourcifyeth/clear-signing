@@ -11,7 +11,7 @@ import type {
   TypedData,
   TypeMember,
   Warning,
-} from "./types";
+} from "./types.js";
 import {
   type BaseResolvePath,
   toArgumentValue,
@@ -19,9 +19,9 @@ import {
   isEip712DescriptorBoundTo,
   resolveMetadataValue,
   resolveTypedDataPath,
-} from "./descriptor";
-import { warn } from "./utils";
-import { applyFieldFormats } from "./fields";
+} from "./descriptor.js";
+import { warn } from "./utils.js";
+import { applyFieldFormats } from "./fields.js";
 
 /**
  * Format EIP-712 typed data for clear signing display.

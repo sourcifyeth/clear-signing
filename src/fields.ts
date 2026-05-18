@@ -17,13 +17,13 @@ import type {
   FieldType,
   FormatCalldata,
   Warning,
-} from "./types";
+} from "./types.js";
 import type {
   ArgumentValue,
   BaseResolvePath,
   BytesSliceValue,
   ResolvePath,
-} from "./descriptor";
+} from "./descriptor.js";
 import {
   argumentValueEquals,
   argumentValueToBytes,
@@ -33,7 +33,7 @@ import {
   mergeDefinitions,
   resolveFieldValue,
   toArgumentValue,
-} from "./descriptor";
+} from "./descriptor.js";
 import {
   bigIntToBytes,
   bytesEqual,
@@ -42,8 +42,8 @@ import {
   bytesToUnsignedBigInt,
   stripLeadingZeros,
   warn,
-} from "./utils";
-import { renderField } from "./formatters";
+} from "./utils.js";
+import { renderField } from "./formatters.js";
 
 /** Callback to get the length of an array at a given container path. */
 export type GetArrayLength = (path: string) => number;

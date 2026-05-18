@@ -11,15 +11,15 @@ import type {
   RawCalldataFallback,
   Transaction,
   Warning,
-} from "./types";
-import type { ArgumentValue, BaseResolvePath } from "./descriptor";
+} from "./types.js";
+import type { ArgumentValue, BaseResolvePath } from "./descriptor.js";
 import {
   interpolateTemplate,
   isCalldataDescriptorBoundTo,
   resolveMetadataValue,
   resolveTransactionPath,
   toArgumentValue,
-} from "./descriptor";
+} from "./descriptor.js";
 import {
   bytesToAscii,
   bytesToUnsignedBigInt,
@@ -29,8 +29,8 @@ import {
   hexToBytes,
   selectorForSignature,
   warn,
-} from "./utils";
-import { applyFieldFormats } from "./fields";
+} from "./utils.js";
+import { applyFieldFormats } from "./fields.js";
 
 /**
  * Decodes calldata using a resolved descriptor and returns a human-readable

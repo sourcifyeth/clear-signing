@@ -15,12 +15,12 @@ import type {
   TokenResult,
   Transaction,
   Warning,
-} from "./types";
-import type { ArgumentValue, ResolvePath } from "./descriptor";
+} from "./types.js";
+import type { ArgumentValue, ResolvePath } from "./descriptor.js";
 import {
   bytesToAddressArgumentValue,
   resolveMetadataValue,
-} from "./descriptor";
+} from "./descriptor.js";
 import {
   addThousandSeparators,
   bytesToUnsignedBigInt,
@@ -31,7 +31,7 @@ import {
   parseBigInt,
   toChecksumAddress,
   warn,
-} from "./utils";
+} from "./utils.js";
 
 export type FieldFormatOptions = Pick<
   DescriptorFieldFormat,

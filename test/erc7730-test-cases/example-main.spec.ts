@@ -4,18 +4,18 @@
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, formatEip5792Batch, isFieldGroup } from "../../src/index";
+import { format, formatEip5792Batch, isFieldGroup } from "../../src/index.js";
 import type {
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
-} from "../../src/types";
+} from "../../src/types.js";
 import {
   addThousandSeparators,
   hexToBytes,
   toChecksumAddress,
-} from "../../src/utils";
-import { buildEmbeddedResolverOpts } from "../utils";
+} from "../../src/utils.js";
+import { buildEmbeddedResolverOpts } from "../utils.js";
 
 // USDT on mainnet (matches example-main.json deployment)
 const USDT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";

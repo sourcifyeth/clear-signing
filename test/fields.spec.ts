@@ -11,14 +11,14 @@ import {
   bytesSliceToArgumentValue,
   bytesSliceToFieldType,
   parseByteSlice,
-} from "../src/fields";
-import type { ArgumentValue, BaseResolvePath } from "../src/descriptor";
+} from "../src/fields.js";
+import type { ArgumentValue, BaseResolvePath } from "../src/descriptor.js";
 import type {
   DescriptorFieldFormat,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
-} from "../src/types";
-import { hexToBytes, isFieldGroup } from "../src/utils";
+} from "../src/types.js";
+import { hexToBytes, isFieldGroup } from "../src/utils.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

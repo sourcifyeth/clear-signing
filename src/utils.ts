@@ -8,7 +8,7 @@ import type {
   DisplayFieldGroup,
   Warning,
   WarningCode,
-} from "./types";
+} from "./types.js";
 
 /** Create a Warning object. */
 export function warn(code: WarningCode, message: string): Warning {

@@ -15,7 +15,7 @@ import type {
   FieldType,
   Transaction,
   TypedData,
-} from "./types";
+} from "./types.js";
 import {
   asciiToBytes,
   bigIntToBytes,
@@ -24,7 +24,7 @@ import {
   hexToBytes,
   isAddressString,
   normalizeAddress,
-} from "./utils";
+} from "./utils.js";
 
 /**
  * Check if a calldata descriptor is bound to a specific chain and address.
