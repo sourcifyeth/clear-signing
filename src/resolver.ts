@@ -4,6 +4,7 @@ import {
   fetchRegistryFile,
 } from "./github-registry-client";
 import { computeEncodeType } from "./eip712";
+import { fetchPrebuiltRegistryIndex } from "./github-registry-index";
 import type {
   Descriptor,
   EmbeddedResolverOptions,
@@ -15,135 +16,110 @@ import type {
 import { asciiToBytes, bytesToHex, keccak256, normalizeAddress } from "./utils";
 
 /**
- * Uses the index to resolve a descriptor path, then fetches and returns the
- * descriptor content depending on the resolver type.
- * Automatically resolves "includes" properties in the descriptor file.
+ * Internal: an index for path lookup plus a closure that fetches and parses
+ * a single descriptor file by repo-relative path. Built by
+ * {@link createResolver} and consumed by the resolve functions.
  */
-export class DescriptorResolver {
-  readonly index: RegistryIndex;
+interface Resolver {
+  index: RegistryIndex;
+  fetchDescriptor: (path: string) => Promise<Descriptor>;
+}
 
-  private pathResolver: PathResolver;
-
-  constructor(
-    options: GitHubResolverOptions | EmbeddedResolverOptions = {
-      type: "github",
-    },
-  ) {
-    switch (options.type) {
-      case "github":
-        if (options.index) {
-          this.index = options.index;
-        } else {
-          // TODO replace this with prebuilt index
-          this.index = {
-            calldataIndex: {},
-            typedDataIndex: {},
-          };
-        }
-        this.pathResolver = new GitHubPathResolver(options.githubSource);
-        return;
-      case "embedded":
-        this.index = options.index;
-        this.pathResolver = new EmbeddedPathResolver(
-          options.descriptorDirectory,
-        );
-        return;
+/**
+ * Builds a {@link Resolver} for the given source. For `"github"` without an
+ * explicit `options.index`, fetches the prebuilt registry index up front
+ * (no caching — recreating the resolver triggers another fetch).
+ */
+async function createResolver(
+  options: GitHubResolverOptions | EmbeddedResolverOptions = {
+    type: "github",
+  },
+): Promise<Resolver> {
+  switch (options.type) {
+    case "github": {
+      const source: GitHubSource = {
+        repo: options.githubSource?.repo ?? DEFAULT_REPO,
+        ref: options.githubSource?.ref ?? DEFAULT_REF,
+      };
+      const index = options.index ?? (await fetchPrebuiltRegistryIndex(source));
+      return {
+        index,
+        fetchDescriptor: async (path) =>
+          (await fetchRegistryFile(path, source)) as Descriptor,
+      };
+    }
+    case "embedded": {
+      return {
+        index: options.index,
+        fetchDescriptor: async (path) => {
+          const mod = await import(`${options.descriptorDirectory}/${path}`);
+          return (mod.default ?? mod) as Descriptor;
+        },
+      };
     }
   }
-
-  /** Resolves a calldata descriptor by `(chainId, contractAddress)`. */
-  async resolveCalldataDescriptor(
-    chainId: number,
-    to: string,
-  ): Promise<Descriptor | undefined> {
-    const path =
-      this.index.calldataIndex[`eip155:${chainId}:${normalizeAddress(to)}`];
-    if (!path) return undefined;
-    return this.resolveWithIncludes(path);
-  }
-
-  /**
-   * Resolves a typed-data descriptor for the given EIP-712 message.
-   *
-   * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
-   * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
-   * the message's EIP-712 `encodeType` string. Returns `undefined` when no
-   * candidate matches the computed hash.
-   */
-  async resolveTypedDataDescriptor(
-    typedData: TypedData,
-  ): Promise<Descriptor | undefined> {
-    const { chainId, verifyingContract } = typedData.domain;
-    if (chainId === undefined || !verifyingContract) return undefined;
-
-    const byPrimaryType =
-      this.index.typedDataIndex[
-        `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
-      ];
-    const entries = byPrimaryType?.[typedData.primaryType];
-    if (!entries?.length) return undefined;
-
-    const encodeTypeStr = computeEncodeType(
-      typedData.primaryType,
-      typedData.types,
-    );
-    if (!encodeTypeStr) return undefined;
-    const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
-
-    const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
-    if (!match) return undefined;
-    return this.resolveWithIncludes(match.path);
-  }
-
-  private async resolveWithIncludes(path: string): Promise<Descriptor> {
-    const descriptor = await this.pathResolver.resolvePath(path);
-    const includes =
-      typeof descriptor.includes === "string" ? descriptor.includes : undefined;
-    if (!includes) return descriptor;
-
-    const includesPath = new URL(includes, `https://x/${path}`).pathname.slice(
-      1,
-    );
-    const included = await this.pathResolver.resolvePath(includesPath);
-    return mergeDescriptors(descriptor, included);
-  }
 }
 
-interface PathResolver {
-  resolvePath(path: string): Promise<Descriptor>;
+/** Resolves a calldata descriptor by `(chainId, contractAddress)`. */
+export async function resolveCalldataDescriptor(
+  chainId: number,
+  to: string,
+  options?: GitHubResolverOptions | EmbeddedResolverOptions,
+): Promise<Descriptor | undefined> {
+  const resolver = await createResolver(options);
+  const path =
+    resolver.index.calldataIndex[`eip155:${chainId}:${normalizeAddress(to)}`];
+  if (!path) return undefined;
+  return resolveWithIncludes(resolver, path);
 }
 
-class GitHubPathResolver implements PathResolver {
-  readonly source: GitHubSource;
+/**
+ * Resolves a typed-data descriptor for the given EIP-712 message.
+ *
+ * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
+ * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
+ * the message's EIP-712 `encodeType` string. Returns `undefined` when no
+ * candidate matches the computed hash.
+ */
+export async function resolveTypedDataDescriptor(
+  typedData: TypedData,
+  options?: GitHubResolverOptions | EmbeddedResolverOptions,
+): Promise<Descriptor | undefined> {
+  const { chainId, verifyingContract } = typedData.domain;
+  if (chainId === undefined || !verifyingContract) return undefined;
 
-  constructor(source?: Partial<GitHubSource>) {
-    this.source = {
-      repo: source?.repo ?? DEFAULT_REPO,
-      ref: source?.ref ?? DEFAULT_REF,
-    };
-  }
+  const resolver = await createResolver(options);
+  const byPrimaryType =
+    resolver.index.typedDataIndex[
+      `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
+    ];
+  const entries = byPrimaryType?.[typedData.primaryType];
+  if (!entries?.length) return undefined;
 
-  async resolvePath(path: string): Promise<Descriptor> {
-    const descriptor = (await fetchRegistryFile(path, this.source)) as Record<
-      string,
-      unknown
-    >;
-    return descriptor;
-  }
+  const encodeTypeStr = computeEncodeType(
+    typedData.primaryType,
+    typedData.types,
+  );
+  if (!encodeTypeStr) return undefined;
+  const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+
+  const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
+  if (!match) return undefined;
+  return resolveWithIncludes(resolver, match.path);
 }
 
-class EmbeddedPathResolver implements PathResolver {
-  readonly descriptorDirectory: string;
+async function resolveWithIncludes(
+  resolver: Resolver,
+  path: string,
+): Promise<Descriptor> {
+  const descriptor = await resolver.fetchDescriptor(path);
+  const includes =
+    typeof descriptor.includes === "string" ? descriptor.includes : undefined;
+  if (!includes) return descriptor;
 
-  constructor(descriptorDirectory: string) {
-    this.descriptorDirectory = descriptorDirectory || "./descriptors";
-  }
-
-  async resolvePath(path: string): Promise<Descriptor> {
-    const fullPath = `${this.descriptorDirectory}/${path}`;
-    const mod = await import(fullPath);
-    return (mod.default ?? mod) as Descriptor;
-  }
+  const includesPath = new URL(includes, `https://x/${path}`).pathname.slice(1);
+  const included = await resolver.fetchDescriptor(includesPath);
+  return mergeDescriptors(descriptor, included);
 }
 
 /**

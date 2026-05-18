@@ -75,7 +75,9 @@ src/
 
    ```
    format(tx, opts?)
-   → DescriptorResolver.resolveCalldataDescriptor()
+   → resolveCalldataDescriptor(tx.chainId, tx.to, opts?.descriptorResolverOptions)
+       → createResolver(options) — for "github" without an explicit index,
+         calls fetchPrebuiltRegistryIndex() up front
    → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
        → findFormatBySelector() matches selector to a display.formats entry
        → decodeArguments() decodes calldata into { values, arrayLengths } maps
@@ -87,7 +89,8 @@ src/
 
    ```
    formatTypedData(typedData, opts?)
-   → DescriptorResolver.resolveTypedDataDescriptor(typedData)
+   → resolveTypedDataDescriptor(typedData, opts?.descriptorResolverOptions)
+       → createResolver(options)
        → looks up (chainId, verifyingContract, primaryType) in typedDataIndex
        → disambiguates entries by matching keccak256(encodeType) against
          each entry's encodeTypeHashes
@@ -120,26 +123,30 @@ The resolver accepts `GitHubResolverOptions` or `EmbeddedResolverOptions` to con
 
 ### `GitHubResolverOptions`
 
-Fetches descriptors lazily from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry) via the GitHub API. This is the default when no options are specified.
+Fetches descriptors lazily from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry). This is the default when no options are specified.
 
 ```typescript
 const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "github",
-    repo: "ethereum/clear-signing-erc7730-registry", // optional, default
-    ref: "master", // optional, default
-    index: myPrebuiltIndex, // optional: skip GitHub API call
+    githubSource: {
+      repo: "ethereum/clear-signing-erc7730-registry", // optional, default
+      ref: "master", // optional, default
+    },
+    index: myPrebuiltIndex, // optional: skip the prebuilt-index fetch
   },
 };
 ```
 
 **How it works:**
 
-1. `github-registry-index.ts` fetches the GitHub Git Trees API once and indexes all `calldata-*.json` and `eip712-*.json` descriptor files.
-2. Each descriptor is indexed by CAIP-10 key (`eip155:{chainId}:{address}`) into two maps:
+1. The public `resolveCalldataDescriptor` / `resolveTypedDataDescriptor` accept the same `GitHubResolverOptions | EmbeddedResolverOptions` value that `FormatOptions.descriptorResolverOptions` carries. They build an internal `Resolver` (`{ index, fetchDescriptor }`) via the module-private `createResolver`. For the `"github"` case without an explicit `options.index`, `createResolver` calls `fetchPrebuiltRegistryIndex(source)` to fetch `index.calldata.json` and `index.eip712.json` in parallel. **No internal caching** — every resolve call builds a fresh resolver, so callers should pre-fetch the index once and pass the same `descriptorResolverOptions.index` to every `format()` call.
+2. The fetched index has two maps:
    - `calldataIndex: Record<caip10, path>` — keyed by `context.contract.deployments[].{chainId, address}`
    - `typedDataIndex: Record<caip10, Record<primaryType, TypedDataIndexEntry[]>>` — keyed by `context.eip712.deployments[].{chainId, address}`, then by primary type. Each entry carries the descriptor `path` and the keccak256 hashes of every `encodeType` it declares (`display.formats` keys), so multiple descriptors at the same `(chainId, verifyingContract, primaryType)` triple can be disambiguated at lookup time.
-3. Lookups return a repo-relative path; the `GitHubPathResolver` fetches and parses the descriptor.
+3. After the index lookup yields a path, the resolver's `fetchDescriptor(path)` closure fetches and parses the descriptor file; `includes` are merged automatically.
+
+**Fallback indexer:** `createGitHubRegistryIndex(source?)` walks every descriptor file via the GitHub Git Trees API and indexes them in-process. It's significantly slower than `fetchPrebuiltRegistryIndex` but useful when the prebuilt indexes are stale, missing descriptors, or when pointing at a fork that doesn't publish them.
 
 **Known limitation — EIP-712 indexing:**
 
@@ -169,8 +176,8 @@ Pure I/O layer with no caching. Exports:
 
 ### GitHub index module (`github-registry-index.ts`)
 
-- `createGitHubRegistryIndex(source?)` — async factory; fetches all descriptors and builds a `RegistryIndex`
-- `DEFAULT_REPO` / `DEFAULT_REF` — default registry constants used by `DescriptorResolver`
+- `fetchPrebuiltRegistryIndex(source?)` — async; fetches the registry's `index.calldata.json` + `index.eip712.json` and returns the merged `RegistryIndex`. Cached per `(repo, ref)`. Used by `DescriptorResolver` as the default index source.
+- `createGitHubRegistryIndex(source?)` — async factory; walks all descriptor files and builds a `RegistryIndex` in-process. Fallback for when the prebuilt indexes are missing entries or unavailable.
 
 ## Descriptor Includes & Merging
 
@@ -451,4 +458,3 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 
 - `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
-- Pre-built registry index (GitHub index is not yet wired up; currently returns empty index)

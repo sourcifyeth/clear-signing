@@ -396,8 +396,14 @@ export interface FormatOptions {
 
 export type GitHubResolverOptions = {
   type: "github";
-  index?: RegistryIndex; // defaults to a prebuilt GitHub registry index
-  githubSource?: Partial<GitHubSource>; // only used when type is "github", ignored otherwise
+  /**
+   * Pre-built registry index. Strongly recommended: fetch once at app
+   * startup via `fetchPrebuiltRegistryIndex()` and reuse across calls.
+   * If omitted, the library re-fetches the registry's prebuilt index
+   * files on every `format()` / `formatTypedData()` call.
+   */
+  index?: RegistryIndex;
+  githubSource?: Partial<GitHubSource>;
 };
 
 export type EmbeddedResolverOptions = {

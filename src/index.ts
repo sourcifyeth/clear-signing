@@ -16,7 +16,10 @@
  * ```
  */
 
-import { DescriptorResolver } from "./resolver";
+import {
+  resolveCalldataDescriptor,
+  resolveTypedDataDescriptor,
+} from "./resolver";
 import {
   formatCalldata,
   parseCalldataHex,
@@ -36,11 +39,16 @@ import type {
   Warning,
 } from "./types";
 
-// Re-export types
 export type * from "./types";
-
-export { createGitHubRegistryIndex } from "./github-registry-index";
+export {
+  createGitHubRegistryIndex,
+  fetchPrebuiltRegistryIndex,
+} from "./github-registry-index";
 export { isFieldGroup } from "./utils";
+export {
+  resolveCalldataDescriptor,
+  resolveTypedDataDescriptor,
+} from "./resolver";
 
 /**
  * Formats a single transaction's calldata into a human-readable {@link DisplayModel}.
@@ -60,9 +68,11 @@ export async function format(
   try {
     let descriptor: Descriptor | undefined;
     try {
-      descriptor = await new DescriptorResolver(
+      descriptor = await resolveCalldataDescriptor(
+        tx.chainId,
+        tx.to,
         opts?.descriptorResolverOptions,
-      ).resolveCalldataDescriptor(tx.chainId, tx.to);
+      );
     } catch (error) {
       return {
         warnings: [
@@ -224,9 +234,10 @@ export async function formatTypedData(
 
     let descriptor: Descriptor | undefined;
     try {
-      descriptor = await new DescriptorResolver(
+      descriptor = await resolveTypedDataDescriptor(
+        typedData,
         opts?.descriptorResolverOptions,
-      ).resolveTypedDataDescriptor(typedData);
+      );
     } catch (error) {
       return {
         warnings: [

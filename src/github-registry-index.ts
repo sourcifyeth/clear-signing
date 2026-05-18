@@ -8,6 +8,36 @@ import {
 import { extractPrimaryType } from "./eip712";
 import { asciiToBytes, bytesToHex, keccak256, normalizeAddress } from "./utils";
 
+/** File names of the prebuilt indexes published in the registry root. */
+const CALLDATA_INDEX_FILE = "index.calldata.json";
+const EIP712_INDEX_FILE = "index.eip712.json";
+
+/**
+ * Fetches the {@link RegistryIndex} from the registry's prebuilt index files
+ * (`index.calldata.json` and `index.eip712.json`). Assumes both files live
+ * at the repo root.
+ *
+ * No caching — call this once at startup and pass the result to `format()` /
+ * `formatTypedData()` via `descriptorResolverOptions.index` to reuse it
+ * across calls.
+ */
+export async function fetchPrebuiltRegistryIndex(
+  source?: Partial<GitHubSource>,
+): Promise<RegistryIndex> {
+  const gitHubSource: GitHubSource = {
+    repo: source?.repo ?? DEFAULT_REPO,
+    ref: source?.ref ?? DEFAULT_REF,
+  };
+  const [calldataIndex, typedDataIndex] = await Promise.all([
+    fetchRegistryFile(CALLDATA_INDEX_FILE, gitHubSource),
+    fetchRegistryFile(EIP712_INDEX_FILE, gitHubSource),
+  ]);
+  return {
+    calldataIndex: calldataIndex as RegistryIndex["calldataIndex"],
+    typedDataIndex: typedDataIndex as RegistryIndex["typedDataIndex"],
+  };
+}
+
 /**
  * Indexes a single descriptor into `index`.
  *

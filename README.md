@@ -12,19 +12,28 @@ npm install @ethereum-sourcify/clear-signing
 
 ## Quick Start
 
+Recommended pattern: fetch the registry index once at app startup and pass it to every `format()` / `formatTypedData()` call. The library does not cache fetched indexes internally — without an index, every format call re-fetches.
+
 ```typescript
 import {
   format,
-  formatTypedData,
-  createGitHubRegistryIndex,
+  fetchPrebuiltRegistryIndex,
 } from "@ethereum-sourcify/clear-signing";
 
-// Build the registry index once at app build time or startup.
-// This fetches the descriptor file tree from GitHub and indexes it
-// so that subsequent format() calls don't need to re-fetch it.
-const index = await createGitHubRegistryIndex();
+// At app startup — fetch once, keep in memory.
+const index = await fetchPrebuiltRegistryIndex();
+const baseOpts = {
+  descriptorResolverOptions: { type: "github" as const, index },
+  externalDataProvider: {
+    resolveToken: async (chainId, address) => {
+      // return token metadata from your wallet's token list
+      // or call the ERC-20 methods on-chain
+      return { name: "Tether USD", symbol: "USDT", decimals: 6 };
+    },
+  },
+};
 
-// Format an ERC-20 approve transaction
+// Reuse on every format call — no re-fetching of the index.
 const result = await format(
   {
     chainId: 1,
@@ -34,22 +43,15 @@ const result = await format(
       "0000000000000000000000001234567890abcdef1234567890abcdef12345678" + // spender
       "00000000000000000000000000000000000000000000000000000000000f4240", // value
   },
-  {
-    descriptorResolverOptions: { type: "github", index },
-    externalDataProvider: {
-      resolveToken: async (chainId, address) => {
-        // return token metadata from your wallet's token list
-        // or call the ERC-20 methods on-chain
-        return { name: "Tether USD", symbol: "USDT", decimals: 6 };
-      },
-    },
-  },
+  baseOpts,
 );
 
 console.log(result.intent); // "Approve"
 console.log(result.fields); // [{ label: "Spender", value: "0x1234..." }, { label: "Amount", value: "1 USDT" }]
 console.log(result.interpolatedIntent); // "Approve 1 USDT to 0x1234..."
 ```
+
+If you omit the `index` (or the `descriptorResolverOptions` entirely), `format()` still works — it just fetches the prebuilt indexes on every call.
 
 ## API Reference
 
@@ -197,23 +199,29 @@ interface ExternalDataProvider {
 
 ### Descriptor Sources
 
-Descriptors are fetched from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry) on GitHub by default.
+Descriptors are fetched from the [Ethereum clear-signing registry](https://github.com/ethereum/clear-signing-erc7730-registry) on GitHub by default. See the [Quick Start](#quick-start) for the recommended pre-fetch pattern.
 
 #### GitHub Registry (default)
 
-```typescript
-import { format } from "@ethereum-sourcify/clear-signing";
+Pass `githubSource` to `fetchPrebuiltRegistryIndex` and the matching `descriptorResolverOptions`:
 
-const result = await format(tx, {
+```typescript
+const index = await fetchPrebuiltRegistryIndex(source);
+const opts = {
   descriptorResolverOptions: {
-    type: "github",
+    type: "github" as const,
     githubSource: {
       repo: "ethereum/clear-signing-erc7730-registry", // default
       ref: "master", // default
     },
+    index,
   },
-});
+};
 ```
+
+#### Building the index from descriptor files
+
+If the prebuilt indexes are missing descriptors or you're using a fork that doesn't publish them, walk the registry yourself with `createGitHubRegistryIndex()`. It's significantly slower (one fetch per descriptor file vs. two for the prebuilt indexes) so reserve it for setup-time use.
 
 #### Embedded Descriptors
 
