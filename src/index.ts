@@ -25,7 +25,11 @@ import {
   parseCalldataHex,
   rawPreviewFromCalldata,
 } from "./calldata.js";
-import { formatEip712 } from "./eip712.js";
+import {
+  computeEncodeType,
+  extractPrimaryType,
+  formatEip712,
+} from "./eip712.js";
 import { warn } from "./utils.js";
 import type {
   Descriptor,
@@ -49,6 +53,12 @@ export {
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
 } from "./resolver.js";
+
+/** EIP-712 utility helpers. */
+export const eip712 = {
+  computeEncodeType,
+  extractPrimaryType,
+};
 
 /**
  * Formats a single transaction's calldata into a human-readable {@link DisplayModel}.
