@@ -4,6 +4,10 @@ A TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](
 
 This library transforms raw transaction calldata and EIP-712 typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
 
+## Wallet Integration Guide
+
+Integrating into a wallet? See the [Wallet Integration Guide](GUIDE.md).
+
 ## Installation
 
 ```bash
@@ -307,8 +311,8 @@ interface DisplayModel {
   rawCalldataFallback?: RawCalldataFallback;
 
   /**
-   * Non-fatal warnings providing additional context, e.g. why
-   * interpolation failed or why a field could not be formatted.
+   * Warnings providing additional context, e.g. why
+   * interpolation failed.
    */
   warnings?: Warning[];
 }

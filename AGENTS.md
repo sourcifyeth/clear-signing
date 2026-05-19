@@ -296,7 +296,7 @@ Container paths are resolved by `resolveTransactionPath()` and `resolveTypedData
 
 ### Warnings
 
-Non-fatal warnings are returned in the `DisplayModel.warnings` array and on individual `DisplayField.warning`. All warning codes are the `WarningCode` string literal union defined in `types.ts`. Use the `warn(code, message)` helper from `utils.ts` to create them. **Never use out-parameters for warnings — always return them in the result object.**
+Warnings are returned in the `DisplayModel.warnings` array and on individual `DisplayField.warning`. All warning codes are the `WarningCode` string literal union defined in `types.ts`. Use the `warn(code, message)` helper from `utils.ts` to create them. **Never use out-parameters for warnings — always return them in the result object.**
 
 ## Common Tasks
 
@@ -323,6 +323,11 @@ const opts: FormatOptions = {
 ## Before Committing
 
 Always run `npm run fix` before committing to auto-fix lint and formatting issues.
+
+When changing the public API, input/output types, descriptor resolver options, warning
+codes, or the `ExternalDataProvider` interface, check whether [`GUIDE.md`](GUIDE.md)
+(the wallet integration guide) and [`README.md`](README.md) need updating too — they
+contain example code and type signatures that can drift out of sync with the source.
 
 ## Testing
 

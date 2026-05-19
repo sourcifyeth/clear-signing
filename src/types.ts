@@ -104,7 +104,7 @@ export type WarningCode =
   | "BATCH_INTERPOLATION_INCOMPLETE"
   | "BATCH_EMPTY";
 
-/** Non-fatal warning from formatting. */
+/** Warning from formatting. */
 export interface Warning {
   /** machine-readable warning code */
   code: WarningCode;
@@ -258,7 +258,7 @@ export interface DisplayModel {
   rawCalldataFallback?: RawCalldataFallback;
 
   /**
-   * Non-fatal warnings providing additional context, e.g. why
+   * Warnings providing additional context, e.g. why
    * interpolation failed.
    */
   warnings?: Warning[];

@@ -1121,7 +1121,7 @@ export async function formatTokenTicker(
   const chainIdResult = resolveChainId(fieldOptions, resolvePath);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
     return {
-      rendered: toChecksumAddress(value.bytes),
+      rendered: renderRaw(value),
       warning: warn(
         "FORMAT_PARAM_RESOLUTION_ERROR",
         "chainId or chainIdPath param could not be resolved",
@@ -1134,7 +1134,7 @@ export async function formatTokenTicker(
 
   if (chainId === undefined) {
     return {
-      rendered: toChecksumAddress(value.bytes),
+      rendered: renderRaw(value),
       warning: warn(
         "CONTAINER_MISSING_CHAIN_ID",
         "Cannot format tokenTicker without a chainId",
@@ -1152,7 +1152,7 @@ export async function formatTokenTicker(
   }
   if (!token) {
     return {
-      rendered: toChecksumAddress(value.bytes),
+      rendered: renderRaw(value),
       warning: warn("UNKNOWN_TOKEN", "Token could not be resolved"),
     };
   }
