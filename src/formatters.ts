@@ -351,7 +351,7 @@ export function tokenAmountMessage(
     threshold = resolved.value;
   } else if (resolved.type === "string") {
     threshold = parseBigInt(resolved.value);
-  } else if (resolved.type === "bytes-slice") {
+  } else if (resolved.type === "bytes" || resolved.type === "bytes-slice") {
     threshold = bytesToUnsignedBigInt(resolved.bytes);
   }
 
@@ -922,7 +922,7 @@ function resolveAmountParam(
   if (resolved?.type === "string") {
     return parseBigInt(resolved.value);
   }
-  if (resolved?.type === "bytes-slice") {
+  if (resolved?.type === "bytes" || resolved?.type === "bytes-slice") {
     return bytesToUnsignedBigInt(resolved.bytes);
   }
 
@@ -1193,7 +1193,7 @@ function resolveChainId(
     let resolvedN: bigint | undefined;
     if (resolved?.type === "uint" || resolved?.type === "int") {
       resolvedN = resolved.value;
-    } else if (resolved?.type === "bytes-slice") {
+    } else if (resolved?.type === "bytes" || resolved?.type === "bytes-slice") {
       resolvedN = bytesToUnsignedBigInt(resolved.bytes);
     }
 
