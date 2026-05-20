@@ -1,8 +1,15 @@
 # @ethereum-sourcify/clear-signing
 
-A TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](https://eips.ethereum.org/EIPS/eip-7730).
+Reference TypeScript implementation of [ERC-7730: Structured Data Clear Signing Format](https://eips.ethereum.org/EIPS/eip-7730).
 
 This library transforms raw transaction calldata and EIP-712 typed data into human-readable display models, enabling wallets to show users exactly what they're signing.
+
+Designed to drop into wallet codebases:
+
+- Runs on modern browsers, Node.js (≥22), and React Native (ESM + CJS).
+- Single runtime dependency: [`@noble/hashes`](https://github.com/paulmillr/noble-hashes).
+- Pure formatting: No RPC client, no token/chain/ENS fetching; external data is delegated to the wallet via [`ExternalDataProvider`](#externaldataprovider).
+- No internal caching: The caller controls when descriptors and indexes are fetched.
 
 ## Wallet Integration Guide
 
@@ -351,7 +358,8 @@ npm run test:watch # Watch mode
 
 ## Related
 
-- [EIP-7730 Specification](https://eips.ethereum.org/EIPS/eip-7730)
+- [Clear Signing Website](https://clearsigning.org)
+- [ERC-7730 Specification](https://eips.ethereum.org/EIPS/eip-7730)
 - [Ethereum Clear Signing Registry](https://github.com/ethereum/clear-signing-erc7730-registry)
 
 ## License
