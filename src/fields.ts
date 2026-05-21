@@ -179,6 +179,16 @@ async function processSingleField(
 
   const resolvedValue = resolveFieldValue(merged, ctx.resolvePath);
   if (!resolvedValue) {
+    if (merged.path?.startsWith("@.")) {
+      return {
+        warnings: [
+          warn(
+            "CONTAINER_MISSING_REQUIRED_PATH",
+            `Descriptor requires container field '${merged.path}', but it was not provided in the container`,
+          ),
+        ],
+      };
+    }
     return {
       warnings: [
         warn(
