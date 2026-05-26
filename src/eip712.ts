@@ -70,7 +70,8 @@ export async function formatEip712(
   };
 
   const getArrayLength = (path: string): number => {
-    const raw = getMessageValue(typedData.message, path);
+    const key = path.startsWith("#.") ? path.slice(2) : path;
+    const raw = getMessageValue(typedData.message, key);
     return Array.isArray(raw) ? raw.length : 0;
   };
 
