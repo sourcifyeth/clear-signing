@@ -93,7 +93,7 @@ export async function renderField(
     case "duration":
       return formatDuration(value);
     case "unit":
-      return formatUnit(value, fieldOptions);
+      return formatUnit(value, fieldOptions, metadata);
     case "enum":
       return formatEnum(fieldOptions, value, metadata);
     case "chainId":
@@ -673,12 +673,13 @@ const SI_PREFIXES: [bigint, string][] = [
 export function formatUnit(
   value: ArgumentValue,
   fieldOptions: FieldFormatOptions,
+  metadata: DescriptorMetadata | undefined,
 ): RenderFieldResult {
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "unit");
 
   const params = fieldOptions.params ?? {};
-  const base = params.base ?? "";
+  const base = resolveUnitBase(params.base, metadata);
   const decimals = params.decimals ?? 0;
   const prefix = params.prefix === true;
 
@@ -704,6 +705,20 @@ export function formatUnit(
   }
 
   return { rendered: `${formatted}${base}` };
+}
+
+/**
+ * The `base` param is either a literal unit symbol ("ETH", "%") or a
+ * `$.metadata.*` reference pointing at a string constant.
+ */
+function resolveUnitBase(
+  spec: string | undefined,
+  metadata: DescriptorMetadata | undefined,
+): string {
+  if (!spec) return "";
+  if (!spec.startsWith("$.metadata.")) return spec;
+  const resolved = resolveMetadataValue(metadata, spec);
+  return typeof resolved === "string" ? resolved : "";
 }
 
 function bigintLog10(n: bigint): number {
