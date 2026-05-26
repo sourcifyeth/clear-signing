@@ -106,6 +106,7 @@ export async function applyFieldFormats(
       if ("warnings" in groupResult) return groupResult;
       fields.push(groupResult.group);
     } else if (fieldSpec.path?.endsWith(".[]")) {
+      if (fieldSpec.visible === "never") continue;
       const arrayResult = await processArrayField(fieldSpec, ctx);
       if ("warnings" in arrayResult) return arrayResult;
       fields.push(arrayResult.group);

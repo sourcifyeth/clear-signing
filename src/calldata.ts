@@ -96,12 +96,17 @@ export async function formatCalldata(
     return decoded.values.get(key);
   };
 
+  const getArrayLength = (path: string): number => {
+    const key = path.startsWith("#.") ? path.slice(2) : path;
+    return decoded.arrayLengths.get(key) ?? 0;
+  };
+
   const definitions = descriptor.display?.definitions ?? {};
   const result = await applyFieldFormats(
     format,
     definitions,
     resolvePath,
-    (path: string) => decoded.arrayLengths.get(path) ?? 0,
+    getArrayLength,
     tx.chainId,
     descriptor.metadata,
     externalDataProvider,
