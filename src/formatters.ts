@@ -621,7 +621,7 @@ export async function formatDate(
 }
 
 /**
- * Format a Unix timestamp (seconds) as a UTC date string.
+ * Format a Unix timestamp (seconds) as an RFC 3339 date string in UTC.
  */
 export function formatTimestamp(seconds: bigint): RenderFieldResult {
   const date = new Date(Number(seconds) * 1000);
@@ -632,7 +632,7 @@ export function formatTimestamp(seconds: bigint): RenderFieldResult {
   const minutes = String(date.getUTCMinutes()).padStart(2, "0");
   const secs = String(date.getUTCSeconds()).padStart(2, "0");
   return {
-    rendered: `${year}-${month}-${day} ${hours}:${minutes}:${secs} UTC`,
+    rendered: `${year}-${month}-${day} ${hours}:${minutes}:${secs}Z`,
   };
 }
 

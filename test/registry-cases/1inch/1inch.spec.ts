@@ -279,7 +279,7 @@ describe("1inch AggregationRouterV6", () => {
       const expirationField = result.fields[3];
       assert(!isFieldGroup(expirationField));
       expect(expirationField.label).toBe("Expiration time");
-      expect(expirationField.value).toBe("2023-11-14 22:13:20 UTC");
+      expect(expirationField.value).toBe("2023-11-14 22:13:20Z");
       expect(expirationField.fieldType).toBe("uint");
       expect(expirationField.format).toBe("date");
       expect(expirationField.tokenAddress).toBeUndefined();

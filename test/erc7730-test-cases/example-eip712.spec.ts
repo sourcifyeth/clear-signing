@@ -138,7 +138,7 @@ describe("example-eip712.json — PermitSingle", () => {
     const expirationField = result.fields[2];
     assert(!isFieldGroup(expirationField));
     expect(expirationField.label).toBe("Approval expires");
-    expect(expirationField.value).toBe("2025-01-01 00:00:00 UTC");
+    expect(expirationField.value).toBe("2025-01-01 00:00:00Z");
     expect(expirationField.fieldType).toBe("uint");
     expect(expirationField.format).toBe("date");
     expect(expirationField.rawAddress).toBeUndefined();
@@ -381,7 +381,7 @@ describe("example-eip712.json — PermitBatch", () => {
 
     const exp0 = group.fields[1];
     expect(exp0.label).toBe("Approval expires");
-    expect(exp0.value).toBe("2025-01-01 00:00:00 UTC");
+    expect(exp0.value).toBe("2025-01-01 00:00:00Z");
     expect(exp0.fieldType).toBe("uint");
     expect(exp0.format).toBe("date");
     expect(exp0.rawAddress).toBeUndefined();
@@ -404,7 +404,7 @@ describe("example-eip712.json — PermitBatch", () => {
 
     const exp1 = group.fields[3];
     expect(exp1.label).toBe("Approval expires");
-    expect(exp1.value).toBe("2026-01-01 00:00:00 UTC");
+    expect(exp1.value).toBe("2026-01-01 00:00:00Z");
     expect(exp1.fieldType).toBe("uint");
     expect(exp1.format).toBe("date");
     expect(exp1.rawAddress).toBeUndefined();

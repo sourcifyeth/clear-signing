@@ -1023,18 +1023,18 @@ describe("formatTimestamp", () => {
   it("formats Unix epoch as UTC date", () => {
     // 2024-01-15 10:00:00 UTC = 1705312800
     const result = formatTimestamp(1705312800n);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+    expect(result.rendered).toBe("2024-01-15 10:00:00Z");
   });
 
   it("formats epoch 0", () => {
     const result = formatTimestamp(0n);
-    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
+    expect(result.rendered).toBe("1970-01-01 00:00:00Z");
   });
 
   it("pads single-digit months and days", () => {
     // 2024-03-05 08:01:02 UTC = 1709625662
     const result = formatTimestamp(1709625662n);
-    expect(result.rendered).toBe("2024-03-05 08:01:02 UTC");
+    expect(result.rendered).toBe("2024-03-05 08:01:02Z");
   });
 });
 
@@ -1048,13 +1048,13 @@ describe("formatDate", () => {
 
   it("formats a uint value as date with encoding=timestamp", async () => {
     const result = await formatDate(uint(1705312800n), timestampOpts, 1);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+    expect(result.rendered).toBe("2024-01-15 10:00:00Z");
     expect(result.warning).toBeUndefined();
   });
 
   it("formats an int value as date with encoding=timestamp", async () => {
     const result = await formatDate(int(1705312800n), timestampOpts, 1);
-    expect(result.rendered).toBe("2024-01-15 10:00:00 UTC");
+    expect(result.rendered).toBe("2024-01-15 10:00:00Z");
     expect(result.warning).toBeUndefined();
   });
 
@@ -1079,7 +1079,7 @@ describe("formatDate", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("2024-02-29 07:27:12 UTC");
+    expect(result.rendered).toBe("2024-02-29 07:27:12Z");
     expect(result.warning).toBeUndefined();
   });
 
@@ -1093,7 +1093,7 @@ describe("formatDate", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("2024-02-29 07:27:12 UTC");
+    expect(result.rendered).toBe("2024-02-29 07:27:12Z");
     expect(result.warning).toBeUndefined();
   });
 
@@ -1995,7 +1995,7 @@ describe("renderField", () => {
       1,
       undefined,
     );
-    expect(result.rendered).toBe("1970-01-01 00:00:00 UTC");
+    expect(result.rendered).toBe("1970-01-01 00:00:00Z");
   });
 
   it("dispatches 'enum' format", async () => {
