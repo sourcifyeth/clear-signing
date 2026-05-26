@@ -10,11 +10,7 @@ import type {
   ExternalDataProvider,
   FormatOptions,
 } from "../../src/types.js";
-import {
-  addThousandSeparators,
-  hexToBytes,
-  toChecksumAddress,
-} from "../../src/utils.js";
+import { hexToBytes, toChecksumAddress } from "../../src/utils.js";
 import { buildEmbeddedResolverOpts } from "../utils.js";
 
 // USDT on mainnet (matches example-main.json deployment)
@@ -214,9 +210,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
     const amountField = result.fields[1];
     assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount");
-    expect(amountField.value).toBe(
-      addThousandSeparators(TRANSFER_AMOUNT.toString()),
-    );
+    expect(amountField.value).toBe(TRANSFER_AMOUNT.toString());
     expect(amountField.fieldType).toBe("uint");
     expect(amountField.format).toBe("tokenAmount");
     expect(amountField.tokenAddress).toBe(
@@ -229,7 +223,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
 
     expect(result.intent).toBe("Send");
     expect(result.interpolatedIntent).toBe(
-      `Send ${addThousandSeparators(TRANSFER_AMOUNT.toString())} to ${RECIPIENT_LOCAL_NAME}`,
+      `Send ${TRANSFER_AMOUNT.toString()} to ${RECIPIENT_LOCAL_NAME}`,
     );
 
     assert(result.metadata);

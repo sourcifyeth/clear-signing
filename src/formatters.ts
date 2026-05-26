@@ -22,7 +22,6 @@ import {
   resolveMetadataValue,
 } from "./descriptor.js";
 import {
-  addThousandSeparators,
   bytesToUnsignedBigInt,
   bytesToHex,
   formatAmountWithDecimals,
@@ -145,7 +144,7 @@ export function renderRaw(value: ArgumentValue): string {
       return toChecksumAddress(value.bytes);
     case "uint":
     case "int":
-      return addThousandSeparators(value.value.toString());
+      return value.value.toString();
     case "bool":
       return value.value.toString();
     case "string":

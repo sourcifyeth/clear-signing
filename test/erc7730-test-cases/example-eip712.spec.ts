@@ -166,7 +166,7 @@ describe("example-eip712.json — PermitSingle", () => {
     const amountField = result.fields[1];
     assert(!isFieldGroup(amountField));
     expect(amountField.label).toBe("Amount allowance");
-    expect(amountField.value).toBe("1,000,000");
+    expect(amountField.value).toBe("1000000");
     expect(amountField.fieldType).toBe("uint");
     expect(amountField.format).toBe("tokenAmount");
     expect(amountField.tokenAddress).toBe(

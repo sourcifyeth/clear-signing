@@ -96,33 +96,20 @@ export function toChecksumAddress(bytes: Uint8Array): string {
   return result;
 }
 
-/** Add thousand separators to a numeric string. */
-export function addThousandSeparators(value: string): string {
-  const chars = value.split("").reverse();
-  const result: string[] = [];
-  for (let i = 0; i < chars.length; i++) {
-    if (i > 0 && i % 3 === 0) {
-      result.push(",");
-    }
-    result.push(chars[i]);
-  }
-  return result.reverse().join("");
-}
-
 /** Format a bigint amount with decimal places. */
 export function formatAmountWithDecimals(
   amount: bigint,
   decimals: number,
 ): string {
   if (decimals === 0) {
-    return addThousandSeparators(amount.toString());
+    return amount.toString();
   }
 
   const factor = 10n ** BigInt(decimals);
   const integer = amount / factor;
   const remainder = amount % factor;
 
-  const integerPart = addThousandSeparators(integer.toString());
+  const integerPart = integer.toString();
   if (remainder === 0n) {
     return integerPart;
   }
