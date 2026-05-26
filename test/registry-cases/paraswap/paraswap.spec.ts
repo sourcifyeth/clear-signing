@@ -144,7 +144,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       const sendField = result.fields[1];
       assert(!isFieldGroup(sendField));
       expect(sendField.label).toBe("Maximum to Send");
-      expect(sendField.value).toBe("2,000,000,000,000 USDC");
+      expect(sendField.value).toBe("2000000000000 USDC");
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
@@ -374,7 +374,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       const sendField = result.fields[0];
       assert(!isFieldGroup(sendField));
       expect(sendField.label).toBe("Amount to Send");
-      expect(sendField.value).toBe("6,781.622338330348265721 CRV");
+      expect(sendField.value).toBe("6781.622338330348265721 CRV");
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(CRV)));
@@ -386,7 +386,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       const receiveField = result.fields[1];
       assert(!isFieldGroup(receiveField));
       expect(receiveField.label).toBe("Minimum to Receive");
-      expect(receiveField.value).toBe("1,550.108421 USDC");
+      expect(receiveField.value).toBe("1550.108421 USDC");
       expect(receiveField.fieldType).toBe("uint");
       expect(receiveField.format).toBe("tokenAmount");
       expect(receiveField.tokenAddress).toBe(

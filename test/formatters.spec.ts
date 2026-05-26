@@ -75,12 +75,12 @@ describe("renderRaw", () => {
     );
   });
 
-  it("formats uint with thousand separators", () => {
-    expect(renderRaw(uint(1000000n))).toBe("1,000,000");
+  it("formats uint as decimal string", () => {
+    expect(renderRaw(uint(1000000n))).toBe("1000000");
   });
 
-  it("formats int with thousand separators", () => {
-    expect(renderRaw(int(123456n))).toBe("123,456");
+  it("formats int as decimal string", () => {
+    expect(renderRaw(int(123456n))).toBe("123456");
   });
 
   it("formats bool", () => {
@@ -156,7 +156,7 @@ describe("formatNativeAmount", () => {
 
   it("falls back to raw with UNKNOWN_CHAIN when provider is absent", async () => {
     const result = await formatNativeAmount(uint(10n ** 18n), 1);
-    expect(result.rendered).toBe("1,000,000,000,000,000,000");
+    expect(result.rendered).toBe("1000000000000000000");
     expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
   });
 
@@ -166,7 +166,7 @@ describe("formatNativeAmount", () => {
       undefined,
       provider,
     );
-    expect(result.rendered).toBe("1,000,000,000,000,000,000");
+    expect(result.rendered).toBe("1000000000000000000");
     expect(result.warning?.code).toBe("UNKNOWN_CHAIN");
   });
 });
@@ -400,7 +400,7 @@ describe("formatTokenAmount", () => {
       1,
       undefined,
     );
-    expect(result.rendered).toBe("1,000,000");
+    expect(result.rendered).toBe("1000000");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
@@ -417,7 +417,7 @@ describe("formatTokenAmount", () => {
       undefined,
       nullProvider,
     );
-    expect(result.rendered).toBe("1,000,000");
+    expect(result.rendered).toBe("1000000");
     expect(result.warning?.code).toBe("UNKNOWN_TOKEN");
     expect(result.tokenAddress).toBe(
       "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -513,7 +513,7 @@ describe("formatTokenAmount", () => {
       undefined,
       provider,
     );
-    expect(result.rendered).toBe("1,000,000");
+    expect(result.rendered).toBe("1000000");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 });
@@ -633,7 +633,7 @@ describe("formatTokenAmount with metadata token", () => {
       1,
       incompleteMeta,
     );
-    expect(result.rendered).toBe("1,000,000");
+    expect(result.rendered).toBe("1000000");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
@@ -938,7 +938,7 @@ describe("formatNftName", () => {
 
   it("falls back to raw when collection address is missing", async () => {
     const result = await formatNftName({}, uint(1036n), noopResolvePath, 1);
-    expect(result.rendered).toBe("1,036");
+    expect(result.rendered).toBe("1036");
     expect(result.warning?.code).toBe("FORMAT_PARAM_RESOLUTION_ERROR");
   });
 
@@ -952,7 +952,7 @@ describe("formatNftName", () => {
       noopResolvePath,
       undefined,
     );
-    expect(result.rendered).toBe("1,036");
+    expect(result.rendered).toBe("1036");
     expect(result.warning?.code).toBe("CONTAINER_MISSING_CHAIN_ID");
   });
 
@@ -970,7 +970,7 @@ describe("formatNftName", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("1,036");
+    expect(result.rendered).toBe("1036");
     expect(result.warning?.code).toBe("UNKNOWN_NFT_COLLECTION");
   });
 
@@ -988,7 +988,7 @@ describe("formatNftName", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("1,036");
+    expect(result.rendered).toBe("1036");
     expect(result.warning?.code).toBe("UNKNOWN_NFT_COLLECTION");
   });
 
@@ -1060,7 +1060,7 @@ describe("formatDate", () => {
 
   it("falls back to raw when encoding is missing", async () => {
     const result = await formatDate(uint(1705312800n), {}, 1);
-    expect(result.rendered).toBe("1,705,312,800");
+    expect(result.rendered).toBe("1705312800");
     expect(result.warning?.code).toBe("UNKNOWN_ENCODING");
   });
 
@@ -1116,7 +1116,7 @@ describe("formatDate", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("19,332,140");
+    expect(result.rendered).toBe("19332140");
     expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
   });
 
@@ -1130,13 +1130,13 @@ describe("formatDate", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("19,332,140");
+    expect(result.rendered).toBe("19332140");
     expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
   });
 
   it("returns UNKNOWN_BLOCK when no provider for blockheight", async () => {
     const result = await formatDate(uint(19332140n), blockheightOpts, 1);
-    expect(result.rendered).toBe("19,332,140");
+    expect(result.rendered).toBe("19332140");
     expect(result.warning?.code).toBe("UNKNOWN_BLOCK");
   });
 });

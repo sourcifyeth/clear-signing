@@ -117,7 +117,7 @@ describe("1inch AggregationRouterV6", () => {
       const sendField = result.fields[0];
       assert(!isFieldGroup(sendField));
       expect(sendField.label).toBe("Amount to Send");
-      expect(sendField.value).toBe("500,000,000,000,000 CHUPA");
+      expect(sendField.value).toBe("500000000000000 CHUPA");
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(
@@ -239,7 +239,7 @@ describe("1inch AggregationRouterV6", () => {
       const sendField = result.fields[0];
       assert(!isFieldGroup(sendField));
       expect(sendField.label).toBe("Amount to Send");
-      expect(sendField.value).toBe("1,000 USDC");
+      expect(sendField.value).toBe("1000 USDC");
       expect(sendField.fieldType).toBe("uint");
       expect(sendField.format).toBe("tokenAmount");
       expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
