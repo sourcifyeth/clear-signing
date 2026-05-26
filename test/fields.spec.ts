@@ -186,6 +186,26 @@ describe("applyFieldFormats", () => {
       assert("warnings" in result);
       expect(result.warnings[0].code).toBe("INVALID_DESCRIPTOR");
     });
+
+    it("returns CONTAINER_MISSING_REQUIRED_PATH for missing container field", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [{ path: "@.from", label: "Sender", format: "raw" }],
+      };
+      const resolvePath = mapResolvePath({});
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings[0].code).toBe("CONTAINER_MISSING_REQUIRED_PATH");
+      expect(result.warnings[0].message).toContain("@.from");
+    });
   });
 
   describe("field group with group-level array path (pattern 1)", () => {

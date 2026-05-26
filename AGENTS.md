@@ -329,6 +329,11 @@ codes, or the `ExternalDataProvider` interface, check whether [`GUIDE.md`](GUIDE
 (the wallet integration guide) and [`README.md`](README.md) need updating too — they
 contain example code and type signatures that can drift out of sync with the source.
 
+## Pull Requests
+
+Never include a "Test plan" section in PR descriptions. Keep descriptions to a
+short bulleted summary of the change.
+
 ## Testing
 
 ```bash
