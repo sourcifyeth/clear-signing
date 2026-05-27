@@ -1,13 +1,20 @@
 /**
- * Tests for 1inch AggregationRouterV6 descriptor:
- * - swap: standard token swap with tuple params
- * - clipperSwap: byte slice paths (srcToken.[-20:], goodUntil.[-4:])
+ * Tests for 1inch descriptors:
+ * - AggregationRouterV6.swap: standard token swap with tuple params
+ * - AggregationRouterV6.clipperSwap: byte slice paths (srcToken.[-20:], goodUntil.[-4:])
+ * - NativeOrderFactory.create: tuple with addresses declared as uint256
+ *   (1inch's Address-as-uint256 convention)
  */
 
 import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
-import { toChecksumAddress, hexToBytes } from "../../../src/utils.js";
+import {
+  bytesToHex,
+  hexToBytes,
+  selectorForSignature,
+  toChecksumAddress,
+} from "../../../src/utils.js";
 import { buildEmbeddedResolverOpts } from "../../utils.js";
 
 describe("1inch AggregationRouterV6", () => {
@@ -294,6 +301,172 @@ describe("1inch AggregationRouterV6", () => {
       expect(result.metadata.info).toEqual({
         url: "https://1inch.io/",
         deploymentDate: "2024-02-12T03:44:35Z",
+      });
+
+      expect(result.interpolatedIntent).toBeUndefined();
+      expect(result.rawCalldataFallback).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    });
+  });
+});
+
+describe("1inch NativeOrderFactory", () => {
+  const CHAIN_ID = 1;
+  const CONTRACT = "0xe12E0f117d23a5ccc57f8935CD8c4E80cD91FF01";
+  const RECEIVER = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+  const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+
+  function buildOpts(externalDataProvider?: ExternalDataProvider) {
+    return buildEmbeddedResolverOpts(
+      __dirname,
+      {
+        calldataDescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: CONTRACT,
+            file: "calldata-NativeOrderFactory.json",
+          },
+        ],
+      },
+      externalDataProvider,
+    );
+  }
+
+  // =========================================================================
+  // create
+  // =========================================================================
+  describe("create", () => {
+    // create((uint256 salt, uint256 maker, uint256 receiver, uint256 makerAsset,
+    //        uint256 takerAsset, uint256 makingAmount, uint256 takingAmount,
+    //        uint256 makerTraits) makerOrder)
+    //
+    // 1inch stores addresses (receiver, makerAsset, takerAsset) inside uint256
+    // slots — the address lives in the low 20 bytes of the 32-byte word.
+    //
+    // Test order: ETH → USDC native swap order, sending 1 ETH for 3000 USDC,
+    // beneficiary is the receiver (vitalik.eth address).
+    const SELECTOR = bytesToHex(
+      selectorForSignature(
+        "create((uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256))",
+      ),
+    );
+
+    const CREATE_CALLDATA =
+      SELECTOR +
+      "0000000000000000000000000000000000000000000000000000000000012345" + // salt
+      "0000000000000000000000000000000000000000000000000000000000000001" + // maker (hidden)
+      "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045" + // receiver
+      "0000000000000000000000000000000000000000000000000000000000000000" + // makerAsset (hidden)
+      "000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" + // takerAsset = USDC
+      "0000000000000000000000000000000000000000000000000000000000000000" + // makingAmount (hidden)
+      "00000000000000000000000000000000000000000000000000000000b2d05e00" + // takingAmount = 3000 USDC
+      "0000000000000000000000000000000000000000000000000000000000000000"; // makerTraits (hidden)
+
+    const TX_VALUE = 1000000000000000000n; // 1 ETH
+
+    const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] = async (
+      chainId,
+    ) => {
+      if (chainId === CHAIN_ID) {
+        return {
+          name: "Ethereum Mainnet",
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        };
+      }
+      return null;
+    };
+
+    const resolveToken: ExternalDataProvider["resolveToken"] = async (
+      chainId,
+      tokenAddress,
+    ) => {
+      if (chainId === CHAIN_ID && tokenAddress === USDC) {
+        return { name: "USD Coin", symbol: "USDC", decimals: 6 };
+      }
+      return null;
+    };
+
+    const resolveLocalName: ExternalDataProvider["resolveLocalName"] = async (
+      address,
+    ) => {
+      if (address === RECEIVER) {
+        return { name: "vitalik.eth", typeMatch: true };
+      }
+      return null;
+    };
+
+    it("renders an ETH→USDC limit order with uint256-encoded addresses", async () => {
+      const opts = buildOpts({
+        resolveChainInfo,
+        resolveToken,
+        resolveLocalName,
+      });
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          value: TX_VALUE,
+          data: CREATE_CALLDATA,
+        },
+        opts,
+      );
+
+      expect(result.intent).toBe("create order");
+
+      assert(result.fields);
+      // Visible: Amount to Send, Receive amount, Beneficiary
+      // Hidden (visible=never): salt, maker, makerAsset, makingAmount, makerTraits
+      expect(result.fields).toHaveLength(3);
+
+      // Field 0: Amount to Send — `@.value` rendered as native ETH amount
+      const sendField = result.fields[0];
+      assert(!isFieldGroup(sendField));
+      expect(sendField.label).toBe("Amount to Send");
+      expect(sendField.value).toBe("1 ETH");
+      expect(sendField.fieldType).toBe("uint");
+      expect(sendField.format).toBe("amount");
+      expect(sendField.tokenAddress).toBeUndefined();
+      expect(sendField.rawAddress).toBeUndefined();
+      expect(sendField.embeddedCalldata).toBeUndefined();
+      expect(sendField.warning).toBeUndefined();
+
+      // Field 1: Receive amount — tokenAmount whose tokenPath points to a
+      // uint256 slot holding the USDC address in its low 20 bytes
+      const receiveField = result.fields[1];
+      assert(!isFieldGroup(receiveField));
+      expect(receiveField.label).toBe("Receive amount");
+      expect(receiveField.value).toBe("3000 USDC");
+      expect(receiveField.fieldType).toBe("uint");
+      expect(receiveField.format).toBe("tokenAmount");
+      expect(receiveField.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(USDC)),
+      );
+      expect(receiveField.rawAddress).toBeUndefined();
+      expect(receiveField.embeddedCalldata).toBeUndefined();
+      expect(receiveField.warning).toBeUndefined();
+
+      // Field 2: Beneficiary — addressName on a uint256 field holding an address
+      const beneficiaryField = result.fields[2];
+      assert(!isFieldGroup(beneficiaryField));
+      expect(beneficiaryField.label).toBe("Beneficiary");
+      expect(beneficiaryField.value).toBe("vitalik.eth");
+      expect(beneficiaryField.fieldType).toBe("address");
+      expect(beneficiaryField.format).toBe("addressName");
+      expect(beneficiaryField.rawAddress).toBe(
+        toChecksumAddress(hexToBytes(RECEIVER)),
+      );
+      expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
+      expect(beneficiaryField.warning).toBeUndefined();
+
+      // Metadata
+      assert(result.metadata);
+      expect(result.metadata.owner).toBe("1inch Network");
+      expect(result.metadata.contractName).toBe("NativeOrderFactory");
+      expect(result.metadata.info).toEqual({
+        url: "https://1inch.io/",
+        deploymentDate: "2025-09-26T02:02:59Z",
       });
 
       expect(result.interpolatedIntent).toBeUndefined();
