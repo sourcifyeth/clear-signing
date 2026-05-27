@@ -8,4 +8,10 @@ export default defineConfig({
   sourcemap: true,
   target: "es2022",
   platform: "neutral",
+  esbuildOptions(options) {
+    options.supported = {
+      ...options.supported,
+      "import-attributes": true,
+    };
+  },
 });

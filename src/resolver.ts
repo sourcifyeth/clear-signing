@@ -57,7 +57,9 @@ async function createResolver(
       return {
         index: options.index,
         fetchDescriptor: async (path) => {
-          const mod = await import(`${options.descriptorDirectory}/${path}`);
+          const mod = await import(`${options.descriptorDirectory}/${path}`, {
+            with: { type: "json" },
+          });
           return (mod.default ?? mod) as Descriptor;
         },
       };
