@@ -1188,53 +1188,98 @@ describe("formatDuration", () => {
 
 describe("formatUnit", () => {
   it("formats integer with base unit (no decimals)", () => {
-    const result = formatUnit(uint(10n), { params: { base: "h" } });
+    const result = formatUnit(uint(10n), { params: { base: "h" } }, undefined);
     expect(result.rendered).toBe("10h");
   });
 
   it("formats with decimals", () => {
-    const result = formatUnit(uint(15n), {
-      params: { base: "d", decimals: 1 },
-    });
+    const result = formatUnit(
+      uint(15n),
+      { params: { base: "d", decimals: 1 } },
+      undefined,
+    );
     expect(result.rendered).toBe("1.5d");
   });
 
   it("formats percentage with decimals", () => {
-    const result = formatUnit(uint(5000n), {
-      params: { base: "%", decimals: 2 },
-    });
+    const result = formatUnit(
+      uint(5000n),
+      { params: { base: "%", decimals: 2 } },
+      undefined,
+    );
     expect(result.rendered).toBe("50%");
   });
 
   it("formats with SI prefix", () => {
-    const result = formatUnit(uint(36000n), {
-      params: { base: "s", prefix: true },
-    });
+    const result = formatUnit(
+      uint(36000n),
+      { params: { base: "s", prefix: true } },
+      undefined,
+    );
     expect(result.rendered).toBe("36ks");
   });
 
   it("formats with SI prefix and decimals", () => {
-    const result = formatUnit(uint(1500000n), {
-      params: { base: "W", decimals: 3, prefix: true },
-    });
+    const result = formatUnit(
+      uint(1500000n),
+      { params: { base: "W", decimals: 3, prefix: true } },
+      undefined,
+    );
     expect(result.rendered).toBe("1.5kW");
   });
 
   it("falls back to no prefix when value is too small", () => {
-    const result = formatUnit(uint(500n), {
-      params: { base: "s", prefix: true },
-    });
+    const result = formatUnit(
+      uint(500n),
+      { params: { base: "s", prefix: true } },
+      undefined,
+    );
     expect(result.rendered).toBe("500s");
   });
 
   it("returns type mismatch for non-numeric values", () => {
-    const result = formatUnit(str("hello"), { params: { base: "m" } });
+    const result = formatUnit(
+      str("hello"),
+      { params: { base: "m" } },
+      undefined,
+    );
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
   });
 
   it("defaults decimals to 0 and base to empty", () => {
-    const result = formatUnit(uint(42n), {});
+    const result = formatUnit(uint(42n), {}, undefined);
     expect(result.rendered).toBe("42");
+  });
+
+  it("resolves a metadata-path base", () => {
+    const metadata: DescriptorMetadata = {
+      constants: { stakingTokenTicker: "POL" },
+    };
+    const result = formatUnit(
+      uint(100n * 10n ** 18n),
+      {
+        params: {
+          base: "$.metadata.constants.stakingTokenTicker",
+          decimals: 18,
+        },
+      },
+      metadata,
+    );
+    expect(result.rendered).toBe("100POL");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("falls back to empty base when the metadata path does not resolve to a string", () => {
+    const metadata: DescriptorMetadata = {
+      constants: { stakingTokenTicker: 42 },
+    };
+    const result = formatUnit(
+      uint(10n),
+      { params: { base: "$.metadata.constants.stakingTokenTicker" } },
+      metadata,
+    );
+    expect(result.rendered).toBe("10");
+    expect(result.warning).toBeUndefined();
   });
 });
 
