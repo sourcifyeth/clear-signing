@@ -2,6 +2,7 @@
  * Tests for Paraswap AugustusSwapper v6.2 descriptor:
  * - swapOnAugustusRFQTryBatchFill: tuple array decoding + array index access
  * - swapExactAmountOutOnBalancerV2: dynamic bytes + byte slices
+ * - swapExactAmountInOnCurveV1: static tuple with relative tokenPath
  */
 
 import { describe, it, expect, assert } from "vitest";
@@ -406,6 +407,120 @@ describe("Paraswap AugustusSwapper v6.2", () => {
       expect(beneficiaryField.format).toBe("addressName");
       expect(beneficiaryField.rawAddress).toBe(
         toChecksumAddress(hexToBytes(FROM)),
+      );
+      expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
+      expect(beneficiaryField.warning).toBeUndefined();
+
+      // Metadata
+      assert(result.metadata);
+      expect(result.metadata.owner).toBe("Velora");
+      expect(result.metadata.contractName).toBe("AugustusSwapperV6.2");
+      expect(result.metadata.info).toEqual({
+        url: "https://www.velora.xyz/",
+      });
+
+      expect(result.interpolatedIntent).toBeUndefined();
+      expect(result.rawCalldataFallback).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // swapExactAmountInOnCurveV1
+  // =========================================================================
+  describe("swapExactAmountInOnCurveV1", () => {
+    // ABI-encoded calldata:
+    //   curveV1Data is a static tuple (9 static fields = 288 bytes inline)
+    //   curveV1Data.srcToken = USDC
+    //   curveV1Data.destToken = DAI
+    //   curveV1Data.fromAmount = 1,000,000 (1 USDC)
+    //   curveV1Data.toAmount = 950,000,000,000,000,000 (0.95 DAI)
+    //   curveV1Data.beneficiary = BENEFICIARY
+    //   partnerAndFee = 0
+    //   permit = empty bytes
+    // Head layout (after selector):
+    //   bytes 0-287:   curveV1Data tuple (9 words)
+    //   bytes 288-319: partnerAndFee
+    //   bytes 320-351: permit offset = 0x160 (352)
+    //   bytes 352+:    permit length (0) + content
+    const CURVE_V1_CALLDATA =
+      "0x1a01c532" +
+      // curveV1Data tuple (9 words):
+      "0000000000000000000000000000000000000000000000000000000000000000" + // curveData
+      "0000000000000000000000000000000000000000000000000000000000000000" + // curveAssets
+      "000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" + // srcToken (USDC)
+      "0000000000000000000000006b175474e89094c44da98b954eedeac495271d0f" + // destToken (DAI)
+      "00000000000000000000000000000000000000000000000000000000000f4240" + // fromAmount = 1e6
+      "0000000000000000000000000000000000000000000000000d2f13f7789f0000" + // toAmount = 0.95e18
+      "0000000000000000000000000000000000000000000000000000000000000000" + // quotedAmount
+      "0000000000000000000000000000000000000000000000000000000000000000" + // metadata
+      "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045" + // beneficiary
+      // partnerAndFee:
+      "0000000000000000000000000000000000000000000000000000000000000000" +
+      // permit offset (0x160 = 352):
+      "0000000000000000000000000000000000000000000000000000000000000160" +
+      // --- permit (length=0) ---
+      "0000000000000000000000000000000000000000000000000000000000000000";
+
+    it("formats CurveV1 swap with relative tokenPath inside a static tuple", async () => {
+      const opts = buildOpts({ resolveToken, resolveLocalName });
+
+      const result = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          from: FROM,
+          data: CURVE_V1_CALLDATA,
+        },
+        opts,
+      );
+
+      expect(result.intent).toBe("Swap");
+
+      assert(result.fields);
+      // 1 unlabeled DisplayFieldGroup wrapping the curveV1Data struct fields
+      expect(result.fields).toHaveLength(1);
+
+      const curveGroup = result.fields[0];
+      assert(isFieldGroup(curveGroup));
+      expect(curveGroup.label).toBeUndefined();
+      expect(curveGroup.warning).toBeUndefined();
+      // 3 visible children: fromAmount, toAmount, beneficiary
+      expect(curveGroup.fields).toHaveLength(3);
+
+      // Child 0: Amount to Send — tokenPath = srcToken (USDC)
+      const sendField = curveGroup.fields[0];
+      expect(sendField.label).toBe("Amount to Send");
+      expect(sendField.value).toBe("1 USDC");
+      expect(sendField.fieldType).toBe("uint");
+      expect(sendField.format).toBe("tokenAmount");
+      expect(sendField.tokenAddress).toBe(toChecksumAddress(hexToBytes(USDC)));
+      expect(sendField.embeddedCalldata).toBeUndefined();
+      expect(sendField.rawAddress).toBeUndefined();
+      expect(sendField.warning).toBeUndefined();
+
+      // Child 1: Minimum to Receive — tokenPath = destToken (DAI)
+      const receiveField = curveGroup.fields[1];
+      expect(receiveField.label).toBe("Minimum to Receive");
+      expect(receiveField.value).toBe("0.95 DAI");
+      expect(receiveField.fieldType).toBe("uint");
+      expect(receiveField.format).toBe("tokenAmount");
+      expect(receiveField.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(DAI)),
+      );
+      expect(receiveField.embeddedCalldata).toBeUndefined();
+      expect(receiveField.rawAddress).toBeUndefined();
+      expect(receiveField.warning).toBeUndefined();
+
+      // Child 2: Beneficiary
+      const beneficiaryField = curveGroup.fields[2];
+      expect(beneficiaryField.label).toBe("Beneficiary");
+      expect(beneficiaryField.value).toBe("vitalik.eth");
+      expect(beneficiaryField.fieldType).toBe("address");
+      expect(beneficiaryField.format).toBe("addressName");
+      expect(beneficiaryField.rawAddress).toBe(
+        toChecksumAddress(hexToBytes(BENEFICIARY)),
       );
       expect(beneficiaryField.tokenAddress).toBeUndefined();
       expect(beneficiaryField.embeddedCalldata).toBeUndefined();
