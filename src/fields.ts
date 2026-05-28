@@ -32,6 +32,7 @@ import {
   isFieldGroup,
   mergeDefinitions,
   resolveFieldValue,
+  resolvedToAddress,
   toArgumentValue,
 } from "./descriptor.js";
 import {
@@ -211,11 +212,13 @@ async function processSingleField(
     };
   }
 
-  // Convert bytes-slice to a typed ArgumentValue based on the field format
-  const argValue: ArgumentValue =
-    resolvedValue.type === "bytes-slice"
-      ? bytesSliceToArgumentValue(resolvedValue, merged.format)
-      : resolvedValue;
+  // Convert bytes-slice to a typed ArgumentValue based on the field format,
+  // and coerce uint/int → address when the format expects an address (some
+  // descriptors store addresses in uint256 slots, e.g. 1inch's `Address` type).
+  const argValue: ArgumentValue = coerceResolvedValue(
+    resolvedValue,
+    merged.format,
+  );
 
   const visibility = evaluateVisibility(merged.visible, argValue, merged.label);
   if ("warning" in visibility) return { warnings: [visibility.warning] };
@@ -681,6 +684,31 @@ export function bytesSliceToArgumentValue(
 ): ArgumentValue {
   const fieldType = fieldTypeForFormat(format);
   return bytesSliceToFieldType(slice.bytes, fieldType);
+}
+
+/**
+ * Coerce a resolved value to the ArgumentValue expected by the field format:
+ *   - bytes-slice → re-interpreted as the format's expected primary type
+ *   - uint/int    → coerced to address when the format expects an address
+ *                   (low 20 bytes of the 32-byte big-endian encoding); this
+ *                   supports descriptors that store addresses in uint256 slots
+ *
+ * Falls through to the input value unchanged otherwise.
+ */
+function coerceResolvedValue(
+  value: ArgumentValue | BytesSliceValue,
+  format: DescriptorFieldFormatType,
+): ArgumentValue {
+  if (value.type === "bytes-slice") {
+    return bytesSliceToArgumentValue(value, format);
+  }
+  if (
+    (value.type === "uint" || value.type === "int") &&
+    fieldTypeForFormat(format) === "address"
+  ) {
+    return resolvedToAddress(value) ?? value;
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------------------

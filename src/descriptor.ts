@@ -193,6 +193,28 @@ export function bytesToAddressArgumentValue(
 }
 
 /**
+ * Coerce a resolved path value to an address ArgumentValue.
+ *
+ * Accepts `address` directly, takes the low 20 bytes of a `bytes`/`bytes-slice`
+ * value, and accepts `uint`/`int` whose 32-byte big-endian encoding carries an
+ * address in the low 20 bytes. The latter supports descriptors that declare
+ * addresses as `uint256` in the ABI (1inch's `Address` user-defined type).
+ */
+export function resolvedToAddress(
+  value: ArgumentValue | BytesSliceValue | undefined,
+): { type: "address"; bytes: Uint8Array } | undefined {
+  if (!value) return undefined;
+  if (value.type === "address") return value;
+  if (value.type === "bytes" || value.type === "bytes-slice") {
+    return bytesToAddressArgumentValue(value.bytes);
+  }
+  if (value.type === "uint" || value.type === "int") {
+    return bytesToAddressArgumentValue(bigIntToBytes(value.value));
+  }
+  return undefined;
+}
+
+/**
  * Convert an ArgumentValue to its raw byte representation for byte slicing.
  * - uint/int → 32-byte big-endian (two's complement for negative int)
  * - address → 20 bytes

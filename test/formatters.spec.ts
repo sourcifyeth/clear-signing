@@ -335,11 +335,21 @@ describe("resolveTokenAddress", () => {
     );
   });
 
-  it("returns undefined when resolvePath returns non-address", () => {
-    const resolvePath: ResolvePath = () => ({
-      type: "uint",
-      value: 42n,
-    });
+  it("resolves token from a uint resolvePath (1inch Address-as-uint256)", () => {
+    // Address packed in the low 20 bytes of a uint256
+    const usdcAsUint = 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48n;
+    const resolvePath: ResolvePath = (path) => {
+      if (path === "tokenSlot") return { type: "uint", value: usdcAsUint };
+      return undefined;
+    };
+    const field = { params: { token: "tokenSlot" } };
+    expect(resolveTokenAddress(field, resolvePath)).toBe(
+      "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    );
+  });
+
+  it("returns undefined when resolvePath returns a non-address-shaped type", () => {
+    const resolvePath: ResolvePath = () => ({ type: "bool", value: true });
     const field = { params: { token: "someField" } };
     expect(resolveTokenAddress(field, resolvePath)).toBeUndefined();
   });

@@ -17,10 +17,7 @@ import type {
   Warning,
 } from "./types.js";
 import type { ArgumentValue, ResolvePath } from "./descriptor.js";
-import {
-  bytesToAddressArgumentValue,
-  resolveMetadataValue,
-} from "./descriptor.js";
+import { resolveMetadataValue, resolvedToAddress } from "./descriptor.js";
 import {
   bytesToUnsignedBigInt,
   bytesToHex,
@@ -412,11 +409,8 @@ export function resolveTokenAddress(
   }
 
   // Any path ($., @., #., or bare) — resolve via the caller's closure
-  let resolved = resolvePath(token);
-  if (resolved?.type === "bytes-slice") {
-    resolved = bytesToAddressArgumentValue(resolved.bytes);
-  }
-  if (resolved?.type === "address") {
+  const resolved = resolvedToAddress(resolvePath(token));
+  if (resolved) {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
 
@@ -543,11 +537,8 @@ export function resolveCollectionAddress(
   }
 
   // Any path ($., @., #., or bare) — resolve via the caller's closure
-  let resolved = resolvePath(collection);
-  if (resolved?.type === "bytes-slice") {
-    resolved = bytesToAddressArgumentValue(resolved.bytes);
-  }
-  if (resolved?.type === "address") {
+  const resolved = resolvedToAddress(resolvePath(collection));
+  if (resolved) {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
 
@@ -903,11 +894,8 @@ function resolveCallee(
     return spec.toLowerCase();
   }
 
-  let resolved = resolvePath(spec);
-  if (resolved?.type === "bytes-slice") {
-    resolved = bytesToAddressArgumentValue(resolved.bytes);
-  }
-  if (resolved?.type === "address") {
+  const resolved = resolvedToAddress(resolvePath(spec));
+  if (resolved) {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
 
@@ -959,11 +947,8 @@ function resolveSpenderParam(
     return spec.toLowerCase();
   }
 
-  let resolved = resolvePath(spec);
-  if (resolved?.type === "bytes-slice") {
-    resolved = bytesToAddressArgumentValue(resolved.bytes);
-  }
-  if (resolved?.type === "address") {
+  const resolved = resolvedToAddress(resolvePath(spec));
+  if (resolved) {
     return bytesToHex(resolved.bytes).toLowerCase();
   }
 
