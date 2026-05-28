@@ -309,12 +309,24 @@ export function mergeDefinitions(
 
 /**
  * Resolve a field's value using its `value` (literal) or `path` property.
+ *
+ * `value` strings that begin with `$.metadata.` are resolved via the path
+ * resolver so that descriptors can reuse constants declared under
+ * `metadata.constants` (or other metadata fields) as field values.
  */
 export function resolveFieldValue(
   field: DescriptorFieldFormat,
   resolvePath: ResolvePath,
 ): ArgumentValue | BytesSliceValue | undefined {
-  if (field.value !== undefined) return toArgumentValue(field.value);
+  if (field.value !== undefined) {
+    if (
+      typeof field.value === "string" &&
+      field.value.startsWith("$.metadata.")
+    ) {
+      return resolvePath(field.value);
+    }
+    return toArgumentValue(field.value);
+  }
   if (field.path !== undefined) return resolvePath(field.path);
   return undefined;
 }
