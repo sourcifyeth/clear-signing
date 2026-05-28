@@ -39,7 +39,10 @@ src/
 - **`fields.ts`** — The field processing pipeline. Primary entry point is `applyFieldFormats()`,
   which iterates format fields, merges definitions, resolves values, and renders each field.
   Handles field groups with array iteration (group-level and child-level patterns, sequential
-  and bundled modes). Delegates individual field rendering to `formatters.ts`.
+  and bundled modes) as well as struct groups (group path points to a static tuple, children
+  resolved relative to it; always emitted as a DisplayFieldGroup, with the group's `label`
+  passed through as-is — may be undefined).
+  Delegates individual field rendering to `formatters.ts`.
   Contains byte slice support: `parseByteSlice`, `applyByteSlice`, `buildSliceResolvePath`
   (wraps a `BaseResolvePath` to handle slice paths transparently), and
   `bytesSliceToArgumentValue` (converts `BytesSliceValue` to `ArgumentValue` using the

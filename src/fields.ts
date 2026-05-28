@@ -103,7 +103,9 @@ export async function applyFieldFormats(
     if (isFieldGroup(fieldSpec)) {
       const groupResult = fieldSpec.path?.endsWith(".[]")
         ? await processGroupArrayPath(fieldSpec, ctx)
-        : await processChildArrayPaths(fieldSpec, ctx);
+        : groupHasArrayChildren(fieldSpec)
+          ? await processChildArrayPaths(fieldSpec, ctx)
+          : await processStructGroup(fieldSpec, ctx);
       if ("warnings" in groupResult) return groupResult;
       fields.push(groupResult.group);
     } else if (fieldSpec.path?.endsWith(".[]")) {
@@ -332,7 +334,7 @@ async function processChildArrayPaths(
   const paramMismatch = checkParamArrayLengths(childFields, arrayLengths, ctx);
   if (paramMismatch) return { warnings: [paramMismatch] };
 
-  if (arrayLengths.length === 0 || arrayLengths.every((a) => a.length === 0)) {
+  if (arrayLengths.every((a) => a.length === 0)) {
     return {
       group: emptyArrayGroup(group.label, "All arrays in group are empty"),
     };
@@ -401,6 +403,46 @@ async function processChildArrayPaths(
 
   joinArrayValues(arrayLengths, ctx.renderedValues);
   return { group: { label: group.label, fields: allFields } };
+}
+
+/**
+ * Pattern 3: Group path points to a static tuple (no .[] anywhere).
+ * Children are resolved relative to the tuple path — e.g. group
+ * `path: "#.swapData"` with child `path: "fromAmount"` resolves to
+ * `swapData.fromAmount`. Always returns a DisplayFieldGroup (label may be
+ * undefined); the rendering UI decides how to display unlabeled groups.
+ */
+async function processStructGroup(
+  group: DescriptorFieldGroup,
+  ctx: FieldContext,
+): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
+  const prefix = parseGroupBasePath(group.path).replace(/^#\./, "");
+
+  const scopedCtx: FieldContext = prefix
+    ? {
+        ...ctx,
+        resolvePath: (path: string) => {
+          if (path.startsWith("@.") || path.startsWith("$.")) {
+            return ctx.resolvePath(path);
+          }
+          const key = path.startsWith("#.") ? path.slice(2) : path;
+          return ctx.resolvePath(`${prefix}.${key}`);
+        },
+      }
+    : ctx;
+
+  const result = await processFlatFields(group.fields ?? [], scopedCtx);
+  if ("warnings" in result) return result;
+
+  return { group: { label: group.label, fields: result.fields } };
+}
+
+/** True iff any direct child of the group has an `.[]` array iterator in its path. */
+function groupHasArrayChildren(group: DescriptorFieldGroup): boolean {
+  for (const child of group.fields ?? []) {
+    if (!isFieldGroup(child) && child.path?.includes(".[]")) return true;
+  }
+  return false;
 }
 
 /**
