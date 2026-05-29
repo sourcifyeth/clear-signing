@@ -184,7 +184,9 @@ Pure I/O layer with no caching. Exports:
 
 ## Descriptor Includes & Merging
 
-ERC-7730 descriptors may reference another descriptor file via a top-level `includes` field containing a relative path. `DescriptorResolver` automatically fetches and merges the included file before returning the descriptor.
+ERC-7730 descriptors may reference another descriptor file via a top-level `includes` field containing a relative path. `DescriptorResolver` automatically fetches and merges the included file before returning the descriptor. Includes may be chained — each included descriptor is resolved with its own includes before being merged upward. A cyclic include chain returns a `CYCLIC_INCLUDES` warning rather than throwing.
+
+`resolveCalldataDescriptor` / `resolveTypedDataDescriptor` return `Promise<{ descriptor } | { warning }>`. The warning is `NO_DESCRIPTOR` when nothing is indexed for the lookup key, or `CYCLIC_INCLUDES` when the include chain self-references. Fetch errors from the underlying descriptor I/O still throw — only resolution-logic failures surface as warnings.
 
 The merge is implemented in `mergeDescriptors(including, included)` (internal to `resolver.ts`) and follows the EIP-7730 spec:
 
