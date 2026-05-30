@@ -411,13 +411,30 @@ export type GitHubResolverOptions = {
 export type EmbeddedResolverOptions = {
   type: "embedded";
   index: RegistryIndex; // must be provided for embedded resolvers
+  /**
+   * Filesystem root that descriptor paths in `index` are resolved against.
+   * The embedded resolver does `import(${descriptorDirectory}/${path})`.
+   * If a descriptor's `includes` chain reaches outside its own directory
+   * (e.g. `../../ercs/shared.json`), the index entries must be stored with
+   * enough leading directory segments to absorb the `..` traversal — see
+   * the contract on {@link RegistryIndex.calldataIndex}.
+   */
   descriptorDirectory: string;
 };
 
 export interface RegistryIndex {
   /**
-   * Maps CAIP-10 identifiers ("eip155:{chainId}:{address}") to a single
-   * descriptor path.
+   * Maps CAIP-10 identifiers ("eip155:{chainId}:{address}") to the descriptor
+   * file's path.
+   *
+   * The path is resolved relative to the resolver root — `descriptorDirectory`
+   * for embedded resolvers, the repository root for GitHub resolvers. It MUST
+   * be the descriptor's full relative path, not just a basename: an
+   * `includes` declared inside the descriptor (e.g. `"../../ercs/foo.json"`)
+   * is resolved against the directory of *this* path, and any `..` segments
+   * that overshoot the root are dropped. So an index keyed by bare basename
+   * silently truncates `..` traversals — store `"registry/foo/main.json"`,
+   * not `"main.json"`, if the include chain reaches a sibling directory.
    */
   calldataIndex: Record<string, string>;
 
@@ -429,6 +446,9 @@ export interface RegistryIndex {
    * wraps different order shapes). Entries are disambiguated by matching the
    * EIP-712 `encodeType` hash of the incoming typed data against
    * `encodeTypeHashes`.
+   *
+   * The `path` on each entry follows the same relative-path contract as
+   * `calldataIndex`.
    *
    * See https://github.com/ethereum/clear-signing-erc7730-registry/blob/master/index.eip712.json
    * as an example of the shape of this index in practice.
