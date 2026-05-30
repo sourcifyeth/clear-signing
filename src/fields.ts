@@ -108,7 +108,7 @@ export async function applyFieldFormats(
           : await processStructGroup(fieldSpec, ctx);
       if ("warnings" in groupResult) return groupResult;
       fields.push(groupResult.group);
-    } else if (fieldSpec.path?.endsWith(".[]")) {
+    } else if (fieldSpec.path?.includes(".[]")) {
       if (fieldSpec.visible === "never") continue;
       const arrayResult = await processArrayField(fieldSpec, ctx);
       if ("warnings" in arrayResult) return arrayResult;
@@ -613,13 +613,20 @@ function checkParamArrayLengths(
 }
 
 /**
- * Parse a group path like "details.[]" into the base path "details".
- * Strips the trailing `.[]` selector.
+ * Parse the base array path from a `.[]` selector — the prefix up to (but
+ * excluding) the first `.[]`. Returns the path unchanged if there is no
+ * `.[]` selector.
+ *
+ * Examples:
+ *   "details.[]"            → "details"
+ *   "creators.[].account"   → "creators"
+ *   "tokenId"               → "tokenId"
  */
 function parseGroupBasePath(path: string | undefined): string {
   if (!path) return "";
-  if (path.endsWith(".[]")) return path.slice(0, -3);
-  return path;
+  const idx = path.indexOf(".[]");
+  if (idx === -1) return path;
+  return path.slice(0, idx);
 }
 
 // ---------------------------------------------------------------------------
