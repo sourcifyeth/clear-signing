@@ -7,6 +7,7 @@
  *            └─ ercs/calldata-erc4626-vaults.json
  */
 
+import { join } from "node:path";
 import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { ExternalDataProvider } from "../../../src/types.js";
@@ -39,15 +40,23 @@ describe("Kiln Vault USDT Aave v3", () => {
     return null;
   };
 
+  // The descriptor's include chain crosses out of the kiln directory:
+  //   registry-cases/kiln/calldata-Vault-USDT-Aave-v3.json
+  //     └─ common-KilnVaults.json
+  //          └─ ../../ercs/calldata-erc4626-vaults.json
+  // To let the `../../` traverse correctly, the index value must be the
+  // descriptor's full path relative to `descriptorDirectory`, not a basename.
+  const TEST_ROOT = join(__dirname, "..", "..");
+
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
     return buildEmbeddedResolverOpts(
-      __dirname,
+      TEST_ROOT,
       {
         calldataDescriptorFiles: [
           {
             chainId: CHAIN_ID,
             address: VAULT,
-            file: "calldata-Vault-USDT-Aave-v3.json",
+            file: "registry-cases/kiln/calldata-Vault-USDT-Aave-v3.json",
           },
         ],
       },

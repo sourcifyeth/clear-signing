@@ -1,5 +1,5 @@
 {
-  "$schema": "../../specs/erc7730-v2.schema.json",
+  "$schema": "../specs/erc7730-v2.schema.json",
   "context": { "contract": {} },
   "metadata": { "constants": { "underlyingToken": "0x0" } },
   "display": {

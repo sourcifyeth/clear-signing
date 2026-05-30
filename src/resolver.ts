@@ -161,10 +161,35 @@ async function resolveWithIncludes(
     typeof descriptor.includes === "string" ? descriptor.includes : undefined;
   if (!includes) return { descriptor };
 
-  const includesPath = new URL(includes, `https://x/${path}`).pathname.slice(1);
+  const includesPath = resolveIncludePath(path, includes);
   const included = await resolveWithIncludes(resolver, includesPath, visited);
   if ("warning" in included) return included;
   return { descriptor: mergeDescriptors(descriptor, included.descriptor) };
+}
+
+/**
+ * Resolve `includes` (a relative path declared inside a descriptor) against the
+ * directory of `base` (the path the including descriptor was fetched at).
+ *
+ * `base` is treated as absolute (anchored at "/") so `..` segments collapse
+ * cleanly when they overshoot the root: extra `..` are silently dropped rather
+ * than producing a result that escapes the descriptor root. Callers MUST index
+ * descriptors by their full path relative to `descriptorDirectory` (or the repo
+ * root, for the GitHub source), so that `..` segments inside an `includes` are
+ * absorbed against real leading segments instead of being dropped at the root.
+ */
+function resolveIncludePath(base: string, includes: string): string {
+  const baseSegments = ("/" + base).split("/").slice(0, -1);
+  const out: string[] = [];
+  for (const seg of [...baseSegments, ...includes.split("/")]) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      if (out.length > 0) out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
 }
 
 /**
