@@ -1181,6 +1181,11 @@ describe("formatDuration", () => {
     expect(result.rendered).toBe("100:00:00");
   });
 
+  it("formats values above Number.MAX_SAFE_INTEGER without precision loss", () => {
+    const result = formatDuration(uint(9007199254740993n));
+    expect(result.rendered).toBe("2501999792983:36:33");
+  });
+
   it("accepts int type", () => {
     const result = formatDuration(int(8250n));
     expect(result.rendered).toBe("02:17:30");
