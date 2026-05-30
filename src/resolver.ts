@@ -12,12 +12,14 @@ import type {
   GitHubSource,
   RegistryIndex,
   TypedData,
+  Warning,
 } from "./types.js";
 import {
   asciiToBytes,
   bytesToHex,
   keccak256,
   normalizeAddress,
+  warn,
 } from "./utils.js";
 
 /**
@@ -29,6 +31,10 @@ interface Resolver {
   index: RegistryIndex;
   fetchDescriptor: (path: string) => Promise<Descriptor>;
 }
+
+type ResolveDescriptorResult =
+  | { descriptor: Descriptor }
+  | { warning: Warning };
 
 /**
  * Builds a {@link Resolver} for the given source. For `"github"` without an
@@ -67,16 +73,21 @@ async function createResolver(
   }
 }
 
-/** Resolves a calldata descriptor by `(chainId, contractAddress)`. */
+/**
+ * Resolves a calldata descriptor by `(chainId, contractAddress)`. Returns
+ * a `{ descriptor }` envelope on success, or a `{ warning }` envelope when
+ * resolution fails — `NO_DESCRIPTOR` when nothing is indexed for the pair,
+ * `CYCLIC_INCLUDES` when the `includes` chain self-references.
+ */
 export async function resolveCalldataDescriptor(
   chainId: number,
   to: string,
   options?: GitHubResolverOptions | EmbeddedResolverOptions,
-): Promise<Descriptor | undefined> {
+): Promise<ResolveDescriptorResult> {
   const resolver = await createResolver(options);
   const path =
     resolver.index.calldataIndex[`eip155:${chainId}:${normalizeAddress(to)}`];
-  if (!path) return undefined;
+  if (!path) return noDescriptorWarning(chainId, to);
   return resolveWithIncludes(resolver, path);
 }
 
@@ -85,15 +96,18 @@ export async function resolveCalldataDescriptor(
  *
  * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
  * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
- * the message's EIP-712 `encodeType` string. Returns `undefined` when no
- * candidate matches the computed hash.
+ * the message's EIP-712 `encodeType` string. Returns `NO_DESCRIPTOR` if no
+ * candidate matches, `CYCLIC_INCLUDES` if the `includes` chain self-references,
+ * or `{ descriptor }` on success.
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
   options?: GitHubResolverOptions | EmbeddedResolverOptions,
-): Promise<Descriptor | undefined> {
+): Promise<ResolveDescriptorResult> {
   const { chainId, verifyingContract } = typedData.domain;
-  if (chainId === undefined || !verifyingContract) return undefined;
+  if (chainId === undefined || !verifyingContract) {
+    return noDescriptorWarning(chainId, verifyingContract);
+  }
 
   const resolver = await createResolver(options);
   const byPrimaryType =
@@ -101,36 +115,62 @@ export async function resolveTypedDataDescriptor(
       `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
     ];
   const entries = byPrimaryType?.[typedData.primaryType];
-  if (!entries?.length) return undefined;
+  if (!entries?.length) return noDescriptorWarning(chainId, verifyingContract);
 
   const encodeTypeStr = computeEncodeType(
     typedData.primaryType,
     typedData.types,
   );
-  if (!encodeTypeStr) return undefined;
+  if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
   const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
 
   const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
-  if (!match) return undefined;
+  if (!match) return noDescriptorWarning(chainId, verifyingContract);
   return resolveWithIncludes(resolver, match.path);
+}
+
+function noDescriptorWarning(
+  chainId: number | undefined,
+  address: string | undefined,
+): ResolveDescriptorResult {
+  return {
+    warning: warn(
+      "NO_DESCRIPTOR",
+      `No descriptor found for chain ${chainId} and address ${address}`,
+    ),
+  };
 }
 
 async function resolveWithIncludes(
   resolver: Resolver,
   path: string,
-): Promise<Descriptor> {
+  visited: Set<string> = new Set(),
+): Promise<ResolveDescriptorResult> {
+  if (visited.has(path)) {
+    return {
+      warning: warn(
+        "CYCLIC_INCLUDES",
+        `Cyclic includes detected for descriptor path '${path}'`,
+      ),
+    };
+  }
+  visited.add(path);
+
   const descriptor = await resolver.fetchDescriptor(path);
   const includes =
     typeof descriptor.includes === "string" ? descriptor.includes : undefined;
-  if (!includes) return descriptor;
+  if (!includes) return { descriptor };
 
   const includesPath = new URL(includes, `https://x/${path}`).pathname.slice(1);
-  const included = await resolver.fetchDescriptor(includesPath);
-  return mergeDescriptors(descriptor, included);
+  const included = await resolveWithIncludes(resolver, includesPath, visited);
+  if ("warning" in included) return included;
+  return { descriptor: mergeDescriptors(descriptor, included.descriptor) };
 }
 
 /**
  * Merges an including ERC-7730 descriptor with the descriptor it includes.
+ *
+ * May be useful for creating indexes, and correctly resolving an includes chain.
  *
  * Implements the EIP-7730 merge algorithm:
  * - The including descriptor takes priority over the included descriptor for all unique keys.
@@ -139,7 +179,7 @@ async function resolveWithIncludes(
  *   and new fields are appended.
  * - The `includes` key itself is not carried over to the merged result.
  */
-function mergeDescriptors(
+export function mergeDescriptors(
   including: Descriptor,
   included: Descriptor,
 ): Descriptor {

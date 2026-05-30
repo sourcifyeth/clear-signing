@@ -32,7 +32,6 @@ import {
 } from "./eip712.js";
 import { warn } from "./utils.js";
 import type {
-  Descriptor,
   DisplayModel,
   FormatOptions,
   FormatCalldata,
@@ -41,6 +40,7 @@ import type {
   BatchDisplayModel,
   Eip5792Batch,
   Warning,
+  Descriptor,
 } from "./types.js";
 
 export type * from "./types.js";
@@ -52,6 +52,7 @@ export { isFieldGroup } from "./utils.js";
 export {
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
+  mergeDescriptors,
 } from "./resolver.js";
 
 /** EIP-712 utility helpers. */
@@ -76,13 +77,29 @@ export async function format(
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
   try {
-    let descriptor: Descriptor | undefined;
+    let descriptor: Descriptor;
     try {
-      descriptor = await resolveCalldataDescriptor(
+      const result = await resolveCalldataDescriptor(
         tx.chainId,
         tx.to,
         opts?.descriptorResolverOptions,
       );
+
+      if ("warning" in result) {
+        const parsed = parseCalldataHex(tx.data);
+        if ("warning" in parsed) {
+          return { warnings: [result.warning, parsed.warning] };
+        }
+        return {
+          rawCalldataFallback: rawPreviewFromCalldata(
+            parsed.selector,
+            parsed.calldata,
+          ),
+          warnings: [result.warning],
+        };
+      } else {
+        descriptor = result.descriptor;
+      }
     } catch (error) {
       return {
         warnings: [
@@ -91,26 +108,6 @@ export async function format(
             `Failed to resolve descriptor for chain ${tx.chainId} and address ${tx.to}: ${String(error)}`,
           ),
         ],
-      };
-    }
-
-    if (!descriptor) {
-      const noDescriptor = warn(
-        "NO_DESCRIPTOR",
-        `No descriptor found for chain ${tx.chainId} and address ${tx.to}`,
-      );
-
-      const parsed = parseCalldataHex(tx.data);
-      if ("warning" in parsed) {
-        return { warnings: [noDescriptor, parsed.warning] };
-      }
-
-      return {
-        rawCalldataFallback: rawPreviewFromCalldata(
-          parsed.selector,
-          parsed.calldata,
-        ),
-        warnings: [noDescriptor],
       };
     }
 
@@ -242,29 +239,23 @@ export async function formatTypedData(
       };
     }
 
-    let descriptor: Descriptor | undefined;
+    let descriptor: Descriptor;
     try {
-      descriptor = await resolveTypedDataDescriptor(
+      const result = await resolveTypedDataDescriptor(
         typedData,
         opts?.descriptorResolverOptions,
       );
+      if ("warning" in result) {
+        return { warnings: [result.warning] };
+      } else {
+        descriptor = result.descriptor;
+      }
     } catch (error) {
       return {
         warnings: [
           warn(
             "DESCRIPTOR_FETCH_ERROR",
             `Failed to resolve descriptor for chain ${chainId} and address ${verifyingContract}: ${String(error)}`,
-          ),
-        ],
-      };
-    }
-
-    if (!descriptor) {
-      return {
-        warnings: [
-          warn(
-            "NO_DESCRIPTOR",
-            `No descriptor found for chain ${chainId} and address ${verifyingContract}`,
           ),
         ],
       };

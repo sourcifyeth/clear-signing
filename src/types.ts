@@ -103,7 +103,8 @@ export type WarningCode =
   | "BATCH_VALUE_TRANSFER"
   | "BATCH_CONTRACT_CREATION"
   | "BATCH_INTERPOLATION_INCOMPLETE"
-  | "BATCH_EMPTY";
+  | "BATCH_EMPTY"
+  | "CYCLIC_INCLUDES";
 
 /** Warning from formatting. */
 export interface Warning {
