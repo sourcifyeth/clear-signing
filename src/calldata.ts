@@ -92,12 +92,16 @@ export async function formatCalldata(
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
-    const key = path.startsWith("#.") ? path.slice(2) : path;
+    const stripped = path.startsWith("#.") ? path.slice(2) : path;
+    const key = normalizeNegativeIndices(stripped, decoded.arrayLengths);
+    if (key === undefined) return undefined;
     return decoded.values.get(key);
   };
 
   const getArrayLength = (path: string): number => {
-    const key = path.startsWith("#.") ? path.slice(2) : path;
+    const stripped = path.startsWith("#.") ? path.slice(2) : path;
+    const key = normalizeNegativeIndices(stripped, decoded.arrayLengths);
+    if (key === undefined) return 0;
     return decoded.arrayLengths.get(key) ?? 0;
   };
 
@@ -204,6 +208,32 @@ export function rawPreviewFromCalldata(
     selector: bytesToHex(selector),
     args,
   };
+}
+
+/**
+ * Rewrite negative array indices in a dot-path to absolute indices using the
+ * decoded array lengths. Per ERC-7730, `.[-N]` refers to the Nth element from
+ * the end of an array (so `.[-1]` is the last element). Returns `undefined`
+ * if any negative index has no matching array length or resolves out of bounds.
+ */
+function normalizeNegativeIndices(
+  path: string,
+  arrayLengths: Map<string, number>,
+): string | undefined {
+  if (!path.includes("[-")) return path;
+  const segments = path.split(".");
+  for (let i = 0; i < segments.length; i++) {
+    const match = segments[i].match(/^\[(-\d+)\]$/);
+    if (!match) continue;
+    const neg = parseInt(match[1], 10);
+    const prefix = segments.slice(0, i).join(".");
+    const length = arrayLengths.get(prefix);
+    if (length === undefined) return undefined;
+    const absIdx = length + neg;
+    if (absIdx < 0) return undefined;
+    segments[i] = `[${absIdx}]`;
+  }
+  return segments.join(".");
 }
 
 /** Find the format spec whose parsed function selector matches the given hex. */

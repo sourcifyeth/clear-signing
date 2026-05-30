@@ -188,6 +188,7 @@ function collectReferencedTypes(
 /**
  * Navigate a dot-path in an EIP-712 message object.
  * Supports array index segments: `details.[0].amount` indexes into arrays.
+ * Negative indices count from the end: `.[-1]` selects the last element.
  */
 function getMessageValue(
   message: Record<string, unknown>,
@@ -196,10 +197,13 @@ function getMessageValue(
   let current: unknown = message;
   for (const segment of path.split(".")) {
     if (current === null || typeof current !== "object") return undefined;
-    const indexMatch = segment.match(/^\[(\d+)\]$/);
+    const indexMatch = segment.match(/^\[(-?\d+)\]$/);
     if (indexMatch) {
       if (!Array.isArray(current)) return undefined;
-      current = current[parseInt(indexMatch[1], 10)];
+      let idx = parseInt(indexMatch[1], 10);
+      if (idx < 0) idx += current.length;
+      if (idx < 0 || idx >= current.length) return undefined;
+      current = current[idx];
     } else {
       current = (current as Record<string, unknown>)[segment];
     }
