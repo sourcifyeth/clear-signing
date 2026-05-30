@@ -52,6 +52,7 @@ export { isFieldGroup } from "./utils.js";
 export {
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
+  mergeDescriptors,
 } from "./resolver.js";
 
 /** EIP-712 utility helpers. */

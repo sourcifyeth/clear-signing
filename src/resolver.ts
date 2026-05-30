@@ -170,6 +170,8 @@ async function resolveWithIncludes(
 /**
  * Merges an including ERC-7730 descriptor with the descriptor it includes.
  *
+ * May be useful for creating indexes, and correctly resolving an includes chain.
+ *
  * Implements the EIP-7730 merge algorithm:
  * - The including descriptor takes priority over the included descriptor for all unique keys.
  * - `fields` arrays within display format entries are merged by path value:
@@ -177,7 +179,7 @@ async function resolveWithIncludes(
  *   and new fields are appended.
  * - The `includes` key itself is not carried over to the merged result.
  */
-function mergeDescriptors(
+export function mergeDescriptors(
   including: Descriptor,
   included: Descriptor,
 ): Descriptor {
