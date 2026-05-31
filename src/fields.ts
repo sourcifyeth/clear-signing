@@ -33,6 +33,7 @@ import {
   mergeDefinitions,
   resolveFieldValue,
   resolvedToAddress,
+  stripStructuredRootPrefix,
   toArgumentValue,
 } from "./descriptor.js";
 import {
@@ -264,7 +265,9 @@ async function processSingleField(
     ...(embeddedCalldata && { embeddedCalldata }),
   };
 
-  if (merged.path) ctx.renderedValues.set(merged.path, finalValue);
+  if (merged.path) {
+    ctx.renderedValues.set(stripStructuredRootPrefix(merged.path), finalValue);
+  }
   return { field: displayField };
 }
 
@@ -565,14 +568,15 @@ function joinArrayValues(
   renderedValues: Map<string, string>,
 ): void {
   for (const { path, length } of arrayLengths) {
+    const basePath = stripStructuredRootPrefix(path);
     const parts: string[] = [];
     for (let i = 0; i < length; i++) {
-      const v = renderedValues.get(`${path}.[${i}]`);
+      const v = renderedValues.get(`${basePath}.[${i}]`);
       if (v !== undefined) parts.push(v);
     }
     if (parts.length > 0) {
-      renderedValues.set(`${path}.[]`, parts.join(" and "));
-      renderedValues.set(path, parts.join(" and "));
+      renderedValues.set(`${basePath}.[]`, parts.join(" and "));
+      renderedValues.set(basePath, parts.join(" and "));
     }
   }
 }
