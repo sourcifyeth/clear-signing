@@ -634,14 +634,14 @@ export function formatDuration(value: ArgumentValue): RenderFieldResult {
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "duration");
 
-  const totalSeconds = Number(value.value < 0n ? -value.value : value.value);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
+  const totalSeconds = value.value < 0n ? -value.value : value.value;
+  const hours = totalSeconds / 3600n;
+  const minutes = (totalSeconds % 3600n) / 60n;
+  const secs = totalSeconds % 60n;
 
-  const hh = String(hours).padStart(2, "0");
-  const mm = String(minutes).padStart(2, "0");
-  const ss = String(secs).padStart(2, "0");
+  const hh = hours.toString().padStart(2, "0");
+  const mm = minutes.toString().padStart(2, "0");
+  const ss = secs.toString().padStart(2, "0");
 
   return { rendered: `${hh}:${mm}:${ss}` };
 }
