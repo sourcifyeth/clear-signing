@@ -295,8 +295,7 @@ async function processGroupArrayPath(
       if (path.startsWith("@.") || path.startsWith("$.")) {
         return ctx.resolvePath(path);
       }
-      const key = path.startsWith("#.") ? path.slice(2) : path;
-      return ctx.resolvePath(`${prefix}.${key}`);
+      return ctx.resolvePath(`${prefix}.${stripStructuredRootPrefix(path)}`);
     };
 
     const result = await processFlatFields(group.fields ?? [], {
@@ -419,7 +418,7 @@ async function processStructGroup(
   group: DescriptorFieldGroup,
   ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
-  const prefix = parseGroupBasePath(group.path).replace(/^#\./, "");
+  const prefix = stripStructuredRootPrefix(parseGroupBasePath(group.path));
 
   const scopedCtx: FieldContext = prefix
     ? {
@@ -428,8 +427,9 @@ async function processStructGroup(
           if (path.startsWith("@.") || path.startsWith("$.")) {
             return ctx.resolvePath(path);
           }
-          const key = path.startsWith("#.") ? path.slice(2) : path;
-          return ctx.resolvePath(`${prefix}.${key}`);
+          return ctx.resolvePath(
+            `${prefix}.${stripStructuredRootPrefix(path)}`,
+          );
         },
       }
     : ctx;

@@ -13,6 +13,7 @@ import {
   parseByteSlice,
 } from "../src/fields.js";
 import type { ArgumentValue, BaseResolvePath } from "../src/descriptor.js";
+import { stripStructuredRootPrefix } from "../src/descriptor.js";
 import type {
   DescriptorFieldFormat,
   DescriptorFieldGroup,
@@ -26,10 +27,7 @@ import { hexToBytes, isFieldGroup } from "../src/utils.js";
 
 /** Build a BaseResolvePath from a simple key→ArgumentValue map. */
 function mapResolvePath(map: Record<string, ArgumentValue>): BaseResolvePath {
-  return (path: string) => {
-    const key = path.startsWith("#.") ? path.slice(2) : path;
-    return map[key];
-  };
+  return (path: string) => map[stripStructuredRootPrefix(path)];
 }
 
 /** Build a getArrayLength from a map of path→length. */
