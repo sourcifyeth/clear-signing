@@ -155,6 +155,7 @@ async function processArrayField(
   const iterResult = await iterateArrayField(fieldSpec, length, ctx);
   if ("warnings" in iterResult) return iterResult;
 
+  joinArrayValues(fieldArrayLengths, ctx.renderedValues);
   return {
     group: { fields: iterResult.fields },
   };

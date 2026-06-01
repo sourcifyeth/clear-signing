@@ -2,29 +2,40 @@
  * Tests for Lido descriptors:
  * - WithdrawalQueueERC721.claimWithdrawals: uint256[] array iteration with a
  *   visible-never sibling array
+ * - WithdrawalQueueERC721.requestWithdrawals: uint256[] tokenAmount iteration
+ *   followed by a non-iterating addressName field
  * - stETH.approve: addressName + tokenAmount with descriptor constants
  */
 
 import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
-import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
+import {
+  bytesToHex,
+  hexToBytes,
+  selectorForSignature,
+  toChecksumAddress,
+} from "../../../src/utils.js";
 import { buildEmbeddedResolverOpts } from "../../utils.js";
 
 describe("Lido WithdrawalQueueERC721", () => {
   const CHAIN_ID = 1;
   const CONTRACT = "0x889edC2eDab5f40e902b864aD4d7AdE8E412F9B1";
 
-  function buildOpts() {
-    return buildEmbeddedResolverOpts(__dirname, {
-      calldataDescriptorFiles: [
-        {
-          chainId: CHAIN_ID,
-          address: CONTRACT,
-          file: "calldata-WithdrawalQueueERC721.json",
-        },
-      ],
-    });
+  function buildOpts(externalDataProvider?: ExternalDataProvider) {
+    return buildEmbeddedResolverOpts(
+      __dirname,
+      {
+        calldataDescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: CONTRACT,
+            file: "calldata-WithdrawalQueueERC721.json",
+          },
+        ],
+      },
+      externalDataProvider,
+    );
   }
 
   // =========================================================================
@@ -57,7 +68,7 @@ describe("Lido WithdrawalQueueERC721", () => {
         opts,
       );
 
-      expect(result.intent).toBe("claim withdrawals");
+      expect(result.intent).toBe("Claim withdrawals");
 
       assert(result.fields);
       // Only _requestIds is visible → 1 DisplayFieldGroup
@@ -88,6 +99,209 @@ describe("Lido WithdrawalQueueERC721", () => {
       expect(result.interpolatedIntent).toBeUndefined();
       expect(result.rawCalldataFallback).toBeUndefined();
       expect(result.warnings).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // requestWithdrawals
+  // =========================================================================
+  describe("requestWithdrawals", () => {
+    const STETH_ADDRESS = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
+    const OWNER = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+    const OWNER_ENS = "vitalik.eth";
+
+    // requestWithdrawals(uint256[] _amounts, address _owner)
+    //   selector: 0xd6681042
+    //   _amounts: [1e18, 25e17, 1e19]   (1 stETH, 2.5 stETH and 10 stETH)
+    //   _owner:   0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+    const SELECTOR = bytesToHex(
+      selectorForSignature("requestWithdrawals(uint256[],address)"),
+    );
+    const REQUEST_WITHDRAWALS_CALLDATA =
+      SELECTOR +
+      "0000000000000000000000000000000000000000000000000000000000000040" + // offset to _amounts
+      "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045" + // _owner
+      "0000000000000000000000000000000000000000000000000000000000000003" + // _amounts.length = 3
+      "0000000000000000000000000000000000000000000000000de0b6b3a7640000" + // _amounts[0] = 1e18 (1 stETH)
+      "00000000000000000000000000000000000000000000000022b1c8c1227a0000" + // _amounts[1] = 2.5e18 (2.5 stETH)
+      "0000000000000000000000000000000000000000000000008ac7230489e80000"; // _amounts[2] = 1e19 (10 stETH)
+
+    const resolveEnsName: ExternalDataProvider["resolveEnsName"] = async (
+      address,
+    ) => {
+      if (address === OWNER.toLowerCase()) {
+        return { name: OWNER_ENS, typeMatch: true };
+      }
+      return null;
+    };
+
+    const resolveToken: ExternalDataProvider["resolveToken"] = async (
+      chainId,
+      tokenAddress,
+    ) => {
+      if (
+        chainId === CHAIN_ID &&
+        tokenAddress === STETH_ADDRESS.toLowerCase()
+      ) {
+        return {
+          name: "Liquid staked Ether 2.0",
+          symbol: "stETH",
+          decimals: 18,
+        };
+      }
+      return null;
+    };
+
+    it("formats requestWithdrawals iterating over stETH amounts with a beneficiary", async () => {
+      const opts = buildOpts({ resolveEnsName, resolveToken });
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          data: REQUEST_WITHDRAWALS_CALLDATA,
+        },
+        opts,
+      );
+
+      expect(result.intent).toBe("Request Withdrawal");
+      expect(result.interpolatedIntent).toBe(
+        "Withdraw 1 stETH and 2.5 stETH and 10 stETH",
+      );
+
+      assert(result.fields);
+      // Amount group (iterating over _amounts) + Beneficiary field
+      expect(result.fields).toHaveLength(2);
+
+      const amountGroup = result.fields[0];
+      assert(isFieldGroup(amountGroup));
+      expect(amountGroup.label).toBeUndefined();
+      expect(amountGroup.warning).toBeUndefined();
+      expect(amountGroup.fields).toHaveLength(3);
+
+      const amount0 = amountGroup.fields[0];
+      assert(!isFieldGroup(amount0));
+      expect(amount0.label).toBe("Amount");
+      expect(amount0.value).toBe("1 stETH");
+      expect(amount0.fieldType).toBe("uint");
+      expect(amount0.format).toBe("tokenAmount");
+      expect(amount0.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(STETH_ADDRESS)),
+      );
+      expect(amount0.rawAddress).toBeUndefined();
+      expect(amount0.embeddedCalldata).toBeUndefined();
+      expect(amount0.warning).toBeUndefined();
+
+      const amount1 = amountGroup.fields[1];
+      assert(!isFieldGroup(amount1));
+      expect(amount1.label).toBe("Amount");
+      expect(amount1.value).toBe("2.5 stETH");
+      expect(amount1.fieldType).toBe("uint");
+      expect(amount1.format).toBe("tokenAmount");
+      expect(amount1.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(STETH_ADDRESS)),
+      );
+      expect(amount1.rawAddress).toBeUndefined();
+      expect(amount1.embeddedCalldata).toBeUndefined();
+      expect(amount1.warning).toBeUndefined();
+
+      const amount2 = amountGroup.fields[2];
+      assert(!isFieldGroup(amount2));
+      expect(amount2.label).toBe("Amount");
+      expect(amount2.value).toBe("10 stETH");
+      expect(amount2.fieldType).toBe("uint");
+      expect(amount2.format).toBe("tokenAmount");
+      expect(amount2.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(STETH_ADDRESS)),
+      );
+      expect(amount2.rawAddress).toBeUndefined();
+      expect(amount2.embeddedCalldata).toBeUndefined();
+      expect(amount2.warning).toBeUndefined();
+
+      const beneficiaryField = result.fields[1];
+      assert(!isFieldGroup(beneficiaryField));
+      expect(beneficiaryField.label).toBe("Beneficiary");
+      expect(beneficiaryField.value).toBe(OWNER_ENS);
+      expect(beneficiaryField.fieldType).toBe("address");
+      expect(beneficiaryField.format).toBe("addressName");
+      expect(beneficiaryField.rawAddress).toBe(
+        toChecksumAddress(hexToBytes(OWNER)),
+      );
+      expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
+      expect(beneficiaryField.warning).toBeUndefined();
+
+      assert(result.metadata);
+      expect(result.metadata.owner).toBe("Lido DAO");
+      expect(result.metadata.contractName).toBe("WithdrawalQueueERC721");
+      expect(result.metadata.info).toEqual({ url: "https://lido.fi" });
+
+      expect(result.rawCalldataFallback).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    });
+
+    // requestWithdrawals with an empty _amounts array:
+    //   selector: 0xd6681042
+    //   _amounts: []
+    //   _owner:   0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+    const REQUEST_WITHDRAWALS_EMPTY_CALLDATA =
+      SELECTOR +
+      "0000000000000000000000000000000000000000000000000000000000000040" + // offset to _amounts
+      "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045" + // _owner
+      "0000000000000000000000000000000000000000000000000000000000000000"; // _amounts.length = 0
+
+    it("returns EMPTY_ARRAY warning when _amounts is empty", async () => {
+      const opts = buildOpts({ resolveEnsName, resolveToken });
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          data: REQUEST_WITHDRAWALS_EMPTY_CALLDATA,
+        },
+        opts,
+      );
+
+      expect(result.intent).toBe("Request Withdrawal");
+
+      assert(result.fields);
+      // Empty amount group + Beneficiary field
+      expect(result.fields).toHaveLength(2);
+
+      const amountGroup = result.fields[0];
+      assert(isFieldGroup(amountGroup));
+      expect(amountGroup.label).toBe("Amount");
+      expect(amountGroup.fields).toHaveLength(0);
+      assert(amountGroup.warning);
+      expect(amountGroup.warning.code).toBe("EMPTY_ARRAY");
+
+      const beneficiaryField = result.fields[1];
+      assert(!isFieldGroup(beneficiaryField));
+      expect(beneficiaryField.label).toBe("Beneficiary");
+      expect(beneficiaryField.value).toBe(OWNER_ENS);
+      expect(beneficiaryField.fieldType).toBe("address");
+      expect(beneficiaryField.format).toBe("addressName");
+      expect(beneficiaryField.rawAddress).toBe(
+        toChecksumAddress(hexToBytes(OWNER)),
+      );
+      expect(beneficiaryField.tokenAddress).toBeUndefined();
+      expect(beneficiaryField.embeddedCalldata).toBeUndefined();
+      expect(beneficiaryField.warning).toBeUndefined();
+
+      assert(result.metadata);
+      expect(result.metadata.owner).toBe("Lido DAO");
+      expect(result.metadata.contractName).toBe("WithdrawalQueueERC721");
+      expect(result.metadata.info).toEqual({ url: "https://lido.fi" });
+
+      // interpolatedIntent references {_amounts.[]} which cannot resolve to an
+      // empty array, so interpolation fails and the value is omitted.
+      expect(result.interpolatedIntent).toBeUndefined();
+      assert(result.warnings);
+      expect(
+        result.warnings.some((w) => w.code === "INTERPOLATION_ERROR"),
+      ).toBe(true);
+
+      expect(result.rawCalldataFallback).toBeUndefined();
     });
   });
 });
