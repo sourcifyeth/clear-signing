@@ -18,6 +18,7 @@ import {
   isCalldataDescriptorBoundTo,
   resolveMetadataValue,
   resolveTransactionPath,
+  stripStructuredRootPrefix,
   toArgumentValue,
 } from "./descriptor.js";
 import {
@@ -92,15 +93,19 @@ export async function formatCalldata(
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
-    const stripped = path.startsWith("#.") ? path.slice(2) : path;
-    const key = normalizeNegativeIndices(stripped, decoded.arrayLengths);
+    const key = normalizeNegativeIndices(
+      stripStructuredRootPrefix(path),
+      decoded.arrayLengths,
+    );
     if (key === undefined) return undefined;
     return decoded.values.get(key);
   };
 
   const getArrayLength = (path: string): number => {
-    const stripped = path.startsWith("#.") ? path.slice(2) : path;
-    const key = normalizeNegativeIndices(stripped, decoded.arrayLengths);
+    const key = normalizeNegativeIndices(
+      stripStructuredRootPrefix(path),
+      decoded.arrayLengths,
+    );
     if (key === undefined) return 0;
     return decoded.arrayLengths.get(key) ?? 0;
   };

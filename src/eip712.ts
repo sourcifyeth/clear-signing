@@ -19,6 +19,7 @@ import {
   isEip712DescriptorBoundTo,
   resolveMetadataValue,
   resolveTypedDataPath,
+  stripStructuredRootPrefix,
 } from "./descriptor.js";
 import { warn } from "./utils.js";
 import { applyFieldFormats } from "./fields.js";
@@ -63,15 +64,19 @@ export async function formatEip712(
     if (path.startsWith("@.")) return resolveTypedDataPath(path, typedData);
     if (path.startsWith("$."))
       return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
-    const key = path.startsWith("#.") ? path.slice(2) : path;
-    const raw = getMessageValue(typedData.message, key);
+    const raw = getMessageValue(
+      typedData.message,
+      stripStructuredRootPrefix(path),
+    );
     if (raw === undefined) return undefined;
     return toArgumentValue(raw);
   };
 
   const getArrayLength = (path: string): number => {
-    const key = path.startsWith("#.") ? path.slice(2) : path;
-    const raw = getMessageValue(typedData.message, key);
+    const raw = getMessageValue(
+      typedData.message,
+      stripStructuredRootPrefix(path),
+    );
     return Array.isArray(raw) ? raw.length : 0;
   };
 

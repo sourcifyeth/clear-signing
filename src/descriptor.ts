@@ -272,6 +272,10 @@ export function fieldTypeForFormat(
   }
 }
 
+export function stripStructuredRootPrefix(path: string): string {
+  return path.startsWith("#.") ? path.slice(2) : path;
+}
+
 /**
  * Resolves an ERC-7730 path to an ArgumentValue.
  * Handles `@.` (container), `$.` (metadata), `#.` (structured data), and bare paths.
@@ -490,7 +494,7 @@ export function interpolateTemplate(
       if (key.length === 0) {
         throw new Error("Empty placeholder in interpolated intent");
       }
-      const value = values.get(key);
+      const value = values.get(stripStructuredRootPrefix(key));
       if (value === undefined) {
         throw new Error(`Missing interpolated value for '${key}'`);
       }
