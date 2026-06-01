@@ -1,6 +1,6 @@
 {
   "name": "@ethereum-sourcify/clear-signing",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Ethereum clear signing library for human-readable transaction previews",
   "type": "module",
   "main": "./dist/index.cjs",
