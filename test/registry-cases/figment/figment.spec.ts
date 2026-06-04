@@ -8,14 +8,14 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel } from "../../../src/types.js";
 import { bytesToHex, selectorForSignature } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Figment ETH Depositor", () => {
   const CHAIN_ID = 1;
   const CONTRACT = "0x8B0d88B8Be3C15D746Feb0B1f18c883c03B6Aa62";
 
   function buildOpts() {
-    return buildEmbeddedResolverOpts(__dirname, {
+    return buildFilesystemResolverOpts(__dirname, {
       calldataDescriptorFiles: [
         {
           chainId: CHAIN_ID,

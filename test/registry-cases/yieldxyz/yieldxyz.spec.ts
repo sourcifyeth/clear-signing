@@ -15,14 +15,14 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Yield.xyz POL Validator", () => {
   const CHAIN_ID = 1;
   const CONTRACT = "0xb929b89153fc2eed442e81e5a1add4e2fa39028f";
 
   function buildOpts() {
-    return buildEmbeddedResolverOpts(__dirname, {
+    return buildFilesystemResolverOpts(__dirname, {
       calldataDescriptorFiles: [
         {
           chainId: CHAIN_ID,
@@ -110,7 +110,7 @@ describe("Yield.xyz USDe Vault", () => {
   const RECEIVER = "0x2fec9b58d089447d3e5e50578b9f71321713a470";
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [

@@ -9,7 +9,7 @@ import { formatTypedData, isFieldGroup } from "../../src/index.js";
 import type { ExternalDataProvider, TypedData } from "../../src/types.js";
 import { toChecksumAddress, hexToBytes } from "../../src/utils.js";
 import {
-  buildEmbeddedResolverOpts,
+  buildFilesystemResolverOpts,
   computeEncodeTypeOrThrow,
 } from "../utils.js";
 
@@ -73,7 +73,7 @@ describe("example-eip712.json — PermitSingle", () => {
   };
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         eip712DescriptorFiles: [
@@ -191,7 +191,7 @@ describe("example-eip712.json — PermitSingle", () => {
       domain: { ...PERMIT_SINGLE.domain, chainId: 999 },
     };
 
-    const opts = buildEmbeddedResolverOpts(__dirname, {
+    const opts = buildFilesystemResolverOpts(__dirname, {
       eip712DescriptorFiles: [
         {
           chainId: 999,
@@ -290,7 +290,7 @@ describe("example-eip712.json — PermitBatch", () => {
   ];
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         eip712DescriptorFiles: [

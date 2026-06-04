@@ -8,7 +8,7 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("LI.FI LIFIDiamond", () => {
   const CHAIN_ID = 1;
@@ -43,7 +43,7 @@ describe("LI.FI LIFIDiamond", () => {
   };
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [

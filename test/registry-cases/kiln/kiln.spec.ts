@@ -12,7 +12,7 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { ExternalDataProvider } from "../../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Kiln Vault USDT Aave v3", () => {
   const CHAIN_ID = 1;
@@ -49,7 +49,7 @@ describe("Kiln Vault USDT Aave v3", () => {
   const TEST_ROOT = join(__dirname, "..", "..");
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       TEST_ROOT,
       {
         calldataDescriptorFiles: [

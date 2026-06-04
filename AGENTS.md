@@ -122,7 +122,12 @@ wraps it with `buildSliceResolvePath` to handle byte slice paths (e.g. `srcToken
 
 ## Descriptor Sources
 
-The resolver accepts `GitHubResolverOptions` or `EmbeddedResolverOptions` to control where descriptors come from.
+`FormatOptions.descriptorResolverOptions` is a discriminated union:
+`GitHubResolverOptions` (`type: "github"`) for the built-in registry, or
+`CustomResolverOptions` (`type: "custom"`) that wraps any pre-built
+`DescriptorResolver`. The filesystem resolver (in
+`@ethereum-sourcify/clear-signing/filesystem`) is one such custom resolver,
+shipped from a separate entry point so it stays out of browser bundles.
 
 ### `GitHubResolverOptions`
 
@@ -143,7 +148,7 @@ const opts: FormatOptions = {
 
 **How it works:**
 
-1. The public `resolveCalldataDescriptor` / `resolveTypedDataDescriptor` accept the same `GitHubResolverOptions | EmbeddedResolverOptions` value that `FormatOptions.descriptorResolverOptions` carries. They build an internal `Resolver` (`{ index, fetchDescriptor }`) via the module-private `createResolver`. For the `"github"` case without an explicit `options.index`, `createResolver` calls `fetchPrebuiltRegistryIndex(source)` to fetch `index.calldata.json` and `index.eip712.json` in parallel. **No internal caching** — every resolve call builds a fresh resolver, so callers should pre-fetch the index once and pass the same `descriptorResolverOptions.index` to every `format()` call.
+1. The public `resolveCalldataDescriptor` / `resolveTypedDataDescriptor` accept the same `GitHubResolverOptions | CustomResolverOptions` value that `FormatOptions.descriptorResolverOptions` carries. They build a `DescriptorResolver` (`{ index, fetchDescriptor }`) via the module-private `createResolver`. For `type: "github"` without an explicit `options.index`, `createResolver` calls `fetchPrebuiltRegistryIndex(source)` to fetch `index.calldata.json` and `index.eip712.json` in parallel. For `type: "custom"`, it returns `options.resolver` unchanged. **No internal caching** — every resolve call builds a fresh resolver, so callers should pre-fetch the index once and pass the same `descriptorResolverOptions.index` to every `format()` call.
 2. The fetched index has two maps:
    - `calldataIndex: Record<caip10, path>` — keyed by `context.contract.deployments[].{chainId, address}`
    - `typedDataIndex: Record<caip10, Record<primaryType, TypedDataIndexEntry[]>>` — keyed by `context.eip712.deployments[].{chainId, address}`, then by primary type. Each entry carries the descriptor `path` and the keccak256 hashes of every `encodeType` it declares (`display.formats` keys), so multiple descriptors at the same `(chainId, verifyingContract, primaryType)` triple can be disambiguated at lookup time.
@@ -155,19 +160,33 @@ const opts: FormatOptions = {
 
 ERC-7730 defines several ways to identify an EIP-712 descriptor: `deployments` (chain + address array), `domain` (key-value domain match), and `domainSeparator` (pre-computed hash). The index only keys on `context.eip712.deployments`, because the other forms cannot be cheaply pre-indexed without access to a live domain. Descriptors that rely solely on `domain` or `domainSeparator` for binding will not be discoverable through the GitHub index.
 
-### `EmbeddedResolverOptions`
+### `CustomResolverOptions` and the filesystem resolver
 
-Loads descriptors from a local directory using dynamic `import()`. Useful for bundled/offline builds.
+`{ type: "custom", resolver }` plugs any `DescriptorResolver` into the
+format pipeline. The library ships one such resolver out of the box: the
+filesystem resolver, which lives in `src/filesystem.ts` and is exported
+from the `@ethereum-sourcify/clear-signing/filesystem` subpath. It is
+Node-only (uses `node:fs/promises`) and intentionally separated from the
+main entry so consumers that never touch it don't pull a Node builtin into
+their browser bundles.
 
 ```typescript
+import { createFilesystemResolver } from "@ethereum-sourcify/clear-signing/filesystem";
+
 const opts: FormatOptions = {
   descriptorResolverOptions: {
-    type: "embedded",
-    index: myIndex, // RegistryIndex with CAIP-10 → path mappings
-    descriptorDirectory: "./descriptors",
+    type: "custom",
+    resolver: createFilesystemResolver({
+      index: myIndex,
+      descriptorDirectory: "./descriptors",
+    }),
   },
 };
 ```
+
+Any other source (in-memory map, custom HTTP endpoint, ...) is implemented
+by satisfying the `DescriptorResolver` shape directly and wrapping it in
+`{ type: "custom", resolver }`.
 
 ### GitHub client module (`github-registry-client.ts`)
 
@@ -313,7 +332,7 @@ Warnings are returned in the `DisplayModel.warnings` array and on individual `Di
 
 ### Testing with a custom descriptor
 
-Use `GitHubResolverOptions` with a manually built `RegistryIndex` and mock `fetch` in tests:
+Most spec tests use the filesystem resolver via `buildFilesystemResolverOpts` in `test/utils.ts` (descriptors live alongside the test as JSON files). For tests that need to mock the GitHub fetch path, pass `GitHubResolverOptions` with a manually built `RegistryIndex` and mock `fetch`:
 
 ```typescript
 const index: RegistryIndex = {

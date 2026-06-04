@@ -11,7 +11,7 @@ import { formatTypedData, isFieldGroup } from "../../../src/index.js";
 import type { ExternalDataProvider, TypedData } from "../../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
 import {
-  buildEmbeddedResolverOpts,
+  buildFilesystemResolverOpts,
   computeEncodeTypeOrThrow,
 } from "../../utils.js";
 
@@ -66,7 +66,7 @@ describe("Rarible ERC-721 lazy mint", () => {
   };
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         eip712DescriptorFiles: [

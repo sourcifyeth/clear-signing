@@ -20,7 +20,7 @@ import {
   toChecksumAddress,
 } from "../../src/utils.js";
 import {
-  buildEmbeddedResolverOpts,
+  buildFilesystemResolverOpts,
   computeEncodeTypeOrThrow,
 } from "../utils.js";
 
@@ -176,7 +176,7 @@ const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] = async (
 };
 
 function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
-  return buildEmbeddedResolverOpts(
+  return buildFilesystemResolverOpts(
     __dirname,
     {
       eip712DescriptorFiles: [

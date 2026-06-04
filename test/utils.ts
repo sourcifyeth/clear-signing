@@ -1,4 +1,5 @@
 import { computeEncodeType, extractPrimaryType } from "../src/eip712.js";
+import { createFilesystemResolver } from "../src/filesystem.js";
 import type {
   ExternalDataProvider,
   FormatOptions,
@@ -38,10 +39,10 @@ type Eip712DescriptorFileEntry = CalldataDescriptorFileEntry & {
 };
 
 /**
- * Build FormatOptions for an embedded descriptor resolver.
+ * Build FormatOptions backed by the filesystem resolver.
  * Useful for spec test cases where descriptor JSON files live alongside the test.
  */
-export function buildEmbeddedResolverOpts(
+export function buildFilesystemResolverOpts(
   descriptorDirectory: string,
   files: {
     calldataDescriptorFiles?: CalldataDescriptorFileEntry[];
@@ -88,9 +89,8 @@ export function buildEmbeddedResolverOpts(
 
   return {
     descriptorResolverOptions: {
-      type: "embedded",
-      index,
-      descriptorDirectory,
+      type: "custom",
+      resolver: createFilesystemResolver({ index, descriptorDirectory }),
     },
     externalDataProvider,
   };

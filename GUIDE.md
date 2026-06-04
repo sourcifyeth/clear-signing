@@ -42,7 +42,7 @@ Alternatively, you can fetch at build time and bundle the resulting JSON with yo
 Two advanced options you typically won't need:
 
 - **`createGitHubRegistryIndex(source?)`** — walks the registry tree and builds the index in-process. Significantly slower than `fetchPrebuiltRegistryIndex` (one fetch per descriptor file). Use when the prebuilt indexes are stale, missing entries, or when pointing at a fork that doesn't publish them.
-- **Embedded resolver** (`type: "embedded"`) — load descriptor JSON files from a local directory via dynamic `import()`. Useful for fully bundled/offline builds. See the README for the shape.
+- **Custom resolvers** — anything matching the `DescriptorResolver` shape (in-memory map, custom HTTP endpoint, etc.) can be wrapped in `{ type: "custom", resolver }`. One custom resolver ships in the library: the Node-only filesystem resolver at `@ethereum-sourcify/clear-signing/filesystem`, which loads descriptor JSON files from a local directory. See the README for details.
 
 ## 3. Build the `ExternalDataProvider`
 

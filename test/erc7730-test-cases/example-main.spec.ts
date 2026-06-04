@@ -11,7 +11,7 @@ import type {
   FormatOptions,
 } from "../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts } from "../utils.js";
 
 // USDT on mainnet (matches example-main.json deployment)
 const USDT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
@@ -54,7 +54,7 @@ const resolveEnsName: ExternalDataProvider["resolveEnsName"] = async (
 };
 
 function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
-  return buildEmbeddedResolverOpts(
+  return buildFilesystemResolverOpts(
     __dirname,
     {
       calldataDescriptorFiles: [
@@ -158,7 +158,7 @@ describe("example-main.json — transfer(address to, uint256 value)", () => {
   it("returns DEPLOYMENT_MISMATCH when descriptor does not bind to chain+address", async () => {
     // Index resolves the descriptor for chain 999 + USDT address,
     // but the descriptor itself only binds to chains 1, 137, 42161
-    const opts = buildEmbeddedResolverOpts(__dirname, {
+    const opts = buildFilesystemResolverOpts(__dirname, {
       calldataDescriptorFiles: [
         {
           chainId: 999,

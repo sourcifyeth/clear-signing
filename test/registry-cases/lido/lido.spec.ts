@@ -16,14 +16,14 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Lido WithdrawalQueueERC721", () => {
   const CHAIN_ID = 1;
   const CONTRACT = "0x889edC2eDab5f40e902b864aD4d7AdE8E412F9B1";
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [
@@ -331,7 +331,7 @@ describe("Lido stETH", () => {
   };
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [
