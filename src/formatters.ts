@@ -513,7 +513,7 @@ export async function formatNftName(
   }
 
   return {
-    rendered: `Collection Name: ${collection.name} - Token ID: ${tokenId.toString()}`,
+    rendered: `${collection.name} #${tokenId.toString()}`,
   };
 }
 
