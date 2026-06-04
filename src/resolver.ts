@@ -6,11 +6,11 @@ import {
 import { computeEncodeType } from "./eip712.js";
 import { fetchPrebuiltRegistryIndex } from "./github-registry-index.js";
 import type {
+  CustomResolverOptions,
   Descriptor,
-  EmbeddedResolverOptions,
+  DescriptorResolver,
   GitHubResolverOptions,
   GitHubSource,
-  RegistryIndex,
   TypedData,
   Warning,
 } from "./types.js";
@@ -22,31 +22,25 @@ import {
   warn,
 } from "./utils.js";
 
-/**
- * Internal: an index for path lookup plus a closure that fetches and parses
- * a single descriptor file by repo-relative path. Built by
- * {@link createResolver} and consumed by the resolve functions.
- */
-interface Resolver {
-  index: RegistryIndex;
-  fetchDescriptor: (path: string) => Promise<Descriptor>;
-}
-
 type ResolveDescriptorResult =
   | { descriptor: Descriptor }
   | { warning: Warning };
 
 /**
- * Builds a {@link Resolver} for the given source. For `"github"` without an
- * explicit `options.index`, fetches the prebuilt registry index up front
- * (no caching — recreating the resolver triggers another fetch).
+ * Builds a {@link DescriptorResolver} from the supplied options. For
+ * `{ type: "github" }` without an explicit `options.index`, fetches the
+ * prebuilt registry index up front (no caching — recreating the resolver
+ * triggers another fetch). For `{ type: "custom" }`, returns the user-built
+ * resolver unchanged.
  */
 async function createResolver(
-  options: GitHubResolverOptions | EmbeddedResolverOptions = {
+  options: GitHubResolverOptions | CustomResolverOptions = {
     type: "github",
   },
-): Promise<Resolver> {
+): Promise<DescriptorResolver> {
   switch (options.type) {
+    case "custom":
+      return options.resolver;
     case "github": {
       const source: GitHubSource = {
         repo: options.githubSource?.repo ?? DEFAULT_REPO,
@@ -57,17 +51,6 @@ async function createResolver(
         index,
         fetchDescriptor: async (path) =>
           (await fetchRegistryFile(path, source)) as Descriptor,
-      };
-    }
-    case "embedded": {
-      return {
-        index: options.index,
-        fetchDescriptor: async (path) => {
-          const mod = await import(`${options.descriptorDirectory}/${path}`, {
-            with: { type: "json" },
-          });
-          return (mod.default ?? mod) as Descriptor;
-        },
       };
     }
   }
@@ -82,7 +65,7 @@ async function createResolver(
 export async function resolveCalldataDescriptor(
   chainId: number,
   to: string,
-  options?: GitHubResolverOptions | EmbeddedResolverOptions,
+  options?: GitHubResolverOptions | CustomResolverOptions,
 ): Promise<ResolveDescriptorResult> {
   const resolver = await createResolver(options);
   const path =
@@ -102,7 +85,7 @@ export async function resolveCalldataDescriptor(
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
-  options?: GitHubResolverOptions | EmbeddedResolverOptions,
+  options?: GitHubResolverOptions | CustomResolverOptions,
 ): Promise<ResolveDescriptorResult> {
   const { chainId, verifyingContract } = typedData.domain;
   if (chainId === undefined || !verifyingContract) {
@@ -142,7 +125,7 @@ function noDescriptorWarning(
 }
 
 async function resolveWithIncludes(
-  resolver: Resolver,
+  resolver: DescriptorResolver,
   path: string,
   visited: Set<string> = new Set(),
 ): Promise<ResolveDescriptorResult> {

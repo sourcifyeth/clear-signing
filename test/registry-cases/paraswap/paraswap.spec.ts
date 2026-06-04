@@ -9,7 +9,7 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { ExternalDataProvider } from "../../../src/types.js";
 import { toChecksumAddress, hexToBytes } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Paraswap AugustusSwapper v6.2", () => {
   const CHAIN_ID = 1;
@@ -47,7 +47,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
   };
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [

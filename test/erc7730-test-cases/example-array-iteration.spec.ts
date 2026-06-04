@@ -13,7 +13,7 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts } from "../utils.js";
 
 describe("example-array-iteration.json — distribute", () => {
   const CHAIN_ID = 1;
@@ -88,7 +88,7 @@ describe("example-array-iteration.json — distribute", () => {
     "0000000000000000000000000000000000000000000000000000000000000000";
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [
@@ -434,7 +434,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     "0000000000000000000000000000000000000000000000000000000000000000"; // values[0] = 0
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [

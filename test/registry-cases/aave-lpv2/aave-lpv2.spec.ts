@@ -8,7 +8,7 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
 import { toChecksumAddress, hexToBytes } from "../../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts } from "../../utils.js";
 
 describe("Aave Lending Pool v2", () => {
   const CHAIN_ID = 1;
@@ -17,7 +17,7 @@ describe("Aave Lending Pool v2", () => {
   const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 
   function buildOpts(externalDataProvider?: ExternalDataProvider) {
-    return buildEmbeddedResolverOpts(
+    return buildFilesystemResolverOpts(
       __dirname,
       {
         calldataDescriptorFiles: [

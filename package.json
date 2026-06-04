@@ -19,6 +19,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./filesystem": {
+      "import": {
+        "types": "./dist/filesystem.d.ts",
+        "default": "./dist/filesystem.js"
+      },
+      "require": {
+        "types": "./dist/filesystem.d.cts",
+        "default": "./dist/filesystem.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "repository": {

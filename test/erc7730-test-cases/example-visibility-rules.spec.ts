@@ -17,7 +17,7 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts } from "../utils.js";
 
 const CONTRACT_ADDRESS = "0x00112233445566778899AABBCCDDEEFF00112233";
 const CHAIN_ID = 1;
@@ -94,7 +94,7 @@ const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] = async (
 };
 
 function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
-  return buildEmbeddedResolverOpts(
+  return buildFilesystemResolverOpts(
     __dirname,
     {
       calldataDescriptorFiles: [

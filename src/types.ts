@@ -387,9 +387,14 @@ export interface FormatOptions {
   /**
    * Controls where descriptors are fetched from.
    * Defaults to the GitHub registry when omitted.
-   * Also allows to pass descriptors directly via the `embedded` option.
+   *
+   * Pass `{ type: "github", ... }` ({@link GitHubResolverOptions}) to fetch
+   * from the registry, or `{ type: "custom", resolver }`
+   * ({@link CustomResolverOptions}) to plug in any pre-built
+   * {@link DescriptorResolver} — for instance the Node-only filesystem
+   * resolver from `@ethereum-sourcify/clear-signing/filesystem`.
    */
-  descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
+  descriptorResolverOptions?: GitHubResolverOptions | CustomResolverOptions;
 
   // TODO: resolvedImplementationAddress for proxy contracts — may be replaced
   // with an ExternalDataProvider method.
@@ -408,19 +413,31 @@ export type GitHubResolverOptions = {
   githubSource?: Partial<GitHubSource>;
 };
 
-export type EmbeddedResolverOptions = {
-  type: "embedded";
-  index: RegistryIndex; // must be provided for embedded resolvers
-  /**
-   * Filesystem root that descriptor paths in `index` are resolved against.
-   * The embedded resolver does `import(${descriptorDirectory}/${path})`.
-   * If a descriptor's `includes` chain reaches outside its own directory
-   * (e.g. `../../ercs/shared.json`), the index entries must be stored with
-   * enough leading directory segments to absorb the `..` traversal — see
-   * the contract on {@link RegistryIndex.calldataIndex}.
-   */
-  descriptorDirectory: string;
+/**
+ * Plugs a user-built {@link DescriptorResolver} into the format pipeline.
+ * Use this for any descriptor source other than the built-in GitHub
+ * registry — filesystem (see `@ethereum-sourcify/clear-signing/filesystem`),
+ * in-memory map, custom HTTP endpoint, etc.
+ */
+export type CustomResolverOptions = {
+  type: "custom";
+  resolver: DescriptorResolver;
 };
+
+/**
+ * A pre-built descriptor resolver: a registry index plus a closure that
+ * fetches and parses a single descriptor file by its index-relative path.
+ *
+ * Wrap an instance in {@link CustomResolverOptions} and pass it to
+ * {@link FormatOptions.descriptorResolverOptions} to override the default
+ * GitHub-backed resolution with any descriptor source. The library resolves
+ * `includes` chains and merges descriptors using only `index` and
+ * `fetchDescriptor`, so any source that satisfies this shape will work.
+ */
+export interface DescriptorResolver {
+  index: RegistryIndex;
+  fetchDescriptor: (path: string) => Promise<Descriptor>;
+}
 
 export interface RegistryIndex {
   /**
@@ -428,7 +445,7 @@ export interface RegistryIndex {
    * file's path.
    *
    * The path is resolved relative to the resolver root — `descriptorDirectory`
-   * for embedded resolvers, the repository root for GitHub resolvers. It MUST
+   * for the filesystem resolver, the repository root for GitHub resolvers. It MUST
    * be the descriptor's full relative path, not just a basename: an
    * `includes` declared inside the descriptor (e.g. `"../../ercs/foo.json"`)
    * is resolved against the directory of *this* path, and any `..` segments

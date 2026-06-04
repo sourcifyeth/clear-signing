@@ -150,9 +150,8 @@ interface FormatOptions {
   /**
    * Controls where descriptors are fetched from.
    * Defaults to the GitHub registry when omitted.
-   * Also allows to pass descriptors directly via the `embedded` option.
    */
-  descriptorResolverOptions?: GitHubResolverOptions | EmbeddedResolverOptions;
+  descriptorResolverOptions?: GitHubResolverOptions | CustomResolverOptions;
 }
 ```
 
@@ -234,12 +233,13 @@ const opts = {
 
 If the prebuilt indexes are missing descriptors or you're using a fork that doesn't publish them, walk the registry yourself with `createGitHubRegistryIndex()`. It's significantly slower (one fetch per descriptor file vs. two for the prebuilt indexes) so reserve it for setup-time use.
 
-#### Embedded Descriptors
+#### Filesystem resolver (Node-only)
 
-For bundled descriptors or testing, build your own index and descriptors will be loaded via JS module resolution:
+For bundled descriptors or testing in Node, build your own index and load descriptor JSON files from a local directory. The filesystem resolver lives in a Node-only subpath export so it stays out of browser bundles:
 
 ```typescript
 import { format } from "@ethereum-sourcify/clear-signing";
+import { createFilesystemResolver } from "@ethereum-sourcify/clear-signing/filesystem";
 import type { RegistryIndex } from "@ethereum-sourcify/clear-signing";
 
 const index: RegistryIndex = {
@@ -252,10 +252,31 @@ const index: RegistryIndex = {
 
 const result = await format(tx, {
   descriptorResolverOptions: {
-    type: "embedded",
-    index,
-    descriptorDirectory: "./descriptors",
+    type: "custom",
+    resolver: createFilesystemResolver({
+      index,
+      descriptorDirectory: "./descriptors",
+    }),
   },
+});
+```
+
+#### Custom resolvers
+
+`{ type: "custom", resolver }` accepts any object matching the `DescriptorResolver` shape, so you can plug in arbitrary descriptor sources (in-memory map, custom HTTP endpoint, ...):
+
+```typescript
+import type { DescriptorResolver } from "@ethereum-sourcify/clear-signing";
+
+const resolver: DescriptorResolver = {
+  index,
+  fetchDescriptor: async (path) => {
+    /* return parsed descriptor for `path` */
+  },
+};
+
+const result = await format(tx, {
+  descriptorResolverOptions: { type: "custom", resolver },
 });
 ```
 

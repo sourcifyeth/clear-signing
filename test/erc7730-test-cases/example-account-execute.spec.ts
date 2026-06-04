@@ -18,7 +18,7 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils.js";
-import { buildEmbeddedResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts } from "../utils.js";
 
 // Smart account implementation address — a valid 20-byte hex (the original spec
 // file used "0xYourImplementationAddress" as a placeholder; swapped here so that
@@ -108,7 +108,7 @@ const resolveChainInfo: ExternalDataProvider["resolveChainInfo"] = async (
 };
 
 function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
-  return buildEmbeddedResolverOpts(
+  return buildFilesystemResolverOpts(
     __dirname,
     {
       calldataDescriptorFiles: [
