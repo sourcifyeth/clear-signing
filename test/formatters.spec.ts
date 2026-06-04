@@ -940,9 +940,7 @@ describe("formatNftName", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe(
-      "Collection Name: BoredApeYachtClub - Token ID: 1036",
-    );
+    expect(result.rendered).toBe("BoredApeYachtClub #1036");
     expect(result.warning).toBeUndefined();
   });
 
@@ -1021,7 +1019,7 @@ describe("formatNftName", () => {
       1,
       provider,
     );
-    expect(result.rendered).toBe("Collection Name: CoolCats - Token ID: 42");
+    expect(result.rendered).toBe("CoolCats #42");
   });
 });
 
