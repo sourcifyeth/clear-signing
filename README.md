@@ -148,8 +148,9 @@ interface FormatOptions {
   externalDataProvider?: ExternalDataProvider;
 
   /**
-   * Controls where descriptors are fetched from.
-   * Defaults to the GitHub registry when omitted.
+   * Controls where descriptors are fetched from, and optionally carries a
+   * `trustedTokens` list (see below). Defaults to the GitHub registry when
+   * omitted.
    */
   descriptorResolverOptions?: GitHubResolverOptions | CustomResolverOptions;
 }
@@ -279,6 +280,27 @@ const result = await format(tx, {
   descriptorResolverOptions: { type: "custom", resolver },
 });
 ```
+
+### Trusted token lists
+
+The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions (`transfer`, `approve`, `transferFrom`, `safeTransferFrom`, `setApprovalForAll`), add a `trustedTokens` list to `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard` (addresses lowercase or EIP-55 checksummed). When **no registry descriptor resolves** for a transaction's contract, the library looks it up there; if listed, the transaction is rendered from a **bundled ERC-20 / ERC-721 template descriptor** instead of falling back to raw calldata. A registry descriptor always takes precedence.
+
+```typescript
+import type { TrustedTokens } from "@ethereum-sourcify/clear-signing";
+
+const trustedTokens: TrustedTokens = {
+  1: {
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "erc20", // USDC
+    "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d": "erc721", // BAYC
+  },
+};
+
+const result = await format(tx, {
+  descriptorResolverOptions: { type: "github", index, trustedTokens },
+});
+```
+
+Trust is delegated entirely to the wallet. The library never decides which contracts are trustworthy.
 
 ### Display Model
 

@@ -44,7 +44,30 @@ Two advanced options you typically won't need:
 - **`createGitHubRegistryIndex(source?)`** — walks the registry tree and builds the index in-process. Significantly slower than `fetchPrebuiltRegistryIndex` (one fetch per descriptor file). Use when the prebuilt indexes are stale, missing entries, or when pointing at a fork that doesn't publish them.
 - **Custom resolvers** — anything matching the `DescriptorResolver` shape (in-memory map, custom HTTP endpoint, etc.) can be wrapped in `{ type: "custom", resolver }`. One custom resolver ships in the library: the Node-only filesystem resolver at `@ethereum-sourcify/clear-signing/filesystem`, which loads descriptor JSON files from a local directory. See the README for details.
 
-## 3. Build the `ExternalDataProvider`
+## 3. Build the trusted token list
+
+The registry cannot hold a descriptor for every token. To still render plain
+ERC-20 and ERC-721 interactions, pass a `trustedTokens` list inside
+`descriptorResolverOptions`. It maps `chainId → tokenAddress → standard`. If a
+transaction's contract is listed there, the transaction is rendered from a
+bundled ERC-20 / ERC-721 template. Only include tokens in this object that you
+**trust** to be safe to interact with.
+
+```typescript
+import type { TrustedTokens } from "@ethereum-sourcify/clear-signing";
+
+// Token addresses may be lowercase or EIP-55 checksummed.
+const trustedTokens: TrustedTokens = {
+  1: {
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "erc20", // USDC
+    "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d": "erc721", // BAYC
+  },
+};
+
+const descriptorResolverOptions = { type: "github", index, trustedTokens };
+```
+
+## 4. Build the `ExternalDataProvider`
 
 The library is agnostic about how external data is fetched. To resolve token metadata, address names, NFT collections, block timestamps, and chain info, the wallet supplies an `ExternalDataProvider` — an object of async methods backed by the sources the wallet already has (RPC, token list, address book, …).
 
@@ -119,17 +142,21 @@ const externalDataProvider: ExternalDataProvider = {
   },
 };
 
-// Combine with the resolver options from §2 into the FormatOptions object
+// Combine with the resolver options from §2 and §3 into the FormatOptions object
 // that's passed to every format call.
 const opts: FormatOptions = {
-  descriptorResolverOptions: { type: "github", index }, // from §2
+  descriptorResolverOptions: {
+    type: "github",
+    index, // from §2
+    trustedTokens, // from §3
+  },
   externalDataProvider,
 };
 ```
 
 See [`src/types.ts`](src/types.ts) for the exact result type definitions.
 
-## 4. Call the format functions
+## 5. Call the format functions
 
 Three entry points, all returning `DisplayModel` as the output:
 
@@ -141,7 +168,7 @@ Three entry points, all returning `DisplayModel` as the output:
 
 Call them as soon as you have the request and before rendering the confirmation UI — they are async (descriptor fetch + external data resolution).
 
-All three accept the same `opts` object (built in §3) as their optional second argument — reuse it across every call.
+All three accept the same `opts` object (built in §4) as their optional second argument — reuse it across every call.
 
 ### `format`
 
@@ -197,7 +224,7 @@ const batch: Eip5792Batch = {
 const display: BatchDisplayModel = await formatEip5792Batch(batch, opts);
 ```
 
-## 5. Render the `DisplayModel`
+## 6. Render the `DisplayModel`
 
 The library returns a `DisplayModel`. Display its values to the user as the confirmation screen. The library never throws — failures surface as `warnings`.
 

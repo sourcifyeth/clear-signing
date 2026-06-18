@@ -1,0 +1,21 @@
+{
+  "context": {
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0xA0b86991c6218b36c1d19D4a2E9Eb0cE3606eB48"
+        }
+      ]
+    }
+  },
+  "metadata": { "owner": "Registry Owner" },
+  "display": {
+    "formats": {
+      "transfer(address _to,uint256 _value)": {
+        "intent": "Registry Send",
+        "fields": [{ "path": "_to", "label": "Recipient", "format": "raw" }]
+      }
+    }
+  }
+}

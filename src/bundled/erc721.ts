@@ -1,0 +1,92 @@
+import type { Descriptor } from "../types.js";
+
+/**
+ * Bundled ERC-721 NFT descriptor.
+ *
+ * Transcribed verbatim from the Ethereum clear-signing registry
+ * (`ercs/calldata-erc721-nfts.json`). Committed as a TypeScript `const`
+ * rather than imported JSON — see the rationale in `bundled-descriptors.ts`.
+ *
+ * The template carries no `context.contract.deployments`; the deployment is
+ * injected per-transaction by `buildBundledTokenDescriptor`.
+ */
+export const erc721Descriptor: Descriptor = {
+  context: { contract: {} },
+  metadata: { enums: { rights: { True: "Grant all", False: "Deny all" } } },
+  display: {
+    definitions: {
+      from: {
+        label: "From",
+        format: "addressName",
+        params: { types: ["eoa"], sources: ["local", "ens"] },
+      },
+      to: {
+        label: "To",
+        format: "addressName",
+        params: { types: ["eoa"], sources: ["local", "ens"] },
+      },
+      operator: {
+        label: "Operator",
+        format: "addressName",
+        params: { types: ["contract"], sources: ["local", "ens"] },
+      },
+      tokenId: {
+        label: "NFT",
+        format: "nftName",
+        params: { collectionPath: "@.to" },
+      },
+    },
+    formats: {
+      "transferFrom(address _from, address _to, uint256 _tokenId)": {
+        intent: "Send NFT",
+        fields: [
+          { path: "_from", $ref: "$.display.definitions.from" },
+          {
+            path: "_to",
+            $ref: "$.display.definitions.to",
+            visible: "always",
+          },
+          {
+            path: "_tokenId",
+            $ref: "$.display.definitions.tokenId",
+            visible: "always",
+          },
+        ],
+      },
+      "safeTransferFrom(address _from, address _to, uint256 _tokenId)": {
+        intent: "Send NFT",
+        fields: [
+          { path: "_from", $ref: "$.display.definitions.from" },
+          { path: "_to", $ref: "$.display.definitions.to" },
+          { path: "_tokenId", $ref: "$.display.definitions.tokenId" },
+        ],
+      },
+      "approve(address _approved, uint256 _tokenId)": {
+        intent: "Approve operator for NFT",
+        fields: [
+          { path: "_approved", $ref: "$.display.definitions.operator" },
+          { path: "_tokenId", $ref: "$.display.definitions.tokenId" },
+        ],
+      },
+      "setApprovalForAll(address _operator, bool _approved)": {
+        $id: "setApprovalForAll",
+        intent: "Manage operator rights for",
+        fields: [
+          {
+            path: "@.to",
+            label: "Collection",
+            format: "addressName",
+            params: { types: ["collection"], sources: ["local", "ens"] },
+          },
+          { path: "_operator", $ref: "$.display.definitions.operator" },
+          {
+            path: "_approved",
+            label: "Access rights",
+            format: "enum",
+            params: { $ref: "$.metadata.enums.rights" },
+          },
+        ],
+      },
+    },
+  },
+} as const;

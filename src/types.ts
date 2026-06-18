@@ -326,7 +326,7 @@ export interface ChainInfoResult {
   };
 }
 
-/** Wallet-provided async resolvers for external data. */
+/** Wallet-provided async resolvers for external data needed by the formatter. */
 export interface ExternalDataProvider {
   /**
    * Resolution for addressName formats. The wallet should verify whether the
@@ -401,7 +401,27 @@ export interface FormatOptions {
   // resolvedImplementationAddress?: string;
 }
 
-export type GitHubResolverOptions = {
+/** Token standards for descriptor generation. */
+export type TokenStandard = "erc20" | "erc721";
+
+/** Nested map: chain ID → token address → token standard. */
+export interface TrustedTokens {
+  [chainId: number]: { [tokenAddress: string]: TokenStandard };
+}
+
+export interface BaseResolverOptions {
+  /**
+   * Wallet-provided trusted token list. Used to generate descriptors for tokens
+   * on the fly. Standard tokens usually don't have a descriptor in the registry.
+   * Without this option, the library can't format calls to standard tokens.
+   * Only wallet-trusted tokens should be included in this object.
+   *
+   * Both lowercase and checksummed token addresses are accepted.
+   */
+  trustedTokens?: TrustedTokens;
+}
+
+export type GitHubResolverOptions = BaseResolverOptions & {
   type: "github";
   /**
    * Pre-built registry index. Strongly recommended: fetch once at app
@@ -419,7 +439,7 @@ export type GitHubResolverOptions = {
  * registry — filesystem (see `@ethereum-sourcify/clear-signing/filesystem`),
  * in-memory map, custom HTTP endpoint, etc.
  */
-export type CustomResolverOptions = {
+export type CustomResolverOptions = BaseResolverOptions & {
   type: "custom";
   resolver: DescriptorResolver;
 };
@@ -453,7 +473,7 @@ export interface RegistryIndex {
    * silently truncates `..` traversals — store `"registry/foo/main.json"`,
    * not `"main.json"`, if the include chain reaches a sibling directory.
    */
-  calldataIndex: Record<string, string>;
+  calldataIndex: { [caip10Id: string]: string };
 
   /**
    * Maps CAIP-10 identifiers to a per-primary-type list of descriptor entries.
@@ -470,7 +490,9 @@ export interface RegistryIndex {
    * See https://github.com/ethereum/clear-signing-erc7730-registry/blob/master/index.eip712.json
    * as an example of the shape of this index in practice.
    */
-  typedDataIndex: Record<string, Record<string, TypedDataIndexEntry[]>>;
+  typedDataIndex: {
+    [caip10Id: string]: { [primaryType: string]: TypedDataIndexEntry[] };
+  };
 }
 
 /**

@@ -11,14 +11,19 @@ import type {
   DescriptorResolver,
   GitHubResolverOptions,
   GitHubSource,
+  TokenStandard,
+  TrustedTokens,
   TypedData,
   Warning,
 } from "./types.js";
+import { buildBundledTokenDescriptor } from "./bundled-descriptors.js";
 import {
   asciiToBytes,
   bytesToHex,
+  hexToBytes,
   keccak256,
   normalizeAddress,
+  toChecksumAddress,
   warn,
 } from "./utils.js";
 
@@ -61,6 +66,10 @@ async function createResolver(
  * a `{ descriptor }` envelope on success, or a `{ warning }` envelope when
  * resolution fails — `NO_DESCRIPTOR` when nothing is indexed for the pair,
  * `CYCLIC_INCLUDES` when the `includes` chain self-references.
+ *
+ * If no descriptor is indexed for the chain and address, the method also checks
+ * the optional `options.trustedTokens` list for a matching trusted token. In case
+ * of a matching trusted token, a token descriptor is generated on the fly.
  */
 export async function resolveCalldataDescriptor(
   chainId: number,
@@ -70,8 +79,37 @@ export async function resolveCalldataDescriptor(
   const resolver = await createResolver(options);
   const path =
     resolver.index.calldataIndex[`eip155:${chainId}:${normalizeAddress(to)}`];
-  if (!path) return noDescriptorWarning(chainId, to);
-  return resolveWithIncludes(resolver, path);
+  if (path) return resolveWithIncludes(resolver, path);
+
+  // No registry descriptor. Check if a trusted token matches.
+  const standard = lookupTrustedToken(options?.trustedTokens, chainId, to);
+  if (standard) {
+    return { descriptor: buildBundledTokenDescriptor(standard, chainId, to) };
+  }
+
+  return noDescriptorWarning(chainId, to);
+}
+
+/**
+ * Look up a token standard in the trusted-token list, accepting either a
+ * lowercase or an EIP-55 checksummed address key.
+ */
+function lookupTrustedToken(
+  trustedTokens: TrustedTokens | undefined,
+  chainId: number,
+  address: string,
+): TokenStandard | undefined {
+  const tokens = trustedTokens?.[chainId];
+  if (!tokens) return undefined;
+
+  const lowercaseResult = tokens[normalizeAddress(address)];
+  if (lowercaseResult !== undefined) return lowercaseResult;
+
+  try {
+    return tokens[toChecksumAddress(hexToBytes(address))];
+  } catch {
+    return undefined;
+  }
 }
 
 /**
