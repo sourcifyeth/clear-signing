@@ -186,7 +186,7 @@ describe("trusted tokens — bundled ERC-721", () => {
     expect(nft.warning).toBeUndefined();
   });
 
-  it("formats setApprovalForAll(address,bool); enum-on-bool falls back to raw", async () => {
+  it("formats setApprovalForAll(address,bool) with the bool rendered as an enum", async () => {
     const data = "0xa22cb465" + addrWord(OPERATOR) + word("1"); // approved = true
     const result = await format(
       { chainId: CHAIN_ID, to: COLLECTION, data },
@@ -211,16 +211,35 @@ describe("trusted tokens — bundled ERC-721", () => {
     expect(operator.value).toBe(checksum(OPERATOR));
     expect(operator.format).toBe("addressName");
 
-    // The bundled descriptor models access rights as an enum over a bool, but
-    // the library's enum format only accepts uint/int — so it renders the raw
-    // bool with an ARGUMENT_TYPE_MISMATCH warning (known limitation).
+    // The bundled descriptor models access rights as an enum over a bool; the
+    // bool `true` resolves against the capitalized "True" key.
     const rights = result.fields[2];
     assert(!isFieldGroup(rights));
     expect(rights.label).toBe("Access rights");
-    expect(rights.value).toBe("true");
+    expect(rights.value).toBe("Grant all");
     expect(rights.fieldType).toBe("bool");
     expect(rights.format).toBe("enum");
-    expect(rights.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+    expect(rights.rawAddress).toBeUndefined();
+    expect(rights.tokenAddress).toBeUndefined();
+    expect(rights.embeddedCalldata).toBeUndefined();
+    expect(rights.warning).toBeUndefined();
+  });
+
+  it("formats setApprovalForAll(address,bool) with approved=false as Deny all", async () => {
+    const data = "0xa22cb465" + addrWord(OPERATOR) + word("0"); // approved = false
+    const result = await format(
+      { chainId: CHAIN_ID, to: COLLECTION, data },
+      opts(TRUSTED_ERC721),
+    );
+
+    assert(result.fields);
+    const rights = result.fields[2];
+    assert(!isFieldGroup(rights));
+    expect(rights.label).toBe("Access rights");
+    expect(rights.value).toBe("Deny all");
+    expect(rights.fieldType).toBe("bool");
+    expect(rights.format).toBe("enum");
+    expect(rights.warning).toBeUndefined();
   });
 });
 

@@ -731,8 +731,8 @@ export function formatEnum(
   value: ArgumentValue,
   metadata: DescriptorMetadata | undefined,
 ): RenderFieldResult {
-  if (value.type !== "uint" && value.type !== "int")
-    return typeMismatch(value, "uint or int", "enum");
+  if (value.type !== "uint" && value.type !== "int" && value.type !== "bool")
+    return typeMismatch(value, "uint, int or bool", "enum");
   const label = resolveEnumLabel(field, value.value.toString(), metadata);
   if (!label) {
     return {
@@ -749,6 +749,10 @@ export function formatEnum(
 /**
  * Resolve an enum label from a metadata map using a string key.
  * Returns undefined when the reference or map can't be resolved.
+ *
+ * The exact key is tried first, then a case-insensitive match — so a `bool`
+ * value (`"true"`/`"false"`) resolves against capitalized keys like
+ * `{ "True": ..., "False": ... }`.
  */
 export function resolveEnumLabel(
   field: FieldFormatOptions,
@@ -762,7 +766,17 @@ export function resolveEnumLabel(
   const enumMap = resolveMetadataValue(metadata, reference);
   if (!enumMap || typeof enumMap !== "object") return undefined;
 
-  const label = (enumMap as Record<string, unknown>)[key];
+  const map = enumMap as Record<string, unknown>;
+  let label = map[key];
+  if (label === undefined) {
+    const lowerKey = key.toLowerCase();
+    for (const [k, v] of Object.entries(map)) {
+      if (k.toLowerCase() === lowerKey) {
+        label = v;
+        break;
+      }
+    }
+  }
   return typeof label === "string" ? label : undefined;
 }
 

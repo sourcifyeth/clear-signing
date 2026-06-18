@@ -1319,6 +1319,15 @@ describe("resolveEnumLabel", () => {
     expect(resolveEnumLabel(field, "99", metadata)).toBeUndefined();
   });
 
+  it("matches keys case-insensitively (e.g. bool 'true' → 'True')", () => {
+    const meta: DescriptorMetadata = {
+      enums: { rights: { True: "Grant all", False: "Deny all" } },
+    };
+    const field = { params: { $ref: "$.metadata.enums.rights" } };
+    expect(resolveEnumLabel(field, "true", meta)).toBe("Grant all");
+    expect(resolveEnumLabel(field, "false", meta)).toBe("Deny all");
+  });
+
   it("returns undefined when no $ref param", () => {
     expect(resolveEnumLabel({}, "0", metadata)).toBeUndefined();
   });
@@ -1366,7 +1375,17 @@ describe("formatEnum", () => {
     expect(result.rendered).toBe("Active");
   });
 
-  it("returns type mismatch for non-uint/int", () => {
+  it("accepts bool values, matching keys case-insensitively", () => {
+    const meta: DescriptorMetadata = {
+      enums: { rights: { True: "Grant all", False: "Deny all" } },
+    };
+    const field = { params: { $ref: "$.metadata.enums.rights" } };
+    expect(formatEnum(field, bool(true), meta).rendered).toBe("Grant all");
+    expect(formatEnum(field, bool(true), meta).warning).toBeUndefined();
+    expect(formatEnum(field, bool(false), meta).rendered).toBe("Deny all");
+  });
+
+  it("returns type mismatch for non-uint/int/bool", () => {
     const field = { params: { $ref: "$.metadata.enums.status" } };
     const result = formatEnum(field, str("hello"), metadata);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");

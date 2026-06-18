@@ -156,11 +156,6 @@ different semantics (ERC-20 `value` → tokenAmount vs. ERC-721 `tokenId` → nf
 so the calldata alone cannot disambiguate them. Trust is delegated entirely to the
 wallet.
 
-> The bundled ERC-721 `setApprovalForAll` models access rights as an `enum` over a
-> `bool`, but the `enum` format only accepts `uint`/`int` — so that one field renders
-> the raw bool with an `ARGUMENT_TYPE_MISMATCH` warning. Known limitation of the
-> bundled descriptor, faithful to the registry source.
-
 ## Descriptor Sources
 
 `FormatOptions.descriptorResolverOptions` is a discriminated union:
@@ -303,6 +298,7 @@ Not yet implemented: `interoperableAddressName`
 **Spec-compliance notes:**
 
 - All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`, `chainId`) accept both `uint` and `int` field types.
+- `enum` additionally accepts `bool` values (`"true"`/`"false"`), resolving the label case-insensitively so capitalized keys like `{ "True": ..., "False": ... }` match (e.g. ERC-721 `setApprovalForAll`).
 - `date` format supports `params.encoding` of `"timestamp"` (unix seconds) and `"blockheight"` (resolved via `ExternalDataProvider.resolveBlockTimestamp`). Falls back to raw with `UNKNOWN_ENCODING` warning for missing or unsupported encodings.
 - `tokenAmount` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios (same as `tokenTicker`).
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
