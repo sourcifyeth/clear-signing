@@ -19,6 +19,8 @@ src/
 ├── calldata.ts                 # Calldata path: formatCalldata(), signature parsing, ABI decoding
 ├── eip712.ts                   # EIP-712 path: formatEip712(), encodeType matching, type resolution
 ├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
+├── bundled-descriptors.ts      # Bundled ERC-20/721 templates → buildBundledTokenDescriptor()
+├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
 └── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
 ```
@@ -72,6 +74,14 @@ src/
   `extractPrimaryType` for `resolver.ts` and `github-registry-index.ts`; the
   rest is module-private.
 
+- **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 template descriptors (the
+  registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` files, transcribed as TS
+  `const`s in `bundled/erc20.ts` and `bundled/erc721.ts`). Exports
+  `buildBundledTokenDescriptor(standard, chainId, address)`, which clones the template and
+  injects `context.contract.deployments` so the result passes the deployment-binding check.
+  Used by `resolveCalldataDescriptor` for the trusted-token fallback. The descriptors are
+  committed as TS rather than imported JSON — see the gotcha below.
+
 ## Key Data Flow
 
 1. **Transaction formatting:**
@@ -81,6 +91,9 @@ src/
    → resolveCalldataDescriptor(tx.chainId, tx.to, opts?.descriptorResolverOptions)
        → createResolver(options) — for "github" without an explicit index,
          calls fetchPrebuiltRegistryIndex() up front
+       → registry index lookup by (chainId, to); on a miss, if
+         options.trustedTokens tags the contract, return
+         buildBundledTokenDescriptor(standard, chainId, to)
    → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
        → findFormatBySelector() matches selector to a display.formats entry
        → decodeArguments() decodes calldata into { values, arrayLengths } maps
@@ -119,6 +132,29 @@ Both calldata and EIP-712 paths share the same field processing pipeline in `fie
 Each builds a `BaseResolvePath` closure that handles `@.`, `$.`, `#.`, and bare path resolution
 for its domain (calldata args vs. EIP-712 message fields). `applyFieldFormats()` internally
 wraps it with `buildSliceResolvePath` to handle byte slice paths (e.g. `srcToken.[-20:]`).
+
+## Trusted Token Descriptors (bundled ERC-20 / ERC-721)
+
+`descriptorResolverOptions.trustedTokens` (type `TrustedTokens`, declared on the
+shared `BaseResolverOptions`, so both the GitHub and custom variants carry it) is
+an optional wallet-provided **data list** keyed `chainId → tokenAddress → standard`
+(`"erc20" | "erc721"`; address keys may be lowercase or EIP-55 checksummed —
+`lookupTrustedToken` tries both). It is the **fallback after
+registry resolution**: `resolveCalldataDescriptor` first looks up the registry
+index by `(chainId, to)`; when the index has a path, its resolution result is
+returned as-is (the descriptor wins even if none of its `display.formats` match
+the calldata — in which case `formatCalldata` later reports `NO_FORMAT_MATCH` —
+and an `includes` failure surfaces its own warning). Only when the index has no
+path does the resolver consult `options.trustedTokens[chainId][to]`; if a
+standard is listed, `buildBundledTokenDescriptor` (in `bundled-descriptors.ts`)
+produces a deployment-bound ERC-20 / ERC-721 template descriptor. The resolver
+never parses the calldata.
+
+**The wallet must tag each token's standard** — the ERC-20 and ERC-721
+`approve` / `transferFrom` functions share identical 4-byte selectors with
+different semantics (ERC-20 `value` → tokenAmount vs. ERC-721 `tokenId` → nftName),
+so the calldata alone cannot disambiguate them. Trust is delegated entirely to the
+wallet.
 
 ## Descriptor Sources
 
@@ -262,6 +298,7 @@ Not yet implemented: `interoperableAddressName`
 **Spec-compliance notes:**
 
 - All numeric formats (`date`, `tokenAmount`, `amount`, `enum`, `duration`, `nftName`, `chainId`) accept both `uint` and `int` field types.
+- `enum` additionally accepts `bool` values (`"true"`/`"false"`), resolving the label case-insensitively so capitalized keys like `{ "True": ..., "False": ... }` match (e.g. ERC-721 `setApprovalForAll`).
 - `date` format supports `params.encoding` of `"timestamp"` (unix seconds) and `"blockheight"` (resolved via `ExternalDataProvider.resolveBlockTimestamp`). Falls back to raw with `UNKNOWN_ENCODING` warning for missing or unsupported encodings.
 - `tokenAmount` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios (same as `tokenTicker`).
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
@@ -374,6 +411,7 @@ Tests live in `test/`. Current test files:
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
+- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
 
 ### Test guidelines
 
@@ -470,7 +508,7 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 
 ## Gotchas
 
-1. **JSON imports require assertion:** `import data from './file.json' with { type: 'json' };`
+1. **JSON imports require assertion:** `import data from './file.json' with { type: 'json' };` — and for that reason the bundled descriptors (`src/bundled/*.ts`) are committed as TypeScript `const`s, **not** imported JSON. Import attributes caused build/tooling trouble; plain TS bundles as code in every target (ESM/CJS/RN/browser) with no `resolveJsonModule`, no esbuild JSON loader, and no import-attribute support required, and gives the objects compile-time `Descriptor` typing.
 2. **All imports need `.js` extension** (ESM requirement)
 3. **Selector matching is case-sensitive** on function names
 4. **Address normalization:** Always lowercase for comparisons
