@@ -105,6 +105,70 @@ describe("applyFieldFormats", () => {
       expect(field.label).toBe("Amount");
     });
 
+    it("skips fields with visible.mustBe before requiring a format", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          { path: "amount", label: "Amount", format: "raw" },
+          {
+            path: "invariant",
+            label: "Invariant",
+            visible: { mustBe: [0] },
+          },
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        amount: UINT(1n),
+        invariant: UINT(0n),
+      });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      expect(result.fields).toHaveLength(1);
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.label).toBe("Amount");
+    });
+
+    it("supports visible.mustMatch as a legacy alias for mustBe", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          { path: "amount", label: "Amount", format: "raw" },
+          {
+            path: "legacyInvariant",
+            label: "Legacy Invariant",
+            visible: { mustMatch: [0] },
+          },
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        amount: UINT(1n),
+        legacyInvariant: UINT(0n),
+      });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      expect(result.fields).toHaveLength(1);
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.label).toBe("Amount");
+    });
+
     it("merges field with $ref definition", async () => {
       const definitions: Record<string, DescriptorFieldFormat> = {
         myDef: { label: "Defined Label", format: "raw" },

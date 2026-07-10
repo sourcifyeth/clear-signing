@@ -1,6 +1,6 @@
 /**
  * Tests based on the ERC-7730 spec test case: example-visibility-rules.json
- * Tests the per-field `visible` rule (always / never / optional / ifNotIn / mustMatch).
+ * Tests the per-field `visible` rule (always / never / optional / ifNotIn / mustBe).
  * @see https://eips.ethereum.org/EIPS/eip-7730#field-format-specification
  */
 
@@ -110,7 +110,7 @@ function buildOpts(externalDataProvider?: ExternalDataProvider): FormatOptions {
 }
 
 describe("example-visibility-rules.json — transfer with visibility rules", () => {
-  it("shows always/optional fields and hides never/mustMatch fields when values are as expected", async () => {
+  it("shows always/optional fields and hides never/mustBe fields when values are as expected", async () => {
     const opts = buildOpts({
       resolveToken,
       resolveLocalName,
@@ -126,7 +126,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
           value: TRANSFER_AMOUNT,
           referrer: REFERRER,
           rfu: RFU,
-          legacy: 0n, // mustMatch [0] → matches, hidden without warning
+          legacy: 0n, // mustBe [0] → matches, hidden without warning
           fee: FEE_1_ETH, // ifNotIn [0] → not in, shown
         }),
       },
@@ -137,7 +137,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
 
     assert(result.fields);
     // Displayed: To (always), Amount (always), Referrer (optional), Fee (ifNotIn, value != 0)
-    // Hidden:    RFU (never), Legacy (mustMatch with matching value)
+    // Hidden:    RFU (never), Legacy (mustBe with matching value)
     expect(result.fields).toHaveLength(4);
 
     const toField = result.fields[0];
@@ -225,7 +225,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
     );
 
     assert(result.fields);
-    // Hidden: RFU (never), Legacy (mustMatch match), Fee (ifNotIn match)
+    // Hidden: RFU (never), Legacy (mustBe match), Fee (ifNotIn match)
     expect(result.fields).toHaveLength(3);
 
     const labels = result.fields.map((f) => {
@@ -274,7 +274,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
     expect(result.warnings).toBeUndefined();
   });
 
-  it("falls back to rawCalldataFallback when a mustMatch field value does not match", async () => {
+  it("falls back to rawCalldataFallback when a mustBe field value does not match", async () => {
     const opts = buildOpts({
       resolveToken,
       resolveLocalName,
@@ -290,7 +290,7 @@ describe("example-visibility-rules.json — transfer with visibility rules", () 
           value: TRANSFER_AMOUNT,
           referrer: REFERRER,
           rfu: RFU,
-          legacy: 42n, // violates mustMatch: [0]
+          legacy: 42n, // violates mustBe: [0]
           fee: FEE_1_ETH,
         }),
       },

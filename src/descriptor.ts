@@ -100,7 +100,7 @@ export type BytesSliceValue = { type: "bytes-slice"; bytes: Uint8Array };
 
 /**
  * Convert a raw JS value (a literal from a parsed descriptor, an EIP-712
- * message value, or an `ifNotIn`/`mustMatch` candidate) into an ArgumentValue
+ * message value, or an `ifNotIn`/`mustBe` candidate) into an ArgumentValue
  * by inferring its type from the value's shape.
  *
  * Inference rules:

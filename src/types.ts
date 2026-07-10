@@ -580,6 +580,7 @@ export interface DescriptorFieldFormat {
     | "always"
     | "optional"
     | { ifNotIn?: Array<string | number | boolean | null> }
+    | { mustBe?: Array<string | number | boolean | null> }
     | { mustMatch?: Array<string | number | boolean | null> };
   separator?: string;
   encryption?: DescriptorFieldEncryption;

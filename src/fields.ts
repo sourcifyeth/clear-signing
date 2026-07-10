@@ -205,6 +205,14 @@ async function processSingleField(
     };
   }
 
+  const visibility = evaluateVisibility(
+    merged.visible,
+    valueForVisibility(resolvedValue, merged.format),
+    merged.label ?? merged.path ?? String(merged.value),
+  );
+  if ("warning" in visibility) return { warnings: [visibility.warning] };
+  if (visibility.hide) return { field: null };
+
   if (!merged.format || !merged.label) {
     return {
       warnings: [
@@ -223,10 +231,6 @@ async function processSingleField(
     resolvedValue,
     merged.format,
   );
-
-  const visibility = evaluateVisibility(merged.visible, argValue, merged.label);
-  if ("warning" in visibility) return { warnings: [visibility.warning] };
-  if (visibility.hide) return { field: null };
 
   const {
     rendered,
@@ -777,8 +781,9 @@ type VisibilityResult = { hide: boolean } | { warning: Warning };
  *
  *   - "always" / "optional" / undefined → shown
  *   - { ifNotIn: [...] }                 → hidden when the value matches any entry
- *   - { mustMatch: [...] }               → always hidden; emits a MUSTMATCH_VIOLATION
+ *   - { mustBe: [...] }                  → always hidden; emits a MUSTMATCH_VIOLATION
  *                                          warning when the value does NOT match
+ *   - { mustMatch: [...] }               → legacy alias for mustBe
  */
 function evaluateVisibility(
   visible: DescriptorFieldFormat["visible"],
@@ -793,8 +798,15 @@ function evaluateVisibility(
     return { hide: matchesAnyCandidate(argValue, visible.ifNotIn) };
   }
 
-  if ("mustMatch" in visible && visible.mustMatch) {
-    if (matchesAnyCandidate(argValue, visible.mustMatch)) {
+  const mustBe =
+    "mustBe" in visible && visible.mustBe
+      ? visible.mustBe
+      : "mustMatch" in visible && visible.mustMatch
+        ? visible.mustMatch
+        : undefined;
+
+  if (mustBe) {
+    if (matchesAnyCandidate(argValue, mustBe)) {
       return { hide: true };
     }
     return {
@@ -806,6 +818,15 @@ function evaluateVisibility(
   }
 
   return { hide: false };
+}
+
+function valueForVisibility(
+  value: ArgumentValue | BytesSliceValue,
+  format: DescriptorFieldFormatType | undefined,
+): ArgumentValue {
+  if (format) return coerceResolvedValue(value, format);
+  if (value.type !== "bytes-slice") return value;
+  return { type: "bytes", bytes: value.bytes };
 }
 
 function matchesAnyCandidate(
