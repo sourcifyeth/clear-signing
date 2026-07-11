@@ -50,6 +50,12 @@ import { renderField } from "./formatters.js";
 /** Callback to get the length of an array at a given container path. */
 export type GetArrayLength = (path: string) => number;
 
+interface ArrayPath {
+  path: string;
+  basePath: string;
+  length: number;
+}
+
 /** Shared context threaded through all internal processing functions. */
 interface FieldContext {
   definitions: Record<string, DescriptorFieldFormat>;
@@ -134,11 +140,13 @@ async function processArrayField(
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const basePath = parseGroupBasePath(fieldSpec.path);
   const length = ctx.getArrayLength(basePath);
-  const fieldArrayLengths = [{ path: basePath, length }];
+  const fieldArrayPaths = [
+    { path: fieldSpec.path ?? basePath, basePath, length },
+  ];
 
   const paramMismatch = checkParamArrayLengths(
     [fieldSpec],
-    fieldArrayLengths,
+    arrayLengthsFromPaths(fieldArrayPaths),
     ctx,
   );
   if (paramMismatch) return { warnings: [paramMismatch] };
@@ -155,7 +163,7 @@ async function processArrayField(
   const iterResult = await iterateArrayField(fieldSpec, length, ctx);
   if ("warnings" in iterResult) return iterResult;
 
-  joinArrayValues(fieldArrayLengths, ctx.renderedValues);
+  joinArrayValues(fieldArrayPaths, ctx.renderedValues);
   return {
     group: { fields: iterResult.fields },
   };
@@ -321,16 +329,15 @@ async function processChildArrayPaths(
   ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const childFields = group.fields ?? [];
-  const arrayLengths: { path: string; length: number }[] = [];
+  const arrayPaths: ArrayPath[] = [];
   for (const child of childFields) {
     if (!isFieldGroup(child) && child.path?.includes(".[]")) {
       const childBasePath = parseGroupBasePath(child.path);
-      arrayLengths.push({
-        path: childBasePath,
-        length: ctx.getArrayLength(childBasePath),
-      });
+      const length = ctx.getArrayLength(childBasePath);
+      arrayPaths.push({ path: child.path, basePath: childBasePath, length });
     }
   }
+  const arrayLengths = arrayLengthsFromPaths(arrayPaths);
 
   // Per ERC-7730: when a field param references an array path, it must have
   // the same length as the field's own array path.
@@ -373,7 +380,7 @@ async function processChildArrayPaths(
       allFields.push(...result.fields);
     }
 
-    joinArrayValues(arrayLengths, ctx.renderedValues);
+    joinArrayValues(arrayPaths, ctx.renderedValues);
     return { group: { label: group.label, fields: allFields } };
   }
 
@@ -404,7 +411,7 @@ async function processChildArrayPaths(
     }
   }
 
-  joinArrayValues(arrayLengths, ctx.renderedValues);
+  joinArrayValues(arrayPaths, ctx.renderedValues);
   return { group: { label: group.label, fields: allFields } };
 }
 
@@ -559,27 +566,38 @@ function expandParamArrayIndex(
 }
 
 /**
- * For each array tracked in arrayLengths, join the rendered values of
- * individual elements (e.g. "recipients.[0]", "recipients.[1]") with " and "
- * and store the result under the base path (e.g. "recipients") in renderedValues.
- * This allows interpolateTemplate to resolve array placeholders directly.
+ * For each array wildcard path, join the rendered values of
+ * individual elements (e.g. "recipients.[0]", "recipients.[1]" or
+ * "items.[0].amount", "items.[1].amount") with " and " and store the result
+ * under the array wildcard path (e.g. "recipients.[]" or "items.[].amount") in
+ * renderedValues. For top-level array fields, also store the result under the
+ * base path (e.g. "recipients") for descriptor compatibility.
  */
 function joinArrayValues(
-  arrayLengths: { path: string; length: number }[],
+  arrayPaths: ArrayPath[],
   renderedValues: Map<string, string>,
 ): void {
-  for (const { path, length } of arrayLengths) {
-    const basePath = stripStructuredRootPrefix(path);
+  for (const { path, length } of arrayPaths) {
+    const wildcardPath = stripStructuredRootPrefix(path);
     const parts: string[] = [];
     for (let i = 0; i < length; i++) {
-      const v = renderedValues.get(`${basePath}.[${i}]`);
+      const v = renderedValues.get(wildcardPath.replace(".[]", `.[${i}]`));
       if (v !== undefined) parts.push(v);
     }
     if (parts.length > 0) {
-      renderedValues.set(`${basePath}.[]`, parts.join(" and "));
-      renderedValues.set(basePath, parts.join(" and "));
+      const joined = parts.join(" and ");
+      renderedValues.set(wildcardPath, joined);
+      if (wildcardPath.endsWith(".[]")) {
+        renderedValues.set(wildcardPath.slice(0, -3), joined);
+      }
     }
   }
+}
+
+function arrayLengthsFromPaths(
+  arrayPaths: ArrayPath[],
+): { path: string; length: number }[] {
+  return arrayPaths.map(({ basePath, length }) => ({ path: basePath, length }));
 }
 
 /**

@@ -789,5 +789,39 @@ describe("applyFieldFormats", () => {
       expect(result.renderedValues.get("a")).toBe("1");
       expect(result.renderedValues.get("b")).toBe("hello");
     });
+
+    it("stores joined rendered values for child array paths", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Items",
+            iteration: "bundled",
+            fields: [
+              { path: "items.[].name", label: "Name", format: "raw" },
+              { path: "items.[].amount", label: "Amount", format: "raw" },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        "items.[0].name": { type: "string", value: "Alice" },
+        "items.[0].amount": UINT(1n),
+        "items.[1].name": { type: "string", value: "Bob" },
+        "items.[1].amount": UINT(2n),
+      });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        mapArrayLength({ items: 2 }),
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      expect(result.renderedValues.get("items.[].name")).toBe("Alice and Bob");
+      expect(result.renderedValues.get("items.[].amount")).toBe("1 and 2");
+    });
   });
 });
