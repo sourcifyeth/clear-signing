@@ -138,15 +138,12 @@ async function processArrayField(
   fieldSpec: DescriptorFieldFormat,
   ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
-  const basePath = parseGroupBasePath(fieldSpec.path);
-  const length = ctx.getArrayLength(basePath);
-  const fieldArrayPaths = [
-    { path: fieldSpec.path ?? basePath, basePath, length },
-  ];
+  const fieldArrayPaths = [buildArrayPath(fieldSpec.path, ctx)];
+  const { basePath, length } = fieldArrayPaths[0];
 
   const paramMismatch = checkParamArrayLengths(
     [fieldSpec],
-    arrayLengthsFromPaths(fieldArrayPaths),
+    fieldArrayPaths,
     ctx,
   );
   if (paramMismatch) return { warnings: [paramMismatch] };
@@ -329,22 +326,14 @@ async function processChildArrayPaths(
   ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const childFields = group.fields ?? [];
-  const arrayPaths: ArrayPath[] = [];
-  for (const child of childFields) {
-    if (!isFieldGroup(child) && child.path?.includes(".[]")) {
-      const childBasePath = parseGroupBasePath(child.path);
-      const length = ctx.getArrayLength(childBasePath);
-      arrayPaths.push({ path: child.path, basePath: childBasePath, length });
-    }
-  }
-  const arrayLengths = arrayLengthsFromPaths(arrayPaths);
+  const arrayPaths = collectChildArrayPaths(childFields, ctx);
 
   // Per ERC-7730: when a field param references an array path, it must have
   // the same length as the field's own array path.
-  const paramMismatch = checkParamArrayLengths(childFields, arrayLengths, ctx);
+  const paramMismatch = checkParamArrayLengths(childFields, arrayPaths, ctx);
   if (paramMismatch) return { warnings: [paramMismatch] };
 
-  if (arrayLengths.every((a) => a.length === 0)) {
+  if (arrayPaths.every((a) => a.length === 0)) {
     return {
       group: emptyArrayGroup(group.label, "All arrays in group are empty"),
     };
@@ -353,11 +342,11 @@ async function processChildArrayPaths(
   const isBundled = group.iteration === "bundled";
 
   if (isBundled) {
-    const lengths = arrayLengths.map((a) => a.length);
+    const lengths = arrayPaths.map((a) => a.length);
     const first = lengths[0];
     if (lengths.some((l) => l !== first)) {
-      const detail = arrayLengths
-        .map((a) => `${a.path}=${a.length}`)
+      const detail = arrayPaths
+        .map((a) => `${a.basePath}=${a.length}`)
         .join(", ");
       return {
         warnings: [
@@ -399,8 +388,9 @@ async function processChildArrayPaths(
     }
 
     if (child.path?.includes(".[]")) {
-      const childBasePath = parseGroupBasePath(child.path);
-      const len = ctx.getArrayLength(childBasePath);
+      const len =
+        arrayPaths.find((arrayPath) => arrayPath.path === child.path)?.length ??
+        ctx.getArrayLength(parseGroupBasePath(child.path));
       const iterResult = await iterateArrayField(child, len, ctx);
       if ("warnings" in iterResult) return iterResult;
       allFields.push(...iterResult.fields);
@@ -454,6 +444,31 @@ function groupHasArrayChildren(group: DescriptorFieldGroup): boolean {
     if (!isFieldGroup(child) && child.path?.includes(".[]")) return true;
   }
   return false;
+}
+
+function collectChildArrayPaths(
+  childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
+  ctx: FieldContext,
+): ArrayPath[] {
+  const arrayPaths: ArrayPath[] = [];
+  for (const child of childFields) {
+    if (!isFieldGroup(child) && child.path?.includes(".[]")) {
+      arrayPaths.push(buildArrayPath(child.path, ctx));
+    }
+  }
+  return arrayPaths;
+}
+
+function buildArrayPath(
+  path: string | undefined,
+  ctx: FieldContext,
+): ArrayPath {
+  const basePath = parseGroupBasePath(path);
+  return {
+    path: path ?? basePath,
+    basePath,
+    length: ctx.getArrayLength(basePath),
+  };
 }
 
 /**
@@ -594,12 +609,6 @@ function joinArrayValues(
   }
 }
 
-function arrayLengthsFromPaths(
-  arrayPaths: ArrayPath[],
-): { path: string; length: number }[] {
-  return arrayPaths.map(({ basePath, length }) => ({ path: basePath, length }));
-}
-
 /**
  * Check that parameter array paths referenced by child fields have the same
  * length as the field's own array path. Per ERC-7730, parameter arrays must
@@ -607,14 +616,14 @@ function arrayLengthsFromPaths(
  */
 function checkParamArrayLengths(
   childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
-  fieldArrayLengths: { path: string; length: number }[],
+  fieldArrayPaths: ArrayPath[],
   ctx: FieldContext,
 ): Warning | undefined {
   for (const child of childFields) {
     if (isFieldGroup(child) || !child.path?.includes(".[]")) continue;
     const childBasePath = parseGroupBasePath(child.path);
-    const fieldLength = fieldArrayLengths.find(
-      (a) => a.path === childBasePath,
+    const fieldLength = fieldArrayPaths.find(
+      (arrayPath) => arrayPath.basePath === childBasePath,
     )?.length;
     if (fieldLength === undefined) continue;
 
