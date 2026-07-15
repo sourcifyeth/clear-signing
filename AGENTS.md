@@ -32,7 +32,7 @@ src/
   path resolution (`resolveTransactionPath`, `resolveTypedDataPath`),
   value conversion (`ArgumentValue`, `BytesSliceValue`, `toArgumentValue`,
   `argumentValueToBytes`, `argumentValueEquals`), format-to-type mapping
-  (`fieldTypeForFormat`, `bytesSliceToFieldType`),
+  (`fieldTypeForFormat`),
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
   metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
   Defines the `BaseResolvePath` (returns `ArgumentValue`) and `ResolvePath`
@@ -49,6 +49,12 @@ src/
   (wraps a `BaseResolvePath` to handle slice paths transparently), and
   `bytesSliceToArgumentValue` (converts `BytesSliceValue` to `ArgumentValue` using the
   field format's expected type).
+  Also contains encryption support: `plaintextTypeToFieldType` (canonical Solidity
+  type → `FieldType`) and `decryptFieldValue` (calls the wallet's
+  `resolveDecryptedValue` and re-interprets the returned bytes via
+  `bytesSliceToFieldType`). When decryption fails, `processSingleField` substitutes
+  `DEFAULT_ENCRYPTED_PLACEHOLDER` / the descriptor's `fallbackLabel` for the
+  `renderField` call, so the fallback flows through the normal DisplayField path.
 
 - **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
   Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatNftName`,
@@ -70,7 +76,7 @@ src/
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
   (`findFormatSpec`, `computeEncodeType`), message value navigation (`getMessageValue`),
-  and type resolution (`resolveFieldType`). Exports `computeEncodeType` and
+  and referenced-struct collection (`collectReferencedTypes`). Exports `computeEncodeType` and
   `extractPrimaryType` for `resolver.ts` and `github-registry-index.ts`; the
   rest is module-private.
 
@@ -291,9 +297,13 @@ spec. Do not add them to `DescriptorFormatSpec`.
 
 ### Field Formats
 
-Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`, `chainId`
+Supported: `raw`, `amount`, `tokenAmount`, `nftName`, `date`, `duration`, `unit`, `enum`, `addressName`, `tokenTicker`, `chainId`, `calldata`
 
 Not yet implemented: `interoperableAddressName`
+
+Any field, regardless of `format`, may additionally carry an `encryption`
+annotation — see [Encrypted Fields](#encrypted-fields). It is orthogonal to the
+format: the value is decrypted first, then rendered by the format above.
 
 **Spec-compliance notes:**
 
@@ -309,7 +319,80 @@ Not yet implemented: `interoperableAddressName`
 - `tokenAmount` with `nativeCurrencyAddress` also resolves native currency metadata via `resolveChainInfo`.
 - `addressName` supports the `senderAddress` param: when the field value matches a `senderAddress`, it displays `"Sender"` and substitutes `rawAddress` with `@.from`. Checked via `isSenderAddress()`.
 - `resolveLocalName` and `resolveEnsName` receive `acceptedTypes?: DescriptorAddressType[]` (from `params.types`). The parameter is absent when the descriptor defines no `types`. Callers should check membership with `acceptedTypes?.includes(...)`. The library emits `ADDRESS_TYPE_MISMATCH` when the resolver returns `typeMatch: false`.
+- `calldata` formats a nested function call, recursing through `format()` and
+  returning the inner `DisplayModel` on `DisplayField.embeddedCalldata` (with its
+  `callee` and `chainId`). Accepts only `bytes`. Resolves the target via
+  `callee`/`calleePath` and the chain via `chainId`/`chainIdPath`, defaulting to the
+  container's chain. Optional `selector`/`selectorPath` is prepended to the value when
+  the field carries bare arguments; `amount`/`amountPath` and `spender`/`spenderPath`
+  become the inner tx's `value` and `from`. Falls back to raw with
+  `FORMAT_PARAM_RESOLUTION_ERROR` (unresolvable `callee`/`chainId` param),
+  `CONTAINER_MISSING_CHAIN_ID`, or `EMBEDDED_CALLDATA_NOT_SUPPORTED` (the caller
+  supplied no nested formatter — `index.ts` always does, so this only surfaces when
+  `formatCalldata`/`formatEip712` are driven directly).
 - Raw address rendering always uses EIP-55 checksum format (not lowercase hex).
+
+### Encrypted Fields
+
+A field may carry an `encryption` annotation (`DescriptorFieldEncryption`:
+`{ scheme, plaintextType, fallbackLabel }`) marking its value as encrypted.
+Decryption is delegated entirely to the wallet and is optional — schemes
+generally need a live connection, a user signature, and an access-control check.
+`fhevm` is the only scheme ERC-7730 currently defines; the wallet-side
+integration is documented in [`DECRYPTION.md`](DECRYPTION.md) and kept out of the
+library.
+
+The raw encrypted value is always reported on `DisplayField.rawEncryptedValue`,
+decrypted or not — the spec RECOMMENDS wallets show it next to the placeholder
+when decryption is unavailable. It is captured before `argValue` is replaced by
+the plaintext.
+
+`processSingleField` decrypts **before** visibility evaluation and rendering, so
+`ifNotIn`/`mustMatch` rules and the format handler all see the plaintext. On
+success the plaintext replaces the field's `ArgumentValue` and the regular
+`format` renders it (e.g. `tokenAmount` → `"1 cUSDC"`).
+
+Failures split by kind:
+
+- **`DECRYPTION_FAILED`** — the value is real but unavailable (no provider, no
+  chainId, wallet returned `null`, malformed hex). Recoverable: the field still
+  renders, as `fallbackLabel` or the generic `[Encrypted]` placeholder when the
+  descriptor declares none, carrying the warning rather than being dropped. The
+  ciphertext is never the display value; it travels on `rawEncryptedValue`.
+- **`INVALID_DESCRIPTOR`** — the `encryption` annotation itself is malformed
+  (missing `scheme`/`plaintextType`, or a non-canonical `plaintextType`). A
+  descriptor bug, not a decryption outcome, so it is fatal for the whole format,
+  consistent with the other `INVALID_DESCRIPTOR` checks in `processSingleField`.
+
+**Coercion is driven by the descriptor's declared `plaintextType`, never by the
+returned value's shape.** `toArgumentValue` must **not** be used here: it has no
+`bigint` case (returns `undefined`), and its shape inference would misread a
+`bytes20` plaintext as an address. `decryptFieldValue` instead maps
+`plaintextType` → `FieldType` and reuses `bytesSliceToFieldType`, mirroring how
+byte slices are coerced by expected type.
+
+Wallet contract (`ExternalDataProvider.resolveDecryptedValue`):
+
+- Receives `(chainId, encryptedValue, { scheme, contractAddress })`.
+  `encryptedValue` is 0x-hex of the raw field bytes; `contractAddress` is the
+  container's `@.to` (optional — an EIP-712 domain may declare no
+  `verifyingContract`).
+- `plaintextType` is deliberately **not** passed: the wallet has no use for it.
+  Decryption yields bytes; interpreting them is this library's job. Passing it
+  would only invite the wallet to coerce, duplicating work the library already
+  does from the descriptor.
+- Returns `DecryptedValueResult { value: string }` — 0x-hex of the plaintext's
+  big-endian bytes only, never `bigint`/`boolean`. One encoding for every scheme
+  and type, with no hex-vs-text ambiguity.
+- Returns `null` when it cannot decrypt (unsupported scheme, denied signature,
+  no access) → `DECRYPTION_FAILED`. A malformed (non-hex) `value` is treated the
+  same way: it is a failed decryption, not a distinct condition.
+
+`scheme` is typed as `DescriptorFieldEncryptionScheme`, a union of the schemes
+ERC-7730 defines (currently just `"fhevm"`), so wallets get exhaustiveness
+checking when dispatching. Add new schemes there as the spec defines them. The
+library itself never inspects the value — it only passes it to the wallet, which
+decides what it can decrypt.
 
 ### Token Resolution
 
@@ -389,6 +472,11 @@ When changing the public API, input/output types, descriptor resolver options, w
 codes, or the `ExternalDataProvider` interface, check whether [`GUIDE.md`](GUIDE.md)
 (the wallet integration guide) and [`README.md`](README.md) need updating too — they
 contain example code and type signatures that can drift out of sync with the source.
+If the change touches encryption, check [`DECRYPTION.md`](DECRYPTION.md) as well.
+
+Keep scheme-specific integration detail (SDK calls, protocol internals) in
+[`DECRYPTION.md`](DECRYPTION.md) — `src/`, `README.md`, and `GUIDE.md` stay
+scheme-agnostic and describe only the `resolveDecryptedValue` contract.
 
 ## Pull Requests
 
@@ -411,6 +499,7 @@ Tests live in `test/`. Current test files:
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
+- `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue`, rendered as a tokenAmount
 - `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
 
 ### Test guidelines
@@ -528,5 +617,4 @@ When writing code that reads descriptor fields, always guard: `descriptor.contex
 
 ## Not Yet Implemented (from EIP-7730 spec)
 
-- `calldata` format (nested function calls)
 - `interoperableAddressName` format (ERC-7930)
