@@ -1,0 +1,50 @@
+{
+  "$schema": "./erc7730-v2.schema.json",
+  "metadata": {
+    "owner": "Example"
+  },
+  "context": {
+    "eip712": {
+      "domain": {
+        "name": "Tips"
+      },
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0x0000000000112233445566778899aabbccddeeff"
+        }
+      ]
+    }
+  },
+  "display": {
+    "formats": {
+      "TipAuthorization(TipItem[] tips)TipItem(address token,uint256 amount,address recipient)": {
+        "intent": "Authorize tips",
+        "interpolatedIntent": "Authorize {tips.[].amount} tip",
+        "fields": [
+          {
+            "label": "Tips",
+            "iteration": "bundled",
+            "fields": [
+              {
+                "path": "tips.[].amount",
+                "label": "Tip amount",
+                "format": "tokenAmount",
+                "params": { "tokenPath": "tips.[].token" }
+              },
+              {
+                "path": "tips.[].recipient",
+                "label": "Tip to",
+                "format": "raw"
+              },
+              {
+                "path": "tips.[].token",
+                "visible": "never"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

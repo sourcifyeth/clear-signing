@@ -471,3 +471,98 @@ describe("example-eip712.json — PermitBatch", () => {
     expect(result.warnings).toBeUndefined();
   });
 });
+
+describe("example-child-array-interpolation-eip712.json", () => {
+  const VERIFYING_CONTRACT = "0x0000000000112233445566778899aabbccddeeff";
+  const CHAIN_ID = 1;
+  const SIGNER = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const RECIPIENT = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+  const DAI_ADDRESS = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+
+  const TIP_AUTHORIZATION_TYPES = {
+    EIP712Domain: [
+      { name: "name", type: "string" },
+      { name: "chainId", type: "uint256" },
+      { name: "verifyingContract", type: "address" },
+    ],
+    TipAuthorization: [{ name: "tips", type: "TipItem[]" }],
+    TipItem: [
+      { name: "token", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "recipient", type: "address" },
+    ],
+  };
+
+  const resolveToken: ExternalDataProvider["resolveToken"] = async (
+    chainId,
+    tokenAddress,
+  ) => {
+    const lower = tokenAddress.toLowerCase();
+    if (chainId === CHAIN_ID && lower === USDC_ADDRESS.toLowerCase()) {
+      return { name: "USD Coin", symbol: "USDC", decimals: 6 };
+    }
+    if (chainId === CHAIN_ID && lower === DAI_ADDRESS.toLowerCase()) {
+      return { name: "Dai Stablecoin", symbol: "DAI", decimals: 18 };
+    }
+    return null;
+  };
+
+  function buildOpts(externalDataProvider?: ExternalDataProvider) {
+    return buildFilesystemResolverOpts(
+      __dirname,
+      {
+        eip712DescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: VERIFYING_CONTRACT,
+            file: "example-child-array-interpolation-eip712.json",
+            encodeTypes: [
+              computeEncodeTypeOrThrow(
+                "TipAuthorization",
+                TIP_AUTHORIZATION_TYPES,
+              ),
+            ],
+          },
+        ],
+      },
+      externalDataProvider,
+    );
+  }
+
+  it("interpolates child array token amounts with item-scoped tokenPath", async () => {
+    const typedData: TypedData = {
+      account: SIGNER,
+      domain: {
+        name: "Tips",
+        chainId: CHAIN_ID,
+        verifyingContract: VERIFYING_CONTRACT,
+      },
+      primaryType: "TipAuthorization",
+      types: TIP_AUTHORIZATION_TYPES,
+      message: {
+        tips: [
+          {
+            token: USDC_ADDRESS,
+            amount: "1000000",
+            recipient: RECIPIENT,
+          },
+          {
+            token: DAI_ADDRESS,
+            amount: "2000000000000000000",
+            recipient: RECIPIENT,
+          },
+        ],
+      },
+    };
+
+    const result = await formatTypedData(
+      typedData,
+      buildOpts({ resolveToken }),
+    );
+
+    expect(result.intent).toBe("Authorize tips");
+    expect(result.interpolatedIntent).toBe("Authorize 1 USDC and 2 DAI tip");
+    expect(result.warnings).toBeUndefined();
+  });
+});
