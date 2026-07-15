@@ -150,7 +150,7 @@ describe("example-array-iteration.json — distribute", () => {
     const recipient0 = group.fields[0];
     assert(!isFieldGroup(recipient0));
     expect(recipient0.label).toBe("Recipients");
-    expect(recipient0.value).toBe(`Recipient 0 ${RECIPIENT_1_NAME}`);
+    expect(recipient0.value).toBe(RECIPIENT_1_NAME);
     expect(recipient0.fieldType).toBe("address");
     expect(recipient0.format).toBe("addressName");
     expect(recipient0.rawAddress).toBe(checksumRecipient1);
@@ -173,7 +173,7 @@ describe("example-array-iteration.json — distribute", () => {
     const recipient1 = group.fields[2];
     assert(!isFieldGroup(recipient1));
     expect(recipient1.label).toBe("Recipients");
-    expect(recipient1.value).toBe(`Recipient 1 ${RECIPIENT_2_NAME}`);
+    expect(recipient1.value).toBe(RECIPIENT_2_NAME);
     expect(recipient1.fieldType).toBe("address");
     expect(recipient1.format).toBe("addressName");
     expect(recipient1.rawAddress).toBe(checksumRecipient2);
@@ -206,7 +206,7 @@ describe("example-array-iteration.json — distribute", () => {
 
     // interpolatedIntent expands array paths with " and " joining
     expect(result.interpolatedIntent).toBe(
-      `Distribute fees 99.01% and 0.99% among recipients Recipient 0 ${RECIPIENT_1_NAME} and Recipient 1 ${RECIPIENT_2_NAME}`,
+      `Distribute fees 99.01% and 0.99% among recipients ${RECIPIENT_1_NAME} and ${RECIPIENT_2_NAME}`,
     );
     expect(result.warnings).toBeUndefined();
   });
@@ -482,7 +482,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     const recipient = group.fields[0];
     assert(!isFieldGroup(recipient));
     expect(recipient.label).toBe("Recipients");
-    expect(recipient.value).toBe(`Recipient 0 ${recipientName}`);
+    expect(recipient.value).toBe(recipientName);
     expect(recipient.fieldType).toBe("address");
     expect(recipient.format).toBe("addressName");
     expect(recipient.rawAddress).toBe(
@@ -516,7 +516,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     expect(nested.rawCalldataFallback).toBeUndefined();
 
     expect(nested.interpolatedIntent).toBe(
-      `Distribute fees 100% among recipients Recipient 0 ${recipientName}`,
+      `Distribute fees 100% among recipients ${recipientName}`,
     );
     expect(nested.warnings).toBeUndefined();
   }
@@ -546,7 +546,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     const calldataField = group.fields[0];
     assert(!isFieldGroup(calldataField));
     expect(calldataField.label).toBe("Nested Calls");
-    expect(calldataField.value).toBe(`Transaction 0 0x${INNER_DISTRIBUTE_1}`);
+    expect(calldataField.value).toBe(`0x${INNER_DISTRIBUTE_1}`);
     expect(calldataField.fieldType).toBe("bytes");
     expect(calldataField.format).toBe("calldata");
     expect(calldataField.rawAddress).toBeUndefined();
@@ -609,7 +609,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     const field0 = group.fields[0];
     assert(!isFieldGroup(field0));
     expect(field0.label).toBe("Nested Calls");
-    expect(field0.value).toBe(`Transaction 0 0x${INNER_DISTRIBUTE_1}`);
+    expect(field0.value).toBe(`0x${INNER_DISTRIBUTE_1}`);
     expect(field0.fieldType).toBe("bytes");
     expect(field0.format).toBe("calldata");
     expect(field0.rawAddress).toBeUndefined();
@@ -631,7 +631,7 @@ describe("example-array-iteration.json — batchExecute", () => {
     const field1 = group.fields[1];
     assert(!isFieldGroup(field1));
     expect(field1.label).toBe("Nested Calls");
-    expect(field1.value).toBe(`Transaction 1 0x${INNER_DISTRIBUTE_2}`);
+    expect(field1.value).toBe(`0x${INNER_DISTRIBUTE_2}`);
     expect(field1.fieldType).toBe("bytes");
     expect(field1.format).toBe("calldata");
     expect(field1.rawAddress).toBeUndefined();

@@ -446,7 +446,7 @@ describe("applyFieldFormats", () => {
   });
 
   describe("separator handling", () => {
-    it("prepends separator with interpolated {index} to array elements", async () => {
+    it("does not include separator text in rendered array values", async () => {
       const format: DescriptorFormatSpec = {
         fields: [
           {
@@ -481,8 +481,10 @@ describe("applyFieldFormats", () => {
       assert(!("warnings" in result));
       const group = result.fields[0];
       assert(isFieldGroup(group));
-      expect(group.fields[0].value).toBe("Item 0 10");
-      expect(group.fields[1].value).toBe("Item 1 20");
+      expect(group.fields[0].value).toBe("10");
+      expect(group.fields[1].value).toBe("20");
+      expect(result.renderedValues.get("vals.[]")).toBe("10 and 20");
+      expect(result.renderedValues.get("vals")).toBe("10 and 20");
     });
   });
 

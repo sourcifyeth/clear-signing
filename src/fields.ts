@@ -245,19 +245,9 @@ async function processSingleField(
     ctx.formatEmbeddedCalldata,
   );
 
-  // Apply separator prefix for array elements (e.g. "Recipient {index}" → "Recipient 0")
-  let finalValue = rendered;
-  if (merged.separator && merged.path) {
-    const indexMatch = merged.path.match(/\.\[(\d+)\]/);
-    if (indexMatch) {
-      const sep = merged.separator.replace("{index}", indexMatch[1]);
-      finalValue = `${sep} ${rendered}`;
-    }
-  }
-
   const displayField: DisplayField = {
     label: merged.label,
-    value: finalValue,
+    value: rendered,
     fieldType: argValue.type,
     format: merged.format,
     warning: fieldWarning,
@@ -267,7 +257,7 @@ async function processSingleField(
   };
 
   if (merged.path) {
-    ctx.renderedValues.set(stripStructuredRootPrefix(merged.path), finalValue);
+    ctx.renderedValues.set(stripStructuredRootPrefix(merged.path), rendered);
   }
   return { field: displayField };
 }
