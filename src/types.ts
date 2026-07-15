@@ -100,6 +100,7 @@ export type WarningCode =
   | "UNKNOWN_CHAIN"
   | "PARAM_ARRAY_SIZE_MISMATCH"
   | "EMBEDDED_CALLDATA_NOT_SUPPORTED"
+  | "DECRYPTION_FAILED"
   | "BATCH_VALUE_TRANSFER"
   | "BATCH_CONTRACT_CREATION"
   | "BATCH_INTERPOLATION_INCOMPLETE"
@@ -193,6 +194,20 @@ export interface DisplayField {
    * back to the raw amount formatting and warning.code will be UNKNOWN_TOKEN.
    */
   tokenAddress?: string;
+
+  /**
+   * For fields carrying an `encryption` annotation, the raw encrypted value as
+   * 0x-prefixed hex — the field's value as it appears in the signing request,
+   * before decryption. Depending on the scheme this is the ciphertext itself or
+   * a pointer to it.
+   *
+   * Set whether or not decryption succeeded. When it did not, `value` is the
+   * descriptor's `fallbackLabel` (or a generic placeholder if it declares none)
+   * and `warning.code` is DECRYPTION_FAILED; the ERC-7730 spec recommends
+   * wallets also show this raw value — fully or partially — next to that
+   * placeholder, so the user can tell that a real value is present but withheld.
+   */
+  rawEncryptedValue?: string;
 }
 
 /**
@@ -326,6 +341,19 @@ export interface ChainInfoResult {
   };
 }
 
+/** Result of decrypting an encrypted field value. */
+export interface DecryptedValueResult {
+  /**
+   * The decrypted plaintext, as 0x-prefixed hex of its big-endian ABI bytes —
+   * never a `bigint`, `boolean`, or decimal string. The library re-interprets
+   * these bytes according to the descriptor's declared `plaintextType`, so a
+   * single encoding covers every scheme and every type.
+   *
+   * Must be valid, even-length hex.
+   */
+  value: string;
+}
+
 /** Wallet-provided async resolvers for external data needed by the formatter. */
 export interface ExternalDataProvider {
   /**
@@ -371,6 +399,35 @@ export interface ExternalDataProvider {
 
   /** Resolution for chainId and amount formats. */
   resolveChainInfo?: (chainId: number) => Promise<ChainInfoResult | null>;
+
+  /**
+   * Decryption for fields carrying an `encryption` annotation
+   * ({@link DescriptorFieldEncryption}). Only needed by wallets opting in to
+   * an encryption scheme — omit it and encrypted fields render their
+   * `fallbackLabel`.
+   *
+   * The wallet decrypts and reports the plaintext bytes; the library interprets
+   * them against the descriptor's declared `plaintextType`. That declared type
+   * is deliberately not passed here — decryption yields bytes, and typing them
+   * is the library's job, not the wallet's.
+   *
+   * Return `null` when the value cannot be decrypted — unsupported scheme,
+   * declined by the user, or access not granted.
+   */
+  resolveDecryptedValue?: (
+    chainId: number,
+    /** 0x-prefixed hex of the raw encrypted field value. */
+    encryptedValue: string,
+    params: {
+      /** Scheme from the descriptor. Dispatch on this. */
+      scheme: DescriptorFieldEncryptionScheme;
+      /**
+       * The contract the encrypted value belongs to (the container's `@.to`).
+       * Absent when an EIP-712 domain declares no `verifyingContract`.
+       */
+      contractAddress?: string;
+    },
+  ) => Promise<DecryptedValueResult | null>;
 }
 
 export interface FormatOptions {
@@ -534,8 +591,10 @@ export type DescriptorAddressType =
 
 export type DescriptorAddressSource = "local" | "ens";
 
+export type DescriptorFieldEncryptionScheme = "fhevm";
+
 export interface DescriptorFieldEncryption {
-  scheme?: string;
+  scheme?: DescriptorFieldEncryptionScheme;
   plaintextType?: string;
   fallbackLabel?: string;
 }

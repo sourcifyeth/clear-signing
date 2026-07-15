@@ -205,6 +205,20 @@ interface ExternalDataProvider {
 
   /** Resolution for chainId and amount formats. */
   resolveChainInfo?: (chainId: number) => Promise<ChainInfoResult | null>;
+
+  /**
+   * Decryption for fields carrying an `encryption` annotation. Optional and
+   * scheme-specific. Return `null` when the value cannot be decrypted — the
+   * field then renders the descriptor's `fallbackLabel`. See DECRYPTION.md.
+   */
+  resolveDecryptedValue?: (
+    chainId: number,
+    encryptedValue: string,
+    params: {
+      scheme: DescriptorFieldEncryptionScheme;
+      contractAddress?: string;
+    },
+  ) => Promise<DecryptedValueResult | null>;
 }
 ```
 

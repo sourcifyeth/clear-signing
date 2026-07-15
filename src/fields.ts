@@ -6,6 +6,7 @@
  */
 
 import type {
+  DescriptorFieldEncryption,
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
   DescriptorFieldGroup,
@@ -40,11 +41,15 @@ import {
   bigIntToBytes,
   bytesEqual,
   bytesToAscii,
+  bytesToHex,
   bytesToSignedBigInt,
   bytesToUnsignedBigInt,
+  hexToBytes,
   stripLeadingZeros,
+  toChecksumAddress,
   warn,
 } from "./utils.js";
+import type { RenderFieldResult } from "./formatters.js";
 import { renderField } from "./formatters.js";
 
 /** Callback to get the length of an array at a given container path. */
@@ -219,14 +224,59 @@ async function processSingleField(
   // Convert bytes-slice to a typed ArgumentValue based on the field format,
   // and coerce uint/int → address when the format expects an address (some
   // descriptors store addresses in uint256 slots, e.g. 1inch's `Address` type).
-  const argValue: ArgumentValue = coerceResolvedValue(
+  let argValue: ArgumentValue = coerceResolvedValue(
     resolvedValue,
     merged.format,
   );
 
+  // Encrypted fields are decrypted before anything reads the value, so that
+  // visibility rules and the format handler both see the plaintext.
+  let decryptionWarning: Warning | undefined;
+  let rawEncryptedValue: string | undefined;
+  if (merged.encryption) {
+    rawEncryptedValue = bytesToHex(argumentValueToBytes(argValue));
+    const decrypted = await decryptFieldValue(argValue, merged.encryption, ctx);
+    if ("value" in decrypted) {
+      argValue = decrypted.value;
+    } else if (decrypted.warning.code === "DECRYPTION_FAILED") {
+      // Recoverable: the value is real but cannot be shown, so the field still
+      // renders as its fallbackLabel rather than being dropped — the user sees
+      // that a value is present but withheld.
+      decryptionWarning = decrypted.warning;
+    } else {
+      // A malformed `encryption` annotation is a descriptor bug, not a
+      // decryption outcome. Fatal, like the other INVALID_DESCRIPTOR checks.
+      return { warnings: [decrypted.warning] };
+    }
+  }
+
   const visibility = evaluateVisibility(merged.visible, argValue, merged.label);
   if ("warning" in visibility) return { warnings: [visibility.warning] };
   if (visibility.hide) return { field: null };
+
+  let renderResult: RenderFieldResult;
+  if (decryptionWarning) {
+    // Without a plaintext there is nothing for the format handler to render, so
+    // stand in the descriptor's fallbackLabel (or a generic placeholder) and
+    // skip it — the ciphertext is never shown as the value, only on
+    // rawEncryptedValue.
+    renderResult = {
+      rendered:
+        merged.encryption?.fallbackLabel ?? DEFAULT_ENCRYPTED_PLACEHOLDER,
+      warning: decryptionWarning,
+    };
+  } else {
+    renderResult = await renderField(
+      argValue,
+      merged.format,
+      merged,
+      ctx.resolvePath,
+      ctx.chainId,
+      ctx.metadata,
+      ctx.externalDataProvider,
+      ctx.formatEmbeddedCalldata,
+    );
+  }
 
   const {
     rendered,
@@ -234,16 +284,7 @@ async function processSingleField(
     warning: fieldWarning,
     tokenAddress,
     rawAddress,
-  } = await renderField(
-    argValue,
-    merged.format,
-    merged,
-    ctx.resolvePath,
-    ctx.chainId,
-    ctx.metadata,
-    ctx.externalDataProvider,
-    ctx.formatEmbeddedCalldata,
-  );
+  } = renderResult;
 
   // Apply separator prefix for array elements (e.g. "Recipient {index}" → "Recipient 0")
   let finalValue = rendered;
@@ -264,6 +305,7 @@ async function processSingleField(
     ...(rawAddress && { rawAddress }),
     ...(tokenAddress && { tokenAddress }),
     ...(embeddedCalldata && { embeddedCalldata }),
+    ...(rawEncryptedValue && { rawEncryptedValue }),
   };
 
   if (merged.path) {
@@ -764,6 +806,144 @@ function coerceResolvedValue(
   }
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// Encryption (ERC-7730 `encryption` field)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a descriptor's declared `plaintextType` (a canonical Solidity type, e.g.
+ * "uint64") to the FieldType used to interpret the decrypted bytes.
+ *
+ * Returns undefined for types that are not valid Solidity value types, so the
+ * caller can surface a descriptor error rather than silently guessing.
+ */
+export function plaintextTypeToFieldType(
+  plaintextType: string,
+): FieldType | undefined {
+  switch (plaintextType) {
+    case "bool":
+    case "address":
+    case "string":
+    case "bytes":
+      return plaintextType;
+  }
+
+  // uintN / intN — N must be a multiple of 8 in 8..256. The bare `uint`/`int`
+  // aliases are rejected: the spec requires canonical Solidity types.
+  const int = /^(u?)int(\d+)$/.exec(plaintextType);
+  if (int) {
+    const bits = Number(int[2]);
+    if (bits < 8 || bits > 256 || bits % 8 !== 0) return undefined;
+    return int[1] ? "uint" : "int";
+  }
+
+  // bytesN — N in 1..32.
+  const bytes = /^bytes(\d+)$/.exec(plaintextType);
+  if (bytes) {
+    const size = Number(bytes[1]);
+    return size >= 1 && size <= 32 ? "bytes" : undefined;
+  }
+
+  return undefined;
+}
+
+/**
+ * Decrypt a field value via the wallet's resolveDecryptedValue callback and
+ * re-interpret the returned bytes as the descriptor's declared plaintextType.
+ *
+ * The declared type — not the shape of the returned value — drives the
+ * conversion: the descriptor states the intent, and inferring instead would
+ * misread a `bytes20` plaintext as an address. This mirrors how byte slices
+ * are coerced by their expected type rather than by inspection.
+ *
+ * Warnings come in two kinds, which the caller handles differently:
+ * `DECRYPTION_FAILED` means the value is real but unavailable, so the field
+ * falls back to its `fallbackLabel`; `INVALID_DESCRIPTOR` means the `encryption`
+ * annotation itself is malformed, which is fatal for the whole format.
+ */
+async function decryptFieldValue(
+  encrypted: ArgumentValue,
+  encryption: DescriptorFieldEncryption,
+  ctx: FieldContext,
+): Promise<{ value: ArgumentValue } | { warning: Warning }> {
+  const { scheme, plaintextType } = encryption;
+  if (!scheme || !plaintextType) {
+    return {
+      warning: warn(
+        "INVALID_DESCRIPTOR",
+        `Field encryption requires both 'scheme' and 'plaintextType'`,
+      ),
+    };
+  }
+
+  const fieldType = plaintextTypeToFieldType(plaintextType);
+  if (!fieldType) {
+    return {
+      warning: warn(
+        "INVALID_DESCRIPTOR",
+        `Unsupported encryption plaintextType '${plaintextType}'`,
+      ),
+    };
+  }
+
+  if (ctx.chainId === undefined) {
+    return {
+      warning: warn(
+        "DECRYPTION_FAILED",
+        "Cannot decrypt a field without a chainId on the container",
+      ),
+    };
+  }
+
+  const resolveDecryptedValue = ctx.externalDataProvider?.resolveDecryptedValue;
+  if (!resolveDecryptedValue) {
+    return {
+      warning: warn(
+        "DECRYPTION_FAILED",
+        `No resolveDecryptedValue provider to decrypt '${scheme}' value`,
+      ),
+    };
+  }
+
+  // The contract the ciphertext is accessed through. Absent for EIP-712 typed
+  // data whose domain declares no verifyingContract.
+  const to = ctx.resolvePath("@.to");
+  const contractAddress =
+    to && to.type === "address" ? toChecksumAddress(to.bytes) : undefined;
+
+  const result = await resolveDecryptedValue(
+    ctx.chainId,
+    bytesToHex(argumentValueToBytes(encrypted)),
+    { scheme, contractAddress },
+  );
+  if (!result) {
+    return {
+      warning: warn("DECRYPTION_FAILED", `Could not decrypt '${scheme}' value`),
+    };
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = hexToBytes(result.value);
+  } catch {
+    return {
+      warning: warn(
+        "DECRYPTION_FAILED",
+        `Decrypted '${scheme}' value '${result.value}' is not valid hex`,
+      ),
+    };
+  }
+
+  return { value: bytesSliceToFieldType(bytes, fieldType) };
+}
+
+/**
+ * Placeholder for an undecryptable field whose descriptor declares no
+ * `fallbackLabel`. Deliberately generic — an encrypted field is not necessarily
+ * an amount. Reads naturally against the field's own label ("Amount: [Encrypted]").
+ */
+const DEFAULT_ENCRYPTED_PLACEHOLDER = "[Encrypted]";
 
 // ---------------------------------------------------------------------------
 // Visibility rules (ERC-7730 `visible` field)

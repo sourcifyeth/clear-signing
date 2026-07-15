@@ -140,6 +140,15 @@ const externalDataProvider: ExternalDataProvider = {
     };
     return result;
   },
+
+  // Used by fields carrying an `encryption` annotation, to decrypt the value.
+  // Optional and scheme-specific — omit it and encrypted fields render the
+  // descriptor's `fallbackLabel` while everything else formats as usual.
+  // See DECRYPTION.md.
+  resolveDecryptedValue: async (chainId, encryptedValue, params) => {
+    const result: DecryptedValueResult | null = { value: "0x00000000000f4240" };
+    return result;
+  },
 };
 
 // Combine with the resolver options from §2 and §3 into the FormatOptions object
@@ -155,6 +164,10 @@ const opts: FormatOptions = {
 ```
 
 See [`src/types.ts`](src/types.ts) for the exact result type definitions.
+
+To decrypt encrypted fields (`resolveDecryptedValue`), see
+[DECRYPTION.md](DECRYPTION.md). It covers the scheme-agnostic contract and
+`fhevm` (Zama Protocol), the only scheme ERC-7730 currently defines.
 
 ## 5. Call the format functions
 
@@ -295,6 +308,13 @@ interface DisplayField {
   // For `calldata` format (nested function call): the formatted inner
   // transaction. See "Nesting" below.
   embeddedCalldata?: EmbeddedCalldata;
+
+  // For fields carrying an `encryption` annotation: the raw encrypted value,
+  // set whether or not decryption succeeded. When it did not (value is the
+  // `fallbackLabel` or "[Encrypted]", warning.code === "DECRYPTION_FAILED"),
+  // ERC-7730 RECOMMENDS displaying this alongside the placeholder — fully or
+  // truncated — so the user can see a real value is present but withheld.
+  rawEncryptedValue?: string;
 }
 
 // Underlying Solidity type category of a DisplayField.
