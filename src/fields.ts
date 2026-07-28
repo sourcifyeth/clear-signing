@@ -811,22 +811,36 @@ function coerceResolvedValue(
 // Encryption (ERC-7730 `encryption` field)
 // ---------------------------------------------------------------------------
 
+/** A descriptor's declared `plaintextType`, parsed. */
+export type PlaintextType = {
+  /** How the decrypted bytes are interpreted. */
+  fieldType: FieldType;
+  /**
+   * Widest plaintext the type can hold, in bytes. Undefined for the unbounded
+   * types (`bytes`, `string`).
+   */
+  maxBytes?: number;
+};
+
 /**
- * Map a descriptor's declared `plaintextType` (a canonical Solidity type, e.g.
- * "uint64") to the FieldType used to interpret the decrypted bytes.
+ * Parse a descriptor's declared `plaintextType` (a canonical Solidity type,
+ * e.g. "uint64") into the FieldType used to interpret the decrypted bytes and
+ * the width that plaintext may occupy.
  *
  * Returns undefined for types that are not valid Solidity value types, so the
  * caller can surface a descriptor error rather than silently guessing.
  */
-export function plaintextTypeToFieldType(
+export function parsePlaintextType(
   plaintextType: string,
-): FieldType | undefined {
+): PlaintextType | undefined {
   switch (plaintextType) {
     case "bool":
+      return { fieldType: "bool", maxBytes: 1 };
     case "address":
+      return { fieldType: "address", maxBytes: 20 };
     case "string":
     case "bytes":
-      return plaintextType;
+      return { fieldType: plaintextType };
   }
 
   // uintN / intN — N must be a multiple of 8 in 8..256. The bare `uint`/`int`
@@ -835,17 +849,36 @@ export function plaintextTypeToFieldType(
   if (int) {
     const bits = Number(int[2]);
     if (bits < 8 || bits > 256 || bits % 8 !== 0) return undefined;
-    return int[1] ? "uint" : "int";
+    return { fieldType: int[1] ? "uint" : "int", maxBytes: bits / 8 };
   }
 
   // bytesN — N in 1..32.
   const bytes = /^bytes(\d+)$/.exec(plaintextType);
   if (bytes) {
     const size = Number(bytes[1]);
-    return size >= 1 && size <= 32 ? "bytes" : undefined;
+    if (size < 1 || size > 32) return undefined;
+    return { fieldType: "bytes", maxBytes: size };
   }
 
   return undefined;
+}
+
+/**
+ * Whether decrypted bytes are too wide for the declared plaintext type.
+ *
+ * Integers, addresses and bools are big-endian quantities, so leading zeros
+ * carry no value — a wallet returning a zero-padded 32-byte ABI word is
+ * accepted as long as the value itself fits. For `bytesN` every byte is part of
+ * the value, so the raw length is what must fit.
+ */
+function exceedsPlaintextWidth(
+  bytes: Uint8Array,
+  type: PlaintextType,
+): boolean {
+  if (type.maxBytes === undefined) return false;
+  const significant =
+    type.fieldType === "bytes" ? bytes : stripLeadingZeros(bytes);
+  return significant.length > type.maxBytes;
 }
 
 /**
@@ -877,8 +910,8 @@ async function decryptFieldValue(
     };
   }
 
-  const fieldType = plaintextTypeToFieldType(plaintextType);
-  if (!fieldType) {
+  const parsedType = parsePlaintextType(plaintextType);
+  if (!parsedType) {
     return {
       warning: warn(
         "INVALID_DESCRIPTOR",
@@ -935,7 +968,19 @@ async function decryptFieldValue(
     };
   }
 
-  return { value: bytesSliceToFieldType(bytes, fieldType) };
+  // A plaintext too wide for its declared type cannot be rendered faithfully —
+  // a 32-byte value read as a `uint64` amount would display a wildly wrong
+  // number. Treat it as a failed decryption rather than showing it.
+  if (exceedsPlaintextWidth(bytes, parsedType)) {
+    return {
+      warning: warn(
+        "DECRYPTION_FAILED",
+        `Decrypted '${scheme}' value is ${bytes.length} bytes, too wide for '${plaintextType}'`,
+      ),
+    };
+  }
+
+  return { value: bytesSliceToFieldType(bytes, parsedType.fieldType) };
 }
 
 /**

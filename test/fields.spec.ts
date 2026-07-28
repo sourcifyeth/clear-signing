@@ -11,7 +11,7 @@ import {
   bytesSliceToArgumentValue,
   bytesSliceToFieldType,
   parseByteSlice,
-  plaintextTypeToFieldType,
+  parsePlaintextType,
 } from "../src/fields.js";
 import type { ArgumentValue, BaseResolvePath } from "../src/descriptor.js";
 import { stripStructuredRootPrefix } from "../src/descriptor.js";
@@ -765,32 +765,62 @@ describe("applyFieldFormats", () => {
     });
   });
 
-  describe("plaintextTypeToFieldType", () => {
-    it("maps canonical Solidity value types to field types", () => {
-      expect(plaintextTypeToFieldType("bool")).toBe("bool");
-      expect(plaintextTypeToFieldType("address")).toBe("address");
-      expect(plaintextTypeToFieldType("string")).toBe("string");
-      expect(plaintextTypeToFieldType("uint8")).toBe("uint");
-      expect(plaintextTypeToFieldType("uint64")).toBe("uint");
-      expect(plaintextTypeToFieldType("uint256")).toBe("uint");
-      expect(plaintextTypeToFieldType("int8")).toBe("int");
-      expect(plaintextTypeToFieldType("int256")).toBe("int");
-      expect(plaintextTypeToFieldType("bytes")).toBe("bytes");
-      expect(plaintextTypeToFieldType("bytes1")).toBe("bytes");
-      expect(plaintextTypeToFieldType("bytes32")).toBe("bytes");
+  describe("parsePlaintextType", () => {
+    it("maps canonical Solidity value types to field types and widths", () => {
+      expect(parsePlaintextType("bool")).toEqual({
+        fieldType: "bool",
+        maxBytes: 1,
+      });
+      expect(parsePlaintextType("address")).toEqual({
+        fieldType: "address",
+        maxBytes: 20,
+      });
+      expect(parsePlaintextType("uint8")).toEqual({
+        fieldType: "uint",
+        maxBytes: 1,
+      });
+      expect(parsePlaintextType("uint64")).toEqual({
+        fieldType: "uint",
+        maxBytes: 8,
+      });
+      expect(parsePlaintextType("uint256")).toEqual({
+        fieldType: "uint",
+        maxBytes: 32,
+      });
+      expect(parsePlaintextType("int8")).toEqual({
+        fieldType: "int",
+        maxBytes: 1,
+      });
+      expect(parsePlaintextType("int256")).toEqual({
+        fieldType: "int",
+        maxBytes: 32,
+      });
+      expect(parsePlaintextType("bytes1")).toEqual({
+        fieldType: "bytes",
+        maxBytes: 1,
+      });
+      expect(parsePlaintextType("bytes32")).toEqual({
+        fieldType: "bytes",
+        maxBytes: 32,
+      });
+    });
+
+    it("leaves the dynamic types unbounded", () => {
+      expect(parsePlaintextType("bytes")).toEqual({ fieldType: "bytes" });
+      expect(parsePlaintextType("string")).toEqual({ fieldType: "string" });
     });
 
     it("rejects non-canonical and invalid types", () => {
       // "uint" / "int" aliases are not canonical Solidity per the ERC-7730 spec
-      expect(plaintextTypeToFieldType("uint")).toBeUndefined();
-      expect(plaintextTypeToFieldType("int")).toBeUndefined();
+      expect(parsePlaintextType("uint")).toBeUndefined();
+      expect(parsePlaintextType("int")).toBeUndefined();
       // Widths must be multiples of 8, and byte lengths within 1..32
-      expect(plaintextTypeToFieldType("uint7")).toBeUndefined();
-      expect(plaintextTypeToFieldType("uint512")).toBeUndefined();
-      expect(plaintextTypeToFieldType("bytes0")).toBeUndefined();
-      expect(plaintextTypeToFieldType("bytes33")).toBeUndefined();
-      expect(plaintextTypeToFieldType("euint64")).toBeUndefined();
-      expect(plaintextTypeToFieldType("")).toBeUndefined();
+      expect(parsePlaintextType("uint7")).toBeUndefined();
+      expect(parsePlaintextType("uint512")).toBeUndefined();
+      expect(parsePlaintextType("bytes0")).toBeUndefined();
+      expect(parsePlaintextType("bytes33")).toBeUndefined();
+      expect(parsePlaintextType("euint64")).toBeUndefined();
+      expect(parsePlaintextType("")).toBeUndefined();
     });
   });
 
@@ -971,6 +1001,78 @@ describe("applyFieldFormats", () => {
       // raw value is still available on rawEncryptedValue.
       expect(field.value).toBe("[Encrypted]");
       expect(field.rawEncryptedValue).toBe(HANDLE);
+      expect(field.warning?.code).toBe("DECRYPTION_FAILED");
+    });
+
+    it("reports DECRYPTION_FAILED when the plaintext is too wide for its type", async () => {
+      const result = await applyFieldFormats(
+        encryptedField(FHEVM_UINT64),
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+        // 9 significant bytes cannot be a uint64 — rendering it would show a
+        // wildly wrong amount rather than a wrong-looking one.
+        {
+          resolveDecryptedValue: async () => ({
+            value: "0x01ffffffffffffffff",
+          }),
+        },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("[Encrypted Amount]");
+      expect(field.warning?.code).toBe("DECRYPTION_FAILED");
+    });
+
+    it("accepts a zero-padded plaintext whose value fits the type", async () => {
+      const result = await applyFieldFormats(
+        encryptedField(FHEVM_UINT64),
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+        // A wallet handing back the full 32-byte ABI word is fine: leading
+        // zeros carry no value for an integer.
+        {
+          resolveDecryptedValue: async () => ({
+            value: `0x${"00".repeat(29)}0f4240`,
+          }),
+        },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("1000000");
+      expect(field.warning).toBeUndefined();
+    });
+
+    it("rejects a bytesN plaintext wider than the declared size", async () => {
+      const result = await applyFieldFormats(
+        encryptedField({
+          scheme: "fhevm",
+          plaintextType: "bytes4",
+          fallbackLabel: "[Encrypted Amount]",
+        }),
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+        // Unlike integers, every byte of a bytesN is part of the value, so
+        // leading zeros do not make this fit.
+        { resolveDecryptedValue: async () => ({ value: "0x00cafebabe" }) },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("[Encrypted Amount]");
       expect(field.warning?.code).toBe("DECRYPTION_FAILED");
     });
 

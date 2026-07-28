@@ -49,9 +49,10 @@ src/
   (wraps a `BaseResolvePath` to handle slice paths transparently), and
   `bytesSliceToArgumentValue` (converts `BytesSliceValue` to `ArgumentValue` using the
   field format's expected type).
-  Also contains encryption support: `plaintextTypeToFieldType` (canonical Solidity
-  type → `FieldType`) and `decryptFieldValue` (calls the wallet's
-  `resolveDecryptedValue` and re-interprets the returned bytes via
+  Also contains encryption support: `parsePlaintextType` (canonical Solidity type
+  → `FieldType` plus the type's maximum byte width) and `decryptFieldValue`
+  (calls the wallet's `resolveDecryptedValue`, rejects a plaintext too wide for
+  its declared type, and re-interprets the returned bytes via
   `bytesSliceToFieldType`). When decryption fails, `processSingleField` substitutes
   `DEFAULT_ENCRYPTED_PLACEHOLDER` / the descriptor's `fallbackLabel` for the
   `renderField` call, so the fallback flows through the normal DisplayField path.
