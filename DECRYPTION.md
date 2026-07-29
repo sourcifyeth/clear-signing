@@ -135,7 +135,7 @@ big-endian bytes**. The SDK returns a typed JavaScript value — an integer, a
 boolean, or a hex string depending on the handle's FHE type — so integers and
 booleans need encoding before you return them.
 
-Three things are easy to get wrong:
+Four things are easy to get wrong:
 
 - **Pad to an even number of hex digits.** `"0x" + n.toString(16)` yields
   `"0xf4240"` for `1000000n`, which is odd-length and rejected as a failed
@@ -143,9 +143,13 @@ Three things are easy to get wrong:
 - **Keep the value within its declared type.** A plaintext too wide for the
   descriptor's `plaintextType` is also treated as a failed decryption, since
   rendering it would show a wrong number rather than an obviously broken one.
-  Zero-padding is always safe for integers, addresses and bools — a full 32-byte
-  ABI word for a `uint64` is fine, because leading zeros carry no value there.
-  For `bytesN` every byte counts, so return exactly the N bytes.
+  Zero-padding is always safe for unsigned integers, addresses and bools — a
+  full 32-byte ABI word for a `uint64` is fine, because leading zeros carry no
+  value there. For `bytesN` every byte counts, so return exactly the N bytes.
+- **Return signed `intN` at its full declared width.** `-1` as an `int64` is
+  `0xffffffffffffffff`, not `0xff` — a shortened form is ambiguous, since the
+  same bytes are a different number at a different width. Positives are read at
+  the declared width either way, so only negatives depend on this.
 - **Convert the encoding, never the type.** The SDK already returns the value at
   its correct type (the handle encodes it), and the descriptor already declares
   `plaintextType` — which is why that type is not passed to your callback.

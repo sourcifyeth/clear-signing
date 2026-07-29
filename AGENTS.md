@@ -370,7 +370,11 @@ returned value's shape.** `toArgumentValue` must **not** be used here: it has no
 `bigint` case (returns `undefined`), and its shape inference would misread a
 `bytes20` plaintext as an address. `decryptFieldValue` instead maps
 `plaintextType` → `FieldType` and reuses `bytesSliceToFieldType`, mirroring how
-byte slices are coerced by expected type.
+byte slices are coerced by expected type. It also passes the declared **width**,
+which matters for signed `intN`: the wallet chose the byte length, so inferring
+the sign bit from it would read a minimally-encoded positive (`200` → `0xc8`) as
+negative. Byte slices and ABI words pass no width — there the length _is_ the
+value's width.
 
 Wallet contract (`ExternalDataProvider.resolveDecryptedValue`):
 

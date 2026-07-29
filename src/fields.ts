@@ -743,10 +743,19 @@ export function buildSliceResolvePath(resolve: BaseResolvePath): ResolvePath {
 
 /**
  * Convert raw slice bytes to an ArgumentValue for a given FieldType.
+ *
+ * `bits` sets the width used to interpret a signed `int`, which decides where
+ * the sign bit sits. Omit it when the bytes are inherently the value's full
+ * width — a byte slice or an ABI word — so the width follows their length.
+ * Pass it when the caller chose the length independently of the declared type,
+ * as a wallet does when returning a decrypted plaintext: without it, a positive
+ * value whose minimal encoding has the top bit set (`200` → `0xc8`) would be
+ * read as negative.
  */
 export function bytesSliceToFieldType(
   bytes: Uint8Array,
   fieldType: FieldType,
+  bits?: number,
 ): ArgumentValue {
   switch (fieldType) {
     case "address":
@@ -755,7 +764,7 @@ export function bytesSliceToFieldType(
     case "uint":
       return { type: "uint", value: bytesToUnsignedBigInt(bytes) };
     case "int":
-      return { type: "int", value: bytesToSignedBigInt(bytes) };
+      return { type: "int", value: bytesToSignedBigInt(bytes, bits) };
     case "bool":
       return {
         type: "bool",
@@ -870,6 +879,12 @@ export function parsePlaintextType(
  * carry no value — a wallet returning a zero-padded 32-byte ABI word is
  * accepted as long as the value itself fits. For `bytesN` every byte is part of
  * the value, so the raw length is what must fit.
+ *
+ * Only `0x00` is stripped, so a sign-extended negative (`-1` as `0xff…ff`) is
+ * rejected where its zero-padded positive counterpart would pass. That is
+ * intentional: a signed value is returned at exactly its declared width, so
+ * padding it out to a wider word is already outside the contract, and
+ * rejecting shows the fallback rather than a wrong number.
  */
 function exceedsPlaintextWidth(
   bytes: Uint8Array,
@@ -980,7 +995,16 @@ async function decryptFieldValue(
     };
   }
 
-  return { value: bytesSliceToFieldType(bytes, parsedType.fieldType) };
+  // The declared type, not the returned length, fixes the width — the wallet
+  // chose that length, and a minimally-encoded positive `intN` would otherwise
+  // read as negative.
+  return {
+    value: bytesSliceToFieldType(
+      bytes,
+      parsedType.fieldType,
+      parsedType.maxBytes === undefined ? undefined : parsedType.maxBytes * 8,
+    ),
+  };
 }
 
 /**

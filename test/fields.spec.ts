@@ -1076,6 +1076,56 @@ describe("applyFieldFormats", () => {
       expect(field.warning?.code).toBe("DECRYPTION_FAILED");
     });
 
+    // The declared width, not the returned length, decides where a signed
+    // value's sign bit sits — otherwise a minimally-encoded positive whose top
+    // bit happens to be set would render as a negative number.
+    it("interprets a signed plaintext at its declared width, not the returned length", async () => {
+      const asInt64 = async (value: string) => {
+        const result = await applyFieldFormats(
+          encryptedField({ scheme: "fhevm", plaintextType: "int64" }),
+          {},
+          resolvePath,
+          mapArrayLength({}),
+          1,
+          undefined,
+          { resolveDecryptedValue: async () => ({ value }) },
+        );
+        assert(!("warnings" in result));
+        const field = result.fields[0];
+        assert(!isFieldGroup(field));
+        return field;
+      };
+
+      // 200 minimally encoded is 0xc8, whose top bit is set. Read at 8 bits it
+      // would be -56; at the declared 64 it is 200.
+      expect((await asInt64("0xc8")).value).toBe("200");
+      expect((await asInt64("0x00000000000000c8")).value).toBe("200");
+      // Small positives were never affected.
+      expect((await asInt64("0x0a")).value).toBe("10");
+      // Negatives are returned at the full declared width.
+      expect((await asInt64("0xffffffffffffffff")).value).toBe("-1");
+      expect((await asInt64("0xffffffffffffff38")).value).toBe("-200");
+      // fieldType still reports the declared category
+      expect((await asInt64("0xc8")).fieldType).toBe("int");
+    });
+
+    it("keeps a narrower signed type's own width", async () => {
+      const result = await applyFieldFormats(
+        encryptedField({ scheme: "fhevm", plaintextType: "int8" }),
+        {},
+        resolvePath,
+        mapArrayLength({}),
+        1,
+        undefined,
+        { resolveDecryptedValue: async () => ({ value: "0xff" }) },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("-1");
+    });
+
     it("reports DECRYPTION_FAILED when the wallet returns invalid hex", async () => {
       const result = await applyFieldFormats(
         encryptedField(FHEVM_UINT64),
