@@ -504,7 +504,7 @@ Tests live in `test/`. Current test files:
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
-- `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus the no-provider case falling back to the descriptor's `fallbackLabel`
+- `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
 
 ### Test guidelines

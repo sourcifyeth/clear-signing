@@ -220,5 +220,123 @@ describe("Zama ConfidentialWrapper", () => {
       // Field-level warnings are not propagated to the model.
       expect(result.warnings).toBeUndefined();
     });
+
+    // =======================================================================
+    // Plaintext encoding edge cases
+    // =======================================================================
+
+    /** Format the same call with a wallet that returns `value`, or declines. */
+    async function formatWithDecrypted(
+      value: string | null,
+    ): Promise<DisplayModel> {
+      return format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          data: CONFIDENTIAL_TRANSFER_CALLDATA,
+        },
+        buildOpts({
+          resolveToken,
+          resolveLocalName,
+          resolveDecryptedValue: async () =>
+            value === null ? null : { value },
+        }),
+      );
+    }
+
+    /** The Amount field, asserted to be a plain field rather than a group. */
+    function amountFieldOf(result: DisplayModel) {
+      assert(result.fields);
+      expect(result.fields).toHaveLength(2);
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.label).toBe("Amount");
+      return field;
+    }
+
+    it("accepts a zero-padded full ABI word for the uint64 plaintext", async () => {
+      // A wallet handing back the whole 32-byte word rather than the minimal
+      // encoding is the realistic case, and leading zeros carry no value.
+      const result = await formatWithDecrypted(
+        "0x" + "00".repeat(29) + "0f4240",
+      );
+
+      const amountField = amountFieldOf(result);
+      expect(amountField.value).toBe("1 cUSDC");
+      expect(amountField.fieldType).toBe("uint");
+      expect(amountField.format).toBe("tokenAmount");
+      expect(amountField.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(CONTRACT)),
+      );
+      expect(amountField.rawEncryptedValue).toBe(HANDLE);
+      expect(amountField.warning).toBeUndefined();
+      expect(result.interpolatedIntent).toBe(
+        "Confidential transfer of 1 cUSDC to bob.eth",
+      );
+      expect(result.warnings).toBeUndefined();
+    });
+
+    it("reads a top-bit-set plaintext as unsigned, not negative", async () => {
+      // max uint64. Its leading byte has the top bit set, which is what makes a
+      // *signed* type depend on the declared width; `uint64` has no sign bit,
+      // so the full range must render as a positive amount.
+      const result = await formatWithDecrypted("0xffffffffffffffff");
+
+      const amountField = amountFieldOf(result);
+      expect(amountField.value).toBe("18446744073709.551615 cUSDC");
+      expect(amountField.fieldType).toBe("uint");
+      expect(amountField.rawEncryptedValue).toBe(HANDLE);
+      expect(amountField.warning).toBeUndefined();
+      expect(result.interpolatedIntent).toBe(
+        "Confidential transfer of 18446744073709.551615 cUSDC to bob.eth",
+      );
+      expect(result.warnings).toBeUndefined();
+    });
+
+    it("falls back when the plaintext is too wide for the declared uint64", async () => {
+      // Nine significant bytes cannot be a uint64. Rendering it would show a
+      // wildly wrong amount, so it counts as a failed decryption.
+      const result = await formatWithDecrypted("0x01ffffffffffffffff");
+
+      const amountField = amountFieldOf(result);
+      expect(amountField.value).toBe("[Encrypted Amount]");
+      expect(amountField.fieldType).toBe("bytes");
+      expect(amountField.format).toBe("tokenAmount");
+      expect(amountField.warning?.code).toBe("DECRYPTION_FAILED");
+      expect(amountField.rawEncryptedValue).toBe(HANDLE);
+      expect(amountField.tokenAddress).toBeUndefined();
+      expect(result.interpolatedIntent).toBe(
+        "Confidential transfer of [Encrypted Amount] to bob.eth",
+      );
+    });
+
+    it("falls back when the wallet declines to decrypt", async () => {
+      // The provider exists but returns null — no access, or the user declined
+      // the signature. Distinct from having no provider at all, same outcome.
+      const result = await formatWithDecrypted(null);
+
+      const amountField = amountFieldOf(result);
+      expect(amountField.value).toBe("[Encrypted Amount]");
+      expect(amountField.fieldType).toBe("bytes");
+      expect(amountField.format).toBe("tokenAmount");
+      expect(amountField.warning?.code).toBe("DECRYPTION_FAILED");
+      expect(amountField.rawEncryptedValue).toBe(HANDLE);
+      expect(amountField.tokenAddress).toBeUndefined();
+      expect(amountField.embeddedCalldata).toBeUndefined();
+      expect(amountField.rawAddress).toBeUndefined();
+
+      // The receiver is unaffected by the declined decryption.
+      assert(result.fields);
+      const receiverField = result.fields[1];
+      assert(!isFieldGroup(receiverField));
+      expect(receiverField.value).toBe("bob.eth");
+      expect(receiverField.warning).toBeUndefined();
+
+      expect(result.interpolatedIntent).toBe(
+        "Confidential transfer of [Encrypted Amount] to bob.eth",
+      );
+      expect(result.rawCalldataFallback).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    });
   });
 });
