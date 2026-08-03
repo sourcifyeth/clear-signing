@@ -105,7 +105,15 @@ export type WarningCode =
   | "BATCH_CONTRACT_CREATION"
   | "BATCH_INTERPOLATION_INCOMPLETE"
   | "BATCH_EMPTY"
-  | "CYCLIC_INCLUDES";
+  | "CYCLIC_INCLUDES"
+  | "LAYOUT_DECODE_ERROR"
+  | "UNKNOWN_SWITCH_TAG"
+  | "REJECTED"
+  | "INTERACTION_INTENT"
+  | "SWITCH_EXPRESSION_ERROR"
+  | "DELEGATECALL_UNRESOLVED_TARGET"
+  | "RECURSION_LIMIT_EXCEEDED"
+  | "INTERACTION_TARGET_UNRESOLVED";
 
 /** Warning from formatting. */
 export interface Warning {
@@ -137,6 +145,8 @@ export interface EmbeddedCalldata {
    * container's chain ID.
    */
   chainId?: number;
+  /** Present when the nested call uses DELEGATECALL. */
+  operation?: "DELEGATECALL";
 }
 
 /**
@@ -168,6 +178,11 @@ export interface DisplayField {
    * value property (embedded calldata) instead.
    */
   embeddedCalldata?: EmbeddedCalldata;
+
+  /**
+   * For fields resolving to a terminal switch case `{label, intent}`.
+   */
+  switchTerminal?: { text: string; intent?: "info" | "warning" };
 
   /**
    * The fieldType and format properties can be used to show type-specific
@@ -574,6 +589,80 @@ export interface GitHubSource {
   ref: string;
 }
 
+export type LayoutNode =
+  | { uint: { bytes: number; endian?: "be" | "le"; mask?: string } }
+  | { bytes: { length?: string | number; lengthFrom?: string } }
+  | { address: Record<string, never> }
+  | { bool: Record<string, never> }
+  | {
+      bitfield: {
+        bytes: number;
+        endian?: "be" | "le";
+        fields: Array<{ name: string; bit?: number; bits?: [number, number] }>;
+      };
+    }
+  | {
+      object: {
+        fields: Array<{
+          name: string;
+          schema?: LayoutNode;
+          label?: string;
+          format?: string;
+          params?: DescriptorFieldFormatParams;
+        }>;
+      };
+    }
+  | {
+      sequence: {
+        element: LayoutNode;
+        count?: string | number;
+        countFrom?: string;
+      };
+    }
+  | {
+      switch: {
+        expression: LayoutNode;
+        payloadFrom?: string;
+        cases: Record<string, LayoutNode>;
+      };
+    };
+
+export interface DescriptorFieldSwitch {
+  expression: string | { path: string; mask?: string } | LayoutNode;
+  cases: Record<string, SwitchCaseValue>;
+}
+
+export type SwitchCaseValue =
+  | "reject"
+  | { layout: LayoutNode }
+  | { switch: DescriptorFieldSwitch }
+  | { format: string; params?: DescriptorFieldFormatParams }
+  | { label: string; intent?: "info" | "warning" }
+  | Record<
+      string,
+      | {
+          intent?: "info" | "warning";
+          fields?: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+        }
+      | undefined
+    >;
+
+export interface DescriptorInteraction {
+  to: string;
+  signature: string;
+  args: Array<{ path: string } | { value: unknown }>;
+}
+
+export interface DescriptorTopLevelSwitch {
+  expression: string | { path: string; mask?: string } | LayoutNode;
+  cases: Record<
+    string,
+    | "reject"
+    | { switch: DescriptorTopLevelSwitch }
+    | { interaction: DescriptorInteraction }
+  >;
+}
+
 export type DescriptorFieldFormatType =
   | "raw"
   | "amount"
@@ -607,6 +696,19 @@ export interface DescriptorFieldEncryption {
 }
 
 export interface DescriptorFieldFormatParams {
+  operation?:
+    | "CALL"
+    | "DELEGATECALL"
+    | "CREATE"
+    | "CREATE2"
+    | "CALLCODE"
+    | {
+        expression: string | { path: string };
+        cases: Record<
+          string,
+          "CALL" | "DELEGATECALL" | "CREATE" | "CREATE2" | "CALLCODE"
+        >;
+      };
   tokenPath?: string;
   token?: string;
   nativeCurrencyAddress?: string | string[];
@@ -649,6 +751,9 @@ export interface DescriptorFieldFormat {
     | { mustMatch?: Array<string | number | boolean | null> };
   separator?: string;
   encryption?: DescriptorFieldEncryption;
+  layout?: LayoutNode;
+  switch?: DescriptorFieldSwitch;
+  interaction?: DescriptorInteraction;
   $ref?: string;
 }
 
@@ -664,6 +769,7 @@ export interface DescriptorFormatSpec {
   intent?: string | Record<string, string>;
   interpolatedIntent?: string;
   fields?: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+  switch?: DescriptorTopLevelSwitch;
 }
 
 export interface DescriptorDisplay {

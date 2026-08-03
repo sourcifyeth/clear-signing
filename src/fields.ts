@@ -26,6 +26,7 @@ import type {
   ResolvePath,
 } from "./descriptor.js";
 import { decodeLayoutField, layoutSourceBuffer } from "./layout.js";
+import { resolveSwitchCase } from "./switch.js";
 import {
   argumentValueEquals,
   argumentValueToBytes,
@@ -287,6 +288,71 @@ async function processSingleField(
         ),
       ],
     };
+  }
+
+  if (merged.switch) {
+    const caseMatch = resolveSwitchCase(merged.switch, {
+      resolvePath: ctx.resolvePath,
+    });
+
+    if (!caseMatch) {
+      return {
+        warnings: [
+          warn(
+            "INVALID_DESCRIPTOR",
+            `Switch expression failed to match any case for field '${merged.label}'`,
+          ),
+        ],
+      };
+    }
+
+    if (caseMatch === "reject") {
+      return {
+        warnings: [
+          warn(
+            "REJECTED",
+            `Transaction rejected by switch evaluation on '${merged.label}'`,
+          ),
+        ],
+      };
+    }
+
+    if (typeof caseMatch === "object") {
+      if ("format" in caseMatch) {
+        const newSpec: DescriptorFieldFormat = {
+          ...fieldSpec,
+          format: caseMatch.format as DescriptorFieldFormatType,
+          params: { ...fieldSpec.params, ...caseMatch.params },
+        };
+        delete newSpec.switch;
+        return processSingleField(newSpec, ctx);
+      } else if ("label" in caseMatch && typeof caseMatch.label === "string") {
+        const intent = caseMatch.intent;
+        const warning =
+          typeof intent === "string" &&
+          (intent === "info" || intent === "warning")
+            ? warn("INTERACTION_INTENT", intent)
+            : undefined;
+        return {
+          field: {
+            label: caseMatch.label,
+            value: "",
+            fieldType: "string",
+            format: "raw",
+            ...(warning && { warning }),
+          },
+        };
+      } else {
+        return {
+          warnings: [
+            warn(
+              "UNEXPECTED_LIB_ERROR",
+              "Nested switch or layout cases are not supported in field definitions",
+            ),
+          ],
+        };
+      }
+    }
   }
 
   const effectiveFormat = merged.format ?? "raw";

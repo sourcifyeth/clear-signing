@@ -1,4 +1,5 @@
 import type { ArgumentValue, ResolvePath } from "./descriptor.js";
+import type { DescriptorFieldSwitch, SwitchCaseValue } from "./types.js";
 import { parseBigInt, hexToBytes, bytesEqual } from "./utils.js";
 
 export interface SwitchContext {
@@ -10,9 +11,14 @@ export interface SwitchContext {
  * Evaluates a switch expression string (path or layout slice) to an ArgumentValue.
  */
 export function evaluateSwitchExpression(
-  expr: string,
+  expr: DescriptorFieldSwitch["expression"],
   context: SwitchContext,
 ): ArgumentValue | undefined {
+  if (typeof expr !== "string") {
+    // Stage 4 layout switch handling
+    return undefined;
+  }
+
   if (expr.startsWith("@.") || expr.startsWith("$.") || expr.startsWith("#.")) {
     const val = context.resolvePath(expr);
     if (!val) return undefined;
@@ -87,4 +93,28 @@ export function matchSwitchCase(
   }
 
   return false;
+}
+
+/**
+ * Evaluates a switch definition and returns the matching SwitchCaseValue.
+ */
+export function resolveSwitchCase(
+  switchDef: DescriptorFieldSwitch,
+  context: SwitchContext,
+): SwitchCaseValue | undefined {
+  const exprValue = evaluateSwitchExpression(switchDef.expression, context);
+  if (!exprValue) return undefined;
+
+  for (const [caseKey, caseValue] of Object.entries(switchDef.cases)) {
+    if (caseKey === "default") continue;
+    if (matchSwitchCase(exprValue, caseKey)) {
+      return caseValue;
+    }
+  }
+
+  if ("default" in switchDef.cases) {
+    return switchDef.cases["default"];
+  }
+
+  return undefined;
 }

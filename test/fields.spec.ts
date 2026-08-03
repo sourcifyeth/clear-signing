@@ -20,6 +20,7 @@ import type {
   DescriptorFieldFormat,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
+  DisplayField,
 } from "../src/types.js";
 import { hexToBytes, isFieldGroup, toChecksumAddress } from "../src/utils.js";
 
@@ -1293,6 +1294,117 @@ describe("applyFieldFormats", () => {
       assert(!("warnings" in result));
       expect(result.renderedValues.get("items.[].name")).toBe("Alice and Bob");
       expect(result.renderedValues.get("items.[].amount")).toBe("1 and 2");
+    });
+  });
+
+  describe("switch fields", () => {
+    it("recurses into format correctly", async () => {
+      const formatSpec: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Switch Label",
+            path: "$.myValue",
+            switch: {
+              expression: "$.myValue",
+              cases: {
+                "42": { format: "raw", params: {} },
+                default: { format: "unit", params: { decimals: 2 } },
+              },
+            },
+          },
+        ],
+      };
+      const resolvePath = (path: string) => {
+        if (path === "$.myValue") return { type: "uint", value: 42n } as const;
+        return undefined;
+      };
+
+      const result = await applyFieldFormats(
+        formatSpec,
+        {},
+        resolvePath,
+        () => 0,
+        1,
+        undefined,
+      );
+      if ("warnings" in result) throw new Error("Unexpected warnings");
+
+      expect(result.fields).toHaveLength(1);
+      const field = result.fields[0] as DisplayField;
+      expect(field.label).toBe("Switch Label");
+      expect(field.format).toBe("raw");
+      expect(field.value).toBe("42");
+    });
+
+    it("emits interaction intent", async () => {
+      const formatSpec: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Action",
+            path: "$.myValue",
+            switch: {
+              expression: "$.myValue",
+              cases: {
+                "99": { label: "Warning! Danger", intent: "warning" },
+              },
+            },
+          },
+        ],
+      };
+      const resolvePath = (path: string) => {
+        if (path === "$.myValue") return { type: "uint", value: 99n } as const;
+        return undefined;
+      };
+
+      const result = await applyFieldFormats(
+        formatSpec,
+        {},
+        resolvePath,
+        () => 0,
+        1,
+        undefined,
+      );
+      if ("warnings" in result) throw new Error("Unexpected warnings");
+
+      const field = result.fields[0] as DisplayField;
+      expect(field.label).toBe("Warning! Danger");
+      expect(field.value).toBe("");
+      expect(field.warning?.code).toBe("INTERACTION_INTENT");
+      expect(field.warning?.message).toBe("warning");
+    });
+
+    it("returns REJECTED warning", async () => {
+      const formatSpec: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Action",
+            path: "$.myValue",
+            switch: {
+              expression: "$.myValue",
+              cases: {
+                "0": "reject",
+              },
+            },
+          },
+        ],
+      };
+      const resolvePath = (path: string) => {
+        if (path === "$.myValue") return { type: "uint", value: 0n } as const;
+        return undefined;
+      };
+
+      const result = await applyFieldFormats(
+        formatSpec,
+        {},
+        resolvePath,
+        () => 0,
+        1,
+        undefined,
+      );
+      expect("warnings" in result).toBe(true);
+      if ("warnings" in result) {
+        expect(result.warnings[0].code).toBe("REJECTED");
+      }
     });
   });
 });
