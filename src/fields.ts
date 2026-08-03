@@ -25,6 +25,7 @@ import type {
   BytesSliceValue,
   ResolvePath,
 } from "./descriptor.js";
+import { decodeLayoutField, layoutSourceBuffer } from "./layout.js";
 import {
   argumentValueEquals,
   argumentValueToBytes,
@@ -91,7 +92,57 @@ export async function applyFieldFormats(
   | { warnings: Warning[] }
 > {
   const renderedValues = new Map<string, string>();
-  const sliceResolvePath = buildSliceResolvePath(resolvePath);
+  const layoutResolvedValues = new Map<string, ArgumentValue>();
+
+  for (const fieldSpec of format.fields ?? []) {
+    if (!isFieldGroup(fieldSpec) && fieldSpec.layout) {
+      const { merged, warnings: defWarnings } = mergeDefinitions(
+        fieldSpec,
+        definitions,
+      );
+      if (defWarnings.length > 0) {
+        return {
+          warnings: defWarnings.map((msg) =>
+            warn("DEFINITIONS_RESOLUTION_ERROR", msg),
+          ),
+        };
+      }
+      const resolvedAnchor = resolveFieldValue(merged, resolvePath);
+      if (!resolvedAnchor) {
+        return {
+          warnings: [
+            warn(
+              "INVALID_DESCRIPTOR",
+              `No value found for layout anchor '${merged.path ?? merged.value}'`,
+            ),
+          ],
+        };
+      }
+      const anchorValue = coerceResolvedValue(resolvedAnchor, "raw");
+      const anchorBuffer = layoutSourceBuffer(anchorValue);
+      if (!merged.layout)
+        return {
+          warnings: [warn("INVALID_DESCRIPTOR", "Merged layout missing")],
+        };
+      const layoutWarning = decodeLayoutField(
+        merged.layout,
+        anchorBuffer,
+        stripStructuredRootPrefix(merged.path ?? ""),
+        layoutResolvedValues,
+      );
+      if (layoutWarning) return { warnings: [layoutWarning] };
+    }
+  }
+
+  const baseLayoutResolvePath: BaseResolvePath = (path: string) => {
+    const stripped = stripStructuredRootPrefix(path);
+    if (layoutResolvedValues.has(stripped)) {
+      return layoutResolvedValues.get(stripped);
+    }
+    return resolvePath(path);
+  };
+
+  const sliceResolvePath = buildSliceResolvePath(baseLayoutResolvePath);
   const ctx: FieldContext = {
     definitions,
     resolvePath: sliceResolvePath,
@@ -210,23 +261,42 @@ async function processSingleField(
     };
   }
 
-  if (!merged.format || !merged.label) {
+  if (!merged.label) {
     return {
       warnings: [
         warn(
           "INVALID_DESCRIPTOR",
-          `Missing ${!merged.format ? "format" : "label"} for field '${merged.label ?? merged.path}'`,
+          `Missing label for field '${merged.path ?? merged.value}'`,
         ),
       ],
     };
   }
+
+  const hasFormat = merged.format !== undefined;
+  const hasLayout = merged.layout !== undefined;
+  const hasSwitch = merged.switch !== undefined;
+  const exclusiveCount =
+    (hasFormat ? 1 : 0) + (hasLayout ? 1 : 0) + (hasSwitch ? 1 : 0);
+
+  if (exclusiveCount !== 1) {
+    return {
+      warnings: [
+        warn(
+          "INVALID_DESCRIPTOR",
+          `Field '${merged.label}' must have exactly one of format, layout, or switch`,
+        ),
+      ],
+    };
+  }
+
+  const effectiveFormat = merged.format ?? "raw";
 
   // Convert bytes-slice to a typed ArgumentValue based on the field format,
   // and coerce uint/int → address when the format expects an address (some
   // descriptors store addresses in uint256 slots, e.g. 1inch's `Address` type).
   let argValue: ArgumentValue = coerceResolvedValue(
     resolvedValue,
-    merged.format,
+    effectiveFormat,
   );
 
   // Encrypted fields are decrypted before anything reads the value, so that
@@ -268,7 +338,7 @@ async function processSingleField(
   } else {
     renderResult = await renderField(
       argValue,
-      merged.format,
+      effectiveFormat,
       merged,
       ctx.resolvePath,
       ctx.chainId,
@@ -302,7 +372,7 @@ async function processSingleField(
     value: rendered,
     ...(separator && { separator }),
     fieldType: argValue.type,
-    format: merged.format,
+    format: effectiveFormat,
     warning: fieldWarning,
     ...(rawAddress && { rawAddress }),
     ...(tokenAddress && { tokenAddress }),
