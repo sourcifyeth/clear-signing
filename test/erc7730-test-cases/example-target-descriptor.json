@@ -1,0 +1,26 @@
+{
+  "$schema": "https://eips.ethereum.org/assets/eip-7730/erc7730-v1.schema.json",
+  "context": {
+    "$id": "Target Descriptor Example",
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
+        }
+      ]
+    }
+  },
+  "display": {
+    "formats": {
+      "grantReward(address account,uint256 amount)": {
+        "$id": "Grant Reward",
+        "intent": "Grant Reward",
+        "fields": [
+          { "path": "account", "label": "Account", "format": "addressName" },
+          { "path": "amount", "label": "Amount", "format": "amount" }
+        ]
+      }
+    }
+  }
+}

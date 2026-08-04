@@ -90,6 +90,7 @@ export async function formatEip712(
     descriptor.metadata,
     externalDataProvider,
     formatEmbeddedCalldata,
+    undefined,
   );
 
   if ("warnings" in result) {

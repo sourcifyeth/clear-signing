@@ -1,0 +1,40 @@
+{
+  "$schema": "https://eips.ethereum.org/assets/eip-7730/erc7730-v1.schema.json",
+  "context": {
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0x9538d438d506fc426db37fb83dac2a0752a02757"
+        }
+      ]
+    }
+  },
+  "display": {
+    "formats": {
+      "execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures)": {
+        "intent": "Execute Safe Transaction",
+        "fields": [
+          {
+            "path": "to",
+            "label": "Target",
+            "format": "addressName"
+          },
+          {
+            "path": "value",
+            "label": "Value",
+            "format": "amount"
+          },
+          {
+            "path": "data",
+            "label": "Embedded Calldata",
+            "format": "calldata",
+            "params": {
+              "calleePath": "to"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

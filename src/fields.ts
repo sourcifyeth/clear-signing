@@ -6,6 +6,7 @@
  */
 
 import type {
+  Descriptor,
   DescriptorFieldEncryption,
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
@@ -25,6 +26,87 @@ import type {
   BytesSliceValue,
   ResolvePath,
 } from "./descriptor.js";
+import type { LayoutNode } from "./types.js";
+
+function scopeLayoutFieldParams(params: any, basePath: string): any {
+  if (!params || typeof params !== "object") return params;
+  const result = { ...params };
+  for (const [key, value] of Object.entries(result)) {
+    if (key.endsWith("Path") && typeof value === "string") {
+      if (!value.startsWith("@.") && !value.startsWith("$.")) {
+        result[key] = basePath ? `${basePath}.${value}` : value;
+      }
+    }
+    if (key === "operation" && typeof value === "object" && value !== null) {
+      const expr = (value as any).expression;
+      if (typeof expr === "string" && !expr.startsWith("@.") && !expr.startsWith("$.")) {
+        result[key] = {
+          ...(value as any),
+          expression: basePath ? `${basePath}.${expr}` : expr,
+        };
+      }
+    }
+  }
+  return result;
+}
+
+function extractLayoutFields(
+  node: LayoutNode,
+  basePath: string,
+  resolvedValues: Map<string, ArgumentValue>,
+): Array<DescriptorFieldFormat> {
+  const result: Array<DescriptorFieldFormat> = [];
+
+  if (node.type === "object") {
+    for (const field of node.fields) {
+      if (field.schema) {
+        const childPath = basePath ? `${basePath}.${field.name}` : field.name;
+
+        if (field.label || field.format || field.params) {
+          result.push({
+            path: childPath,
+            label: field.label,
+            format: field.format as DescriptorFieldFormatType,
+            params: scopeLayoutFieldParams(field.params, basePath),
+          });
+        }
+
+        result.push(
+          ...extractLayoutFields(field.schema, childPath, resolvedValues),
+        );
+      }
+    }
+  } else if (node.type === "sequence") {
+    let i = 0;
+    while (true) {
+      const childPath = basePath ? `${basePath}.[${i}]` : `[${i}]`;
+      let hasChild = false;
+      for (const key of resolvedValues.keys()) {
+        if (key === childPath || key.startsWith(childPath + ".")) {
+          hasChild = true;
+          break;
+        }
+      }
+      if (!hasChild) break;
+
+      const elementFields = extractLayoutFields(
+        node.element,
+        childPath,
+        resolvedValues,
+      );
+      if (elementFields.length > 0) {
+        result.push(...elementFields);
+      }
+      i++;
+    }
+  }
+
+  return result;
+}
+
+import { decodeLayoutField, layoutSourceBuffer } from "./layout.js";
+import { resolveSwitchCase, parseSwitchCase } from "./switch.js";
+import { parseParamList, decodeArguments } from "./calldata.js";
 import {
   argumentValueEquals,
   argumentValueToBytes,
@@ -59,12 +141,18 @@ export type GetArrayLength = (path: string) => number;
 interface FieldContext {
   definitions: Record<string, DescriptorFieldFormat>;
   resolvePath: ResolvePath;
+  baseResolvePath: BaseResolvePath;
   getArrayLength: GetArrayLength;
   chainId: number | undefined;
   metadata: DescriptorMetadata | undefined;
   renderedValues: Map<string, string>;
   externalDataProvider?: ExternalDataProvider;
   formatEmbeddedCalldata?: FormatCalldata;
+  layoutResolvedValues?: Map<string, ArgumentValue>;
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>;
 }
 
 /**
@@ -83,6 +171,10 @@ export async function applyFieldFormats(
   metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
   formatEmbeddedCalldata?: FormatCalldata,
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>,
 ): Promise<
   | {
       fields: (DisplayField | DisplayFieldGroup)[];
@@ -91,16 +183,69 @@ export async function applyFieldFormats(
   | { warnings: Warning[] }
 > {
   const renderedValues = new Map<string, string>();
-  const sliceResolvePath = buildSliceResolvePath(resolvePath);
+  const layoutResolvedValues = new Map<string, ArgumentValue>();
+
+  for (const fieldSpec of format.fields ?? []) {
+    if (!isFieldGroup(fieldSpec) && fieldSpec.layout) {
+      const { merged, warnings: defWarnings } = mergeDefinitions(
+        fieldSpec,
+        definitions,
+      );
+      if (defWarnings.length > 0) {
+        return {
+          warnings: defWarnings.map((msg) =>
+            warn("DEFINITIONS_RESOLUTION_ERROR", msg),
+          ),
+        };
+      }
+      const resolvedAnchor = resolveFieldValue(merged, resolvePath);
+      if (!resolvedAnchor) {
+        return {
+          warnings: [
+            warn(
+              "INVALID_DESCRIPTOR",
+              `No value found for layout anchor '${merged.path ?? merged.value}'`,
+            ),
+          ],
+        };
+      }
+      const anchorValue = coerceResolvedValue(resolvedAnchor, "raw");
+      const anchorBuffer = layoutSourceBuffer(anchorValue);
+      if (!merged.layout)
+        return {
+          warnings: [warn("INVALID_DESCRIPTOR", "Merged layout missing")],
+        };
+      const layoutWarning = decodeLayoutField(
+        merged.layout,
+        anchorBuffer,
+        stripStructuredRootPrefix(merged.path ?? ""),
+        layoutResolvedValues,
+      );
+      if (layoutWarning) return { warnings: [layoutWarning] };
+    }
+  }
+
+  const baseLayoutResolvePath: BaseResolvePath = (path: string) => {
+    const stripped = stripStructuredRootPrefix(path);
+    if (layoutResolvedValues.has(stripped)) {
+      return layoutResolvedValues.get(stripped);
+    }
+    return resolvePath(path);
+  };
+
+  const sliceResolvePath = buildSliceResolvePath(baseLayoutResolvePath);
   const ctx: FieldContext = {
     definitions,
     resolvePath: sliceResolvePath,
+    baseResolvePath: baseLayoutResolvePath,
     getArrayLength,
     chainId,
     metadata,
     renderedValues,
     externalDataProvider,
     formatEmbeddedCalldata,
+    layoutResolvedValues,
+    resolveCalldataDescriptor,
   };
 
   const fields: (DisplayField | DisplayFieldGroup)[] = [];
@@ -173,7 +318,9 @@ async function processArrayField(
 async function processSingleField(
   fieldSpec: DescriptorFieldFormat,
   ctx: FieldContext,
-): Promise<{ field: DisplayField | null } | { warnings: Warning[] }> {
+): Promise<
+  { field: DisplayField | DisplayFieldGroup | null } | { warnings: Warning[] }
+> {
   const { merged, warnings: defWarnings } = mergeDefinitions(
     fieldSpec,
     ctx.definitions,
@@ -210,23 +357,209 @@ async function processSingleField(
     };
   }
 
-  if (!merged.format || !merged.label) {
+  if (!merged.label) {
     return {
       warnings: [
         warn(
           "INVALID_DESCRIPTOR",
-          `Missing ${!merged.format ? "format" : "label"} for field '${merged.label ?? merged.path}'`,
+          `Missing label for field '${merged.path ?? merged.value}'`,
         ),
       ],
     };
   }
+
+  const hasFormat = merged.format !== undefined;
+  const hasLayout = merged.layout !== undefined;
+  const hasSwitch = merged.switch !== undefined;
+  const exclusiveCount =
+    (hasFormat ? 1 : 0) + (hasLayout ? 1 : 0) + (hasSwitch ? 1 : 0);
+
+  if (exclusiveCount !== 1) {
+    return {
+      warnings: [
+        warn(
+          "INVALID_DESCRIPTOR",
+          `Field '${merged.label}' must have exactly one of format, layout, or switch`,
+        ),
+      ],
+    };
+  }
+
+  if (merged.switch) {
+    const caseMatch = resolveSwitchCase(merged.switch, {
+      resolvePath: ctx.resolvePath,
+    });
+
+    if (!caseMatch) {
+      return {
+        warnings: [
+          warn(
+            "INVALID_DESCRIPTOR",
+            `Switch expression failed to match any case for field '${merged.label}'`,
+          ),
+        ],
+      };
+    }
+
+    const parsedCase = parseSwitchCase(caseMatch);
+    if (!parsedCase) {
+      return {
+        warnings: [
+          warn("UNEXPECTED_LIB_ERROR", "Switch case value could not be parsed"),
+        ],
+      };
+    }
+
+    if (parsedCase.type === "reject") {
+      return {
+        warnings: [
+          warn(
+            "REJECTED",
+            `Transaction rejected by switch evaluation on '${merged.label}'`,
+          ),
+        ],
+      };
+    } else if (parsedCase.type === "format") {
+      const newSpec: DescriptorFieldFormat = {
+        ...fieldSpec,
+        format: parsedCase.format as DescriptorFieldFormatType,
+        params: { ...fieldSpec.params, ...parsedCase.params },
+      };
+      delete newSpec.switch;
+      return processSingleField(newSpec, ctx);
+    } else if (parsedCase.type === "terminal") {
+      const intent = parsedCase.intent;
+      const warning =
+        typeof intent === "string" &&
+        (intent === "info" || intent === "warning")
+          ? warn("INTERACTION_INTENT", intent)
+          : undefined;
+      return {
+        field: {
+          label: parsedCase.label,
+          value: "",
+          fieldType: "string",
+          format: "raw",
+          ...(warning && { warning }),
+        },
+      };
+    } else if (parsedCase.type === "tuple") {
+      const intent = parsedCase.intent;
+      const warning =
+        typeof intent === "string" &&
+        (intent === "info" || intent === "warning")
+          ? warn("INTERACTION_INTENT", intent)
+          : undefined;
+
+      const inputs = parseParamList(parsedCase.tupleSig);
+
+      const argValue = coerceResolvedValue(resolvedValue, "raw");
+      const calldataBytes =
+        argValue.type === "bytes" ? argValue.bytes : new Uint8Array();
+
+      try {
+        const decoded = decodeArguments(inputs, calldataBytes);
+        const tupleFormat: DescriptorFormatSpec = { fields: parsedCase.fields };
+
+        const tupleResolvePath: BaseResolvePath = (path: string) => {
+          if (
+            path.startsWith("@.") ||
+            path.startsWith("#.") ||
+            path.startsWith("$.")
+          ) {
+            return ctx.baseResolvePath(path);
+          }
+          const stripped = stripStructuredRootPrefix(path);
+          const rootMatch = stripped.match(/^([a-zA-Z0-9_]+)/);
+          if (rootMatch) {
+            const rootName = rootMatch[1];
+            if (decoded.values.has(rootName)) {
+              return decoded.values.get(rootName);
+            }
+          }
+          return ctx.baseResolvePath(path);
+        };
+        const tupleGetArrayLength = (path: string) => {
+          const stripped = stripStructuredRootPrefix(path);
+          const rootMatch = stripped.match(/^([a-zA-Z0-9_]+)/);
+          if (rootMatch) {
+            const rootName = rootMatch[1];
+            if (decoded.arrayLengths.has(rootName)) {
+              return decoded.arrayLengths.get(rootName) || 0;
+            }
+          }
+          return ctx.getArrayLength(path);
+        };
+
+        const subResult = await applyFieldFormats(
+          tupleFormat,
+          ctx.definitions,
+          tupleResolvePath,
+          tupleGetArrayLength,
+          ctx.chainId,
+          ctx.metadata,
+          ctx.externalDataProvider,
+          ctx.formatEmbeddedCalldata,
+        );
+        if ("warnings" in subResult) return subResult;
+
+        return {
+          field: {
+            ...(merged.label && { label: merged.label }), // Optional group label
+            fields: subResult.fields,
+            ...(warning && { warning }),
+          },
+        };
+      } catch {
+        return {
+          warnings: [
+            warn(
+              "LAYOUT_DECODE_ERROR",
+              "Failed to decode tuple layout for switch case",
+            ),
+          ],
+        };
+      }
+    } else if (parsedCase.type === "layout") {
+      // Decode layout and then process remaining fields? Wait, a nested switch with {layout} inside a single field is unsupported?
+      return {
+        warnings: [
+          warn(
+            "UNEXPECTED_LIB_ERROR",
+            "Nested layout cases inside fields are not supported",
+          ),
+        ],
+      };
+    }
+  }
+
+  if (merged.layout && !merged.format) {
+    if (ctx.layoutResolvedValues) {
+      const extracted = extractLayoutFields(
+        merged.layout,
+        stripStructuredRootPrefix(merged.path ?? ""),
+        ctx.layoutResolvedValues,
+      );
+      if (extracted.length > 0) {
+        const processedExtracted = await processFlatFields(extracted, ctx);
+        return {
+          field: {
+            ...(merged.label && { label: merged.label }),
+            fields:
+              "fields" in processedExtracted ? processedExtracted.fields : [],
+          },
+        };
+      }
+    }
+  }
+  const effectiveFormat = merged.format ?? "raw";
 
   // Convert bytes-slice to a typed ArgumentValue based on the field format,
   // and coerce uint/int → address when the format expects an address (some
   // descriptors store addresses in uint256 slots, e.g. 1inch's `Address` type).
   let argValue: ArgumentValue = coerceResolvedValue(
     resolvedValue,
-    merged.format,
+    effectiveFormat,
   );
 
   // Encrypted fields are decrypted before anything reads the value, so that
@@ -268,7 +601,7 @@ async function processSingleField(
   } else {
     renderResult = await renderField(
       argValue,
-      merged.format,
+      effectiveFormat,
       merged,
       ctx.resolvePath,
       ctx.chainId,
@@ -302,7 +635,7 @@ async function processSingleField(
     value: rendered,
     ...(separator && { separator }),
     fieldType: argValue.type,
-    format: merged.format,
+    format: effectiveFormat,
     warning: fieldWarning,
     ...(rawAddress && { rawAddress }),
     ...(tokenAddress && { tokenAddress }),
@@ -333,12 +666,12 @@ async function processGroupArrayPath(
     };
   }
 
-  const allFields: DisplayField[] = [];
+  const allFields: Array<DisplayField | DisplayFieldGroup> = [];
   for (let i = 0; i < length; i++) {
     const prefix = `${basePath}.[${i}]`;
     const scopedResolvePath: ResolvePath = (path: string) => {
       if (path.startsWith("@.") || path.startsWith("$.")) {
-        return ctx.resolvePath(path);
+        return ctx.baseResolvePath(path);
       }
       return ctx.resolvePath(`${prefix}.${stripStructuredRootPrefix(path)}`);
     };
@@ -407,7 +740,7 @@ async function processChildArrayPaths(
     }
 
     // Bundled: pair children by index — a0[0] a1[0] a0[1] a1[1] ...
-    const allFields: DisplayField[] = [];
+    const allFields: Array<DisplayField | DisplayFieldGroup> = [];
     for (let i = 0; i < first; i++) {
       const result = await processFlatFields(
         expandArrayIndex(childFields, i),
@@ -422,7 +755,7 @@ async function processChildArrayPaths(
   }
 
   // Sequential (default): iterate each child array fully — a0[0] a0[1] ... a1[0] a1[1] ...
-  const allFields: DisplayField[] = [];
+  const allFields: Array<DisplayField | DisplayFieldGroup> = [];
   for (const child of childFields) {
     if (isFieldGroup(child)) {
       return {
@@ -470,7 +803,7 @@ async function processStructGroup(
         ...ctx,
         resolvePath: (path: string) => {
           if (path.startsWith("@.") || path.startsWith("$.")) {
-            return ctx.resolvePath(path);
+            return ctx.baseResolvePath(path);
           }
           return ctx.resolvePath(
             `${prefix}.${stripStructuredRootPrefix(path)}`,
@@ -500,8 +833,10 @@ function groupHasArrayChildren(group: DescriptorFieldGroup): boolean {
 async function processFlatFields(
   fieldSpecs: (DescriptorFieldFormat | DescriptorFieldGroup)[],
   ctx: FieldContext,
-): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
-  const fields: DisplayField[] = [];
+): Promise<
+  { fields: Array<DisplayField | DisplayFieldGroup> } | { warnings: Warning[] }
+> {
+  const fields: Array<DisplayField | DisplayFieldGroup> = [];
 
   for (const fieldSpec of fieldSpecs) {
     if (isFieldGroup(fieldSpec)) {
@@ -573,8 +908,10 @@ async function iterateArrayField(
   field: DescriptorFieldFormat,
   length: number,
   ctx: FieldContext,
-): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
-  const fields: DisplayField[] = [];
+): Promise<
+  { fields: Array<DisplayField | DisplayFieldGroup> } | { warnings: Warning[] }
+> {
+  const fields: Array<DisplayField | DisplayFieldGroup> = [];
   for (let i = 0; i < length; i++) {
     const indexed = expandFieldForIndex(field, i);
     const result = await processSingleField(indexed, ctx);

@@ -43,6 +43,7 @@
     "dist"
   ],
   "scripts": {
+    "visualize": "npx tsx scratch/visualize.ts",
     "build": "tsup",
     "clean": "rm -rf dist",
     "test": "vitest run",
