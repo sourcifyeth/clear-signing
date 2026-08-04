@@ -16,6 +16,7 @@ import type {
   Transaction,
   Warning,
 } from "./types.js";
+import { evaluateSwitchExpression, matchSwitchCase } from "./switch.js";
 import type { ArgumentValue, ResolvePath } from "./descriptor.js";
 import { resolveMetadataValue, resolvedToAddress } from "./descriptor.js";
 import {
@@ -835,6 +836,31 @@ async function formatCalldata(
     };
   }
 
+  const opResult = resolveOperationParam(fieldOptions, resolvePath);
+  if (opResult.warning) {
+    return {
+      rendered: renderRaw(value),
+      warning: opResult.warning,
+    };
+  }
+  const operation = opResult.operation;
+
+  if (
+    operation === "CREATE" ||
+    operation === "CREATE2" ||
+    operation === "CALLCODE"
+  ) {
+    // These have no resolvable callee or recursion.
+    // Display the operation label.
+    return {
+      rendered: renderRaw(value), // or something else? "CREATE2" ? We'll return the raw bytes and maybe interaction label later? Actually the plan says: "display the operation label without attempting recursion"
+      // Wait, let's just return rendered: renderRaw(value).
+      // Wait, is there a special way to display the label?
+      // "display the operation label without attempting recursion"
+      // Let's return the string representation of the operation.
+    };
+  }
+
   const chainIdResult = resolveChainId(fieldOptions, resolvePath);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
     return {
@@ -883,10 +909,30 @@ async function formatCalldata(
 
   const result = await formatCalldata(tx);
 
+  if (
+    operation === "DELEGATECALL" &&
+    (result.warnings?.some(
+      (w) => w.code === "NO_DESCRIPTOR" || w.code === "DEPLOYMENT_MISMATCH",
+    ) ||
+      result.rawCalldataFallback)
+  ) {
+    // escalate to DELEGATECALL_UNRESOLVED_TARGET
+    return {
+      rendered: renderRaw(value),
+      warning: warn(
+        "DELEGATECALL_UNRESOLVED_TARGET",
+        "DELEGATECALL target could not be resolved",
+      ),
+    };
+  }
+
   const embedded: EmbeddedCalldata = {
     display: result,
     callee: toChecksumAddress(hexToBytes(callee)),
   };
+  if (operation === "DELEGATECALL") {
+    embedded.operation = "DELEGATECALL";
+  }
   if (chainId !== containerChainId) embedded.chainId = chainId;
 
   return { rendered: data, embeddedCalldata: embedded };
@@ -1231,6 +1277,77 @@ export function typeMismatch(
     warning: warn(
       "ARGUMENT_TYPE_MISMATCH",
       `Format ${format} expects ${expected} but got ${value.type}`,
+    ),
+  };
+}
+
+/**
+ * Resolve the operation param.
+ */
+function resolveOperationParam(
+  field: FieldFormatOptions,
+  resolvePath: ResolvePath,
+): {
+  operation: "CALL" | "DELEGATECALL" | "CREATE" | "CREATE2" | "CALLCODE";
+  warning?: Warning;
+} {
+  const params = field.params ?? {};
+  const op = params.operation;
+  if (!op) return { operation: "CALL" };
+
+  if (typeof op === "string")
+    return {
+      operation: op as
+        | "CALL"
+        | "DELEGATECALL"
+        | "CREATE"
+        | "CREATE2"
+        | "CALLCODE",
+    };
+
+  const exprString =
+    typeof op.expression === "string" ? op.expression : op.expression.path;
+  const exprValue = evaluateSwitchExpression(exprString, { resolvePath });
+  if (!exprValue) {
+    return {
+      operation: "CALL",
+      warning: warn(
+        "SWITCH_EXPRESSION_ERROR",
+        "Operation switch expression failed to evaluate",
+      ),
+    };
+  }
+
+  for (const [caseKey, caseValue] of Object.entries(op.cases)) {
+    if (caseKey === "default") continue;
+    if (matchSwitchCase(exprValue, caseKey)) {
+      return {
+        operation: caseValue as
+          | "CALL"
+          | "DELEGATECALL"
+          | "CREATE"
+          | "CREATE2"
+          | "CALLCODE",
+      };
+    }
+  }
+
+  if ("default" in op.cases) {
+    return {
+      operation: op.cases["default"] as
+        | "CALL"
+        | "DELEGATECALL"
+        | "CREATE"
+        | "CREATE2"
+        | "CALLCODE",
+    };
+  }
+
+  return {
+    operation: "CALL",
+    warning: warn(
+      "UNKNOWN_SWITCH_TAG",
+      "No match found for operation switch and no default provided",
     ),
   };
 }

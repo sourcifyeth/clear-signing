@@ -1701,6 +1701,88 @@ describe("calldata format", () => {
 
     expect(result.rendered).toBe("0x12345678deadbeef");
   });
+
+  describe("operation param", () => {
+    it("handles CREATE by displaying raw value without recursion", async () => {
+      mockFormatCalldata.mockClear();
+      const result = await renderField(
+        calldataValue,
+        "calldata",
+        { params: { callee: calleeAddr, operation: "CREATE" } },
+        noopResolvePath,
+        1,
+        undefined,
+        undefined,
+        mockFormatCalldata,
+      );
+      expect(result.rendered).toBe("0xdeadbeef");
+      expect(result.embeddedCalldata).toBeUndefined();
+      expect(mockFormatCalldata).not.toHaveBeenCalled();
+    });
+
+    it("handles DELEGATECALL recursion and tags it", async () => {
+      mockFormatCalldata.mockResolvedValueOnce({ formats: {} });
+      const result = await renderField(
+        calldataValue,
+        "calldata",
+        { params: { callee: calleeAddr, operation: "DELEGATECALL" } },
+        noopResolvePath,
+        1,
+        undefined,
+        undefined,
+        mockFormatCalldata,
+      );
+      expect(result.embeddedCalldata?.operation).toBe("DELEGATECALL");
+    });
+
+    it("escalates DELEGATECALL_UNRESOLVED_TARGET if nested target has NO_DESCRIPTOR", async () => {
+      mockFormatCalldata.mockResolvedValueOnce({
+        warnings: [{ code: "NO_DESCRIPTOR", message: "" }],
+      });
+      const result = await renderField(
+        calldataValue,
+        "calldata",
+        { params: { callee: calleeAddr, operation: "DELEGATECALL" } },
+        noopResolvePath,
+        1,
+        undefined,
+        undefined,
+        mockFormatCalldata,
+      );
+      expect(result.warning?.code).toBe("DELEGATECALL_UNRESOLVED_TARGET");
+      expect(result.embeddedCalldata).toBeUndefined();
+    });
+
+    it("resolves operation via switch expression", async () => {
+      mockFormatCalldata.mockResolvedValueOnce({ formats: {} });
+      const resolvePath = (path: string) => {
+        if (path === "$.opType") return { type: "uint", value: 1n } as const;
+        return undefined;
+      };
+      const result = await renderField(
+        calldataValue,
+        "calldata",
+        {
+          params: {
+            callee: calleeAddr,
+            operation: {
+              expression: "$.opType",
+              cases: {
+                "1": "DELEGATECALL",
+                default: "CALL",
+              },
+            },
+          },
+        },
+        resolvePath as unknown as ResolvePath,
+        1,
+        undefined,
+        undefined,
+        mockFormatCalldata,
+      );
+      expect(result.embeddedCalldata?.operation).toBe("DELEGATECALL");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
