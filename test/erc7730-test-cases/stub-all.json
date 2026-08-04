@@ -1,0 +1,60 @@
+{
+  "$schema": "https://eips.ethereum.org/assets/eip-7730/erc7730-v1.schema.json",
+  "context": {
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0xb63cac384247597756545b500253ff8e607a8020"
+        },
+        {
+          "chainId": 1,
+          "address": "0x96f98ed74639689c3a11daf38ef86e59f43417d3"
+        },
+        {
+          "chainId": 1,
+          "address": "0x482258099de8de2d0bda84215864800ea7e6b03d"
+        }
+      ]
+    }
+  },
+  "display": {
+    "formats": {
+      "unstake(address recipient,uint256 amount,bool bool1,bool bool2)": {
+        "intent": "Unstake",
+        "fields": [
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "amount"
+          },
+          {
+            "path": "recipient",
+            "label": "Recipient",
+            "format": "addressName"
+          }
+        ]
+      },
+      "withdraw(uint256 amount,uint256 id)": {
+        "intent": "Withdraw",
+        "fields": [
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "amount"
+          }
+        ]
+      },
+      "withdraw(uint256 amount)": {
+        "intent": "Withdraw",
+        "fields": [
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "amount"
+          }
+        ]
+      }
+    }
+  }
+}

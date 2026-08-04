@@ -36,33 +36,32 @@ export function evaluateSwitchExpression(
     return undefined;
   }
 
-  if (expr.startsWith("@.") || expr.startsWith("$.") || expr.startsWith("#.")) {
+  if (typeof expr === "string") {
+    if (expr.startsWith(".[")) {
+      if (!context.payloadBuffer) return undefined;
+      const match = expr.match(/^\.\[(\d+)(?::(\d+))?\]$/);
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const endStr = match[2];
+        if (endStr !== undefined) {
+          const end = parseInt(endStr, 10);
+          if (start >= end) return { type: "bytes", bytes: new Uint8Array(0) };
+          return { type: "bytes", bytes: context.payloadBuffer.slice(start, end) };
+        } else {
+          return {
+            type: "bytes",
+            bytes: context.payloadBuffer.slice(start, start + 1),
+          };
+        }
+      }
+    }
+
     const val = context.resolvePath(expr);
     if (!val) return undefined;
     if (val.type === "bytes-slice") {
       return { type: "bytes", bytes: val.bytes };
     }
     return val;
-  }
-
-  if (expr.startsWith(".[")) {
-    if (!context.payloadBuffer) return undefined;
-    const match = expr.match(/^\.\[(\d+)(?::(\d+))?\]$/);
-    if (!match) return undefined;
-
-    const start = parseInt(match[1], 10);
-    const endStr = match[2];
-
-    if (endStr !== undefined) {
-      const end = parseInt(endStr, 10);
-      if (start >= end) return { type: "bytes", bytes: new Uint8Array(0) };
-      return { type: "bytes", bytes: context.payloadBuffer.slice(start, end) };
-    } else {
-      return {
-        type: "bytes",
-        bytes: context.payloadBuffer.slice(start, start + 1),
-      };
-    }
   }
 
   return undefined;

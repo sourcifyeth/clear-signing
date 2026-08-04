@@ -28,6 +28,28 @@ import type {
 } from "./descriptor.js";
 import type { LayoutNode } from "./types.js";
 
+function scopeLayoutFieldParams(params: any, basePath: string): any {
+  if (!params || typeof params !== "object") return params;
+  const result = { ...params };
+  for (const [key, value] of Object.entries(result)) {
+    if (key.endsWith("Path") && typeof value === "string") {
+      if (!value.startsWith("@.") && !value.startsWith("$.")) {
+        result[key] = basePath ? `${basePath}.${value}` : value;
+      }
+    }
+    if (key === "operation" && typeof value === "object" && value !== null) {
+      const expr = (value as any).expression;
+      if (typeof expr === "string" && !expr.startsWith("@.") && !expr.startsWith("$.")) {
+        result[key] = {
+          ...(value as any),
+          expression: basePath ? `${basePath}.${expr}` : expr,
+        };
+      }
+    }
+  }
+  return result;
+}
+
 function extractLayoutFields(
   node: LayoutNode,
   basePath: string,
@@ -45,7 +67,7 @@ function extractLayoutFields(
             path: childPath,
             label: field.label,
             format: field.format as DescriptorFieldFormatType,
-            params: field.params,
+            params: scopeLayoutFieldParams(field.params, basePath),
           });
         }
 
