@@ -248,3 +248,197 @@ describe("applyFieldFormats with layout", () => {
     expect((result.fields[1] as { label: string }).label).toBe("Value A");
   });
 });
+
+describe("decodeNode - bitfield", () => {
+  it("decodes single bits and multi-bit ranges correctly", () => {
+    // 0x81 = 1000 0001
+    // bit 7 = 1, bit 0 = 1, bit 1 = 0
+    // bits [3, 0] = 0001 = 1
+    // bits [7, 4] = 1000 = 8
+    // bits [7, 0] = 0x81 = 129
+    const buffer = hexToBytes("0x81");
+    const node: LayoutNode = {
+      type: "bitfield",
+      bytes: 1,
+      fields: [
+        { name: "flag7", bit: 7 },
+        { name: "flag0", bit: 0 },
+        { name: "flag1", bit: 1 },
+        { name: "lowNibble", bits: [3, 0] },
+        { name: "highNibble", bits: [7, 4] },
+        { name: "full", bits: [7, 0] },
+      ],
+    };
+
+    const ctx = {
+      buffer,
+      offset: 0,
+      depth: 0,
+      resolvedValues: new Map(),
+    };
+
+    const warning = decodeLayoutField(
+      node,
+      buffer,
+      "flags",
+      ctx.resolvedValues,
+    );
+    expect(warning).toBeUndefined();
+    expect(ctx.resolvedValues.get("flags.flag7")).toEqual({
+      type: "bool",
+      value: true,
+    });
+    expect(ctx.resolvedValues.get("flags.flag0")).toEqual({
+      type: "bool",
+      value: true,
+    });
+    expect(ctx.resolvedValues.get("flags.flag1")).toEqual({
+      type: "bool",
+      value: false,
+    });
+    expect(ctx.resolvedValues.get("flags.lowNibble")).toEqual({
+      type: "uint",
+      value: 1n,
+    });
+    expect(ctx.resolvedValues.get("flags.highNibble")).toEqual({
+      type: "uint",
+      value: 8n,
+    });
+    expect(ctx.resolvedValues.get("flags.full")).toEqual({
+      type: "uint",
+      value: 129n,
+    });
+  });
+
+  it("handles overlapping ranges", () => {
+    // 0xff = 1111 1111
+    const buffer = hexToBytes("0xff");
+    const node: LayoutNode = {
+      type: "bitfield",
+      bytes: 1,
+      fields: [
+        { name: "b0", bit: 0 },
+        { name: "b0", bit: 0 }, // Duplicate name overwrites
+        { name: "b01", bits: [1, 0] },
+      ],
+    };
+
+    const ctx = {
+      buffer,
+      offset: 0,
+      depth: 0,
+      resolvedValues: new Map(),
+    };
+
+    decodeLayoutField(node, buffer, "flags", ctx.resolvedValues);
+    expect(ctx.resolvedValues.get("flags.b0")).toEqual({
+      type: "bool",
+      value: true,
+    });
+    expect(ctx.resolvedValues.get("flags.b01")).toEqual({
+      type: "uint",
+      value: 3n,
+    });
+  });
+
+  it("honors endianness", () => {
+    // 0x0102
+    // BE -> val = 0x0102 = 258
+    // LE -> slice reversed -> [0x02, 0x01] -> val = 0x0201 = 513
+    const buffer = hexToBytes("0x0102");
+
+    // Test BE
+    const nodeBE: LayoutNode = {
+      type: "bitfield",
+      bytes: 2,
+      endian: "be",
+      fields: [{ name: "val", bits: [15, 0] }],
+    };
+    const ctxBE = { buffer, offset: 0, depth: 0, resolvedValues: new Map() };
+    decodeLayoutField(nodeBE, buffer, "flags", ctxBE.resolvedValues);
+    expect(ctxBE.resolvedValues.get("flags.val")).toEqual({
+      type: "uint",
+      value: 258n,
+    });
+
+    // Test LE
+    // NOTE: slice.reverse() mutates the slice in place, which is a view of buffer if we used subarray!
+    // But slice() returns a new array, so buffer shouldn't be mutated.
+    const nodeLE: LayoutNode = {
+      type: "bitfield",
+      bytes: 2,
+      endian: "le",
+      fields: [{ name: "val", bits: [15, 0] }],
+    };
+    const ctxLE = { buffer, offset: 0, depth: 0, resolvedValues: new Map() };
+    decodeLayoutField(nodeLE, buffer, "flags", ctxLE.resolvedValues);
+    expect(ctxLE.resolvedValues.get("flags.val")).toEqual({
+      type: "uint",
+      value: 513n,
+    });
+  });
+
+  it("returns INVALID_DESCRIPTOR for out-of-width-range and malformed bits", () => {
+    const buffer = hexToBytes("0x00");
+
+    // bit too high
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x", bit: 8 }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+
+    // bit negative
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x", bit: -1 }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+
+    // bits hi too high
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [8, 0] }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+
+    // bits lo > hi
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [2, 3] }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+
+    // bits negative
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [2, -1] }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+
+    // missing both bit and bits
+    expect(
+      decodeLayoutField(
+        { type: "bitfield", bytes: 1, fields: [{ name: "x" }] },
+        buffer,
+        "flags",
+        new Map(),
+      ),
+    ).toEqual({ code: "INVALID_DESCRIPTOR", message: expect.any(String) });
+  });
+});

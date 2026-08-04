@@ -1,18 +1,25 @@
 const fs = require('fs');
 
-let content = fs.readFileSync('test/layout.spec.ts', 'utf8');
-content = content.replace(/\{ uint: \{ bytes: (\d+) \} \}/g, '{ type: "uint", bytes: $1 }');
-content = content.replace(/\{ uint: \{ bytes: (\d+), endian: "(.*?)" \} \}/g, '{ type: "uint", bytes: $1, endian: "$2" }');
-content = content.replace(/\{ uint: \{ bytes: (\d+), mask: "(.*?)" \} \}/g, '{ type: "uint", bytes: $1, mask: "$2" }');
-content = content.replace(/\{ sequence: \{ element: /g, '{ type: "sequence", element: ');
-content = content.replace(/, count: (\d+) \} \}/g, ', count: $1 }');
-content = content.replace(/, countFrom: "(.*?)" \} \}/g, ', countFrom: "$2" }');
-content = content.replace(/\}; \} \}/g, '} }'); // match sequence closing? Actually let's just regex replace the key object and sequence manually.
+let testCode = fs.readFileSync('test/layout.spec.ts', 'utf8');
 
-// Since object is complex, let's just do simple replacements.
-content = content.replace(/\{ object: \{ fields: /g, '{ type: "object", fields: ');
-content = content.replace(/\} \}\]; \} \}/g, '} }]; }');
-// sequence without count
-content = content.replace(/\{ sequence: \{ element: (.*?)\} \}/g, '{ type: "sequence", element: $1 }');
+testCode = testCode.replace(/const warning = decodeLayoutField\(node, ctx, "flags"\);\n    expect\(warning\)\.toBeUndefined\(\);\n    expect\(ctx\.resolvedValues\.get/g, 'const warning = decodeLayoutField(node, buffer, "flags", ctx.resolvedValues);\n    expect(warning).toBeUndefined();\n    expect(ctx.resolvedValues.get');
 
-fs.writeFileSync('test/layout.spec.ts', content);
+testCode = testCode.replace(/decodeLayoutField\(node, ctx, "flags"\);\n    expect\(ctx\.resolvedValues/g, 'decodeLayoutField(node, buffer, "flags", ctx.resolvedValues);\n    expect(ctx.resolvedValues');
+
+testCode = testCode.replace(/decodeLayoutField\(nodeBE, ctxBE, "flags"\);\n    expect\(ctxBE\.resolvedValues/g, 'decodeLayoutField(nodeBE, buffer, "flags", ctxBE.resolvedValues);\n    expect(ctxBE.resolvedValues');
+
+testCode = testCode.replace(/decodeLayoutField\(nodeLE, ctxLE, "flags"\);\n    expect\(ctxLE\.resolvedValues/g, 'decodeLayoutField(nodeLE, buffer, "flags", ctxLE.resolvedValues);\n    expect(ctxLE.resolvedValues');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x", bit: 8 \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x", bit: 8 }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x", bit: -1 \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x", bit: -1 }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x", bits: \[8, 0\] \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [8, 0] }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x", bits: \[2, 3\] \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [2, 3] }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x", bits: \[2, -1\] \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x", bits: [2, -1] }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+testCode = testCode.replace(/decodeLayoutField\(\n        \{ type: "bitfield", bytes: 1, fields: \[\{ name: "x" \}\] \},\n        ctx\(\),\n        "flags"\n      \)/g, 'decodeLayoutField(\n        { type: "bitfield", bytes: 1, fields: [{ name: "x" }] },\n        buffer,\n        "flags",\n        new Map()\n      )');
+
+fs.writeFileSync('test/layout.spec.ts', testCode);

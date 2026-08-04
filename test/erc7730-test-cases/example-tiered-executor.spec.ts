@@ -49,16 +49,16 @@ describe("example-tiered-executor (Top-level Switch & Interaction)", () => {
     // data = encode(address, uint256)
 
     // We can just construct a synthetic calldata hex.
-    // execute(uint8,bytes) selector = 0xb61d27f6
+    // executeOperation(address target,uint8 op,address account,uint256 amount) selector = 0x512ccc67
     const actionHex =
       "0000000000000000000000000000000000000000000000000000000000000001";
     const addr =
       "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045";
     const amt =
-      "0000000000000000000000000000000000000000000000000000000000000100";
-
+      "0000000000000000000000000000000000000000000000000de0b6b3a7640000";
     const target =
       "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045";
+
     const calldata = "0x512ccc67" + target + actionHex + addr + amt;
 
     const tx: Transaction = {

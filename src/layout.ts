@@ -235,8 +235,55 @@ export function decodeNode(
       // it's returned by decodeNode above.
     }
   } else if (node.type === "bitfield") {
-    // Stage 5 stub
-    return warn("UNEXPECTED_LIB_ERROR", "bitfield layout not implemented");
+    const { bytes, endian, fields } = node;
+    if (ctx.offset + bytes > ctx.buffer.length) {
+      return warn("LAYOUT_DECODE_ERROR", "OOB read in bitfield");
+    }
+
+    const slice = ctx.buffer.slice(ctx.offset, ctx.offset + bytes);
+    ctx.offset += bytes;
+
+    if (endian === "le") {
+      slice.reverse();
+    }
+
+    const val = bytesToUnsignedBigInt(slice);
+    const bitWidth = bytes * 8;
+
+    for (const field of fields) {
+      if (field.bit !== undefined) {
+        if (field.bit < 0 || field.bit >= bitWidth) {
+          return warn(
+            "INVALID_DESCRIPTOR",
+            `Bit ${field.bit} out of range for ${bytes}-byte bitfield`,
+          );
+        }
+        const bitVal = (val >> BigInt(field.bit)) & 1n;
+        ctx.resolvedValues.set(
+          currentPath ? `${currentPath}.${field.name}` : field.name,
+          { type: "bool", value: bitVal === 1n },
+        );
+      } else if (field.bits !== undefined) {
+        const [hi, lo] = field.bits;
+        if (lo < 0 || hi >= bitWidth || lo > hi) {
+          return warn(
+            "INVALID_DESCRIPTOR",
+            `Bit range [${hi}, ${lo}] invalid for ${bytes}-byte bitfield`,
+          );
+        }
+        const mask = (1n << BigInt(hi - lo + 1)) - 1n;
+        const numVal = (val >> BigInt(lo)) & mask;
+        ctx.resolvedValues.set(
+          currentPath ? `${currentPath}.${field.name}` : field.name,
+          { type: "uint", value: numVal },
+        );
+      } else {
+        return warn(
+          "INVALID_DESCRIPTOR",
+          `Bitfield field ${field.name} must specify bit or bits`,
+        );
+      }
+    }
   } else if (node.type === "switch") {
     // Stage 4 stub
     return warn("UNEXPECTED_LIB_ERROR", "switch layout not implemented");
