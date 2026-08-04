@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERC-7730 Clear Signing Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --border: #334155;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --radius: 12px;
+            --font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-family);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem 0;
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .dropzone {
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 3rem;
+            text-align: center;
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+            cursor: pointer;
+            background: rgba(30, 41, 59, 0.5);
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--text-primary);
+        }
+
+        .tx-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .tx-header {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.02);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tx-intent {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        .tx-meta {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .badge {
+            background: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .fields-list {
+            padding: 0;
+            margin: 0;
+            list-style: none;
+        }
+
+        .field-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .field-item:last-child {
+            border-bottom: none;
+        }
+
+        .field-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .field-value {
+            font-size: 1rem;
+            font-family: monospace;
+            word-break: break-all;
+        }
+
+        .nested-calldata {
+            margin-top: 0.75rem;
+            border-left: 2px solid var(--accent);
+            padding-left: 1rem;
+        }
+        
+        .warning-box {
+            margin-top: 0.5rem;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+            border-radius: 6px;
+            padding: 0.75rem;
+            color: #fcd34d;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .icon {
+            width: 16px;
+            height: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <h1>Clear Signing Visualizer</h1>
+            <p class="subtitle">Drop your inception.json or test-out.json here to visualize the 7730 display model</p>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+            Drop JSON file here or click to select
+            <input type="file" id="fileInput" style="display: none" accept=".json" />
+        </div>
+
+        <div id="output" class="container"></div>
+    </div>
+
+    <script>
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const output = document.getElementById('output');
+
+        dropzone.addEventListener('click', () => fileInput.click());
+        
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    renderModel(data);
+                } catch (err) {
+                    alert('Invalid JSON file');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function renderModel(model) {
+            output.innerHTML = '';
+            
+            // Check if it's the root model (has intent or fields)
+            if (model.intent || model.fields || model.display) {
+                // If it has .display (like embeddedCalldata), pass that, otherwise pass model directly
+                const displayModel = model.display ? model.display : model;
+                output.appendChild(createCard(displayModel, model.metadata));
+            } else {
+                output.innerHTML = '<div class="warning-box">Invalid root model. Expecting an object with "intent" or "fields".</div>';
+            }
+        }
+
+        function createCard(displayModel, metadata = null, depth = 0) {
+            const card = document.createElement('div');
+            card.className = 'tx-card';
+
+            const header = document.createElement('div');
+            header.className = 'tx-header';
+            
+            const intent = document.createElement('div');
+            intent.className = 'tx-intent';
+            intent.textContent = displayModel.intent || displayModel.rawCalldataFallback?.selector || 'Unknown Intent';
+            
+            header.appendChild(intent);
+
+            if (metadata) {
+                const meta = document.createElement('div');
+                meta.className = 'tx-meta';
+                if (metadata.contractName) {
+                    const badge = document.createElement('span');
+                    badge.className = 'badge';
+                    badge.textContent = metadata.contractName;
+                    meta.appendChild(badge);
+                }
+                header.appendChild(meta);
+            }
+
+            card.appendChild(header);
+
+            if (displayModel.fields && displayModel.fields.length > 0) {
+                const list = document.createElement('ul');
+                list.className = 'fields-list';
+                
+                displayModel.fields.forEach(field => {
+                    list.appendChild(createField(field, depth));
+                });
+                
+                card.appendChild(list);
+            } else if (displayModel.rawCalldataFallback) {
+                const list = document.createElement('ul');
+                list.className = 'fields-list';
+                const li = document.createElement('li');
+                li.className = 'field-item';
+                li.innerHTML = `<div class="field-label">Raw Args</div><div class="field-value">${displayModel.rawCalldataFallback.args.join('<br>')}</div>`;
+                list.appendChild(li);
+                card.appendChild(list);
+            }
+
+            // Warnings
+            if (displayModel.warnings && displayModel.warnings.length > 0) {
+                displayModel.warnings.forEach(w => {
+                    const warn = document.createElement('div');
+                    warn.className = 'warning-box';
+                    warn.style.margin = '1rem';
+                    warn.innerHTML = `⚠️ <b>${w.code}</b>: ${w.message}`;
+                    card.appendChild(warn);
+                });
+            }
+
+            return card;
+        }
+
+        function createField(field, depth) {
+            const li = document.createElement('li');
+            li.className = 'field-item';
+
+            const label = document.createElement('div');
+            label.className = 'field-label';
+            label.textContent = field.label || 'Unnamed Field';
+            li.appendChild(label);
+
+            const val = document.createElement('div');
+            val.className = 'field-value';
+            
+            if (field.format === 'calldata' && field.embeddedCalldata && field.embeddedCalldata.display) {
+                val.textContent = field.value ? `${field.value.substring(0, 10)}...${field.value.slice(-8)}` : 'Embedded Calldata';
+                val.style.color = 'var(--text-secondary)';
+                li.appendChild(val);
+
+                const nested = document.createElement('div');
+                nested.className = 'nested-calldata';
+                nested.appendChild(createCard(field.embeddedCalldata.display, null, depth + 1));
+                li.appendChild(nested);
+            } else if (field.fields) {
+                // Group / Array format
+                val.textContent = `[ ${field.fields.length} items ]`;
+                li.appendChild(val);
+                
+                const nested = document.createElement('div');
+                nested.className = 'nested-calldata';
+                
+                field.fields.forEach((item, i) => {
+                    if (item.display) {
+                        const itemCard = createCard(item.display, null, depth + 1);
+                        nested.appendChild(itemCard);
+                    } else if (item.fields) {
+                        // Struct or group inside array
+                        const mockModel = { intent: `Item ${i}`, fields: item.fields };
+                        nested.appendChild(createCard(mockModel, null, depth + 1));
+                    } else {
+                        // Regular field inside a group
+                        const mockModel = { intent: item.label || `Item ${i}`, fields: [item] };
+                        nested.appendChild(createCard(mockModel, null, depth + 1));
+                    }
+                });
+                li.appendChild(nested);
+            } else {
+                val.textContent = field.value || 'N/A';
+                li.appendChild(val);
+            }
+
+            if (field.warning) {
+                const warn = document.createElement('div');
+                warn.className = 'warning-box';
+                warn.innerHTML = `⚠️ <b>${field.warning.code}</b>: ${field.warning.message}`;
+                li.appendChild(warn);
+            }
+
+            return li;
+        }
+    </script>
+</body>
+</html>
