@@ -185,6 +185,7 @@
         <div id="output" class="container"></div>
     </div>
 
+    <script src="data.js"></script>
     <script>
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
@@ -226,6 +227,10 @@
                 }
             };
             reader.readAsText(file);
+        }
+
+        if (window.__INCEPTION_DATA__) {
+            renderModel(window.__INCEPTION_DATA__);
         }
 
         function renderModel(model) {
