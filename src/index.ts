@@ -117,6 +117,8 @@ export async function format(
     return formatCalldata(
       tx,
       descriptor,
+      (chainId, to) =>
+        resolveCalldataDescriptor(chainId, to, opts?.descriptorResolverOptions),
       opts?.externalDataProvider,
       formatEmbeddedCalldata,
     );

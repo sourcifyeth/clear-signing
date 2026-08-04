@@ -21,6 +21,7 @@ import {
   stripStructuredRootPrefix,
   toArgumentValue,
 } from "./descriptor.js";
+import { resolveTopLevelSwitch } from "./interaction.js";
 import {
   bytesToAscii,
   bytesToUnsignedBigInt,
@@ -40,6 +41,10 @@ import { applyFieldFormats } from "./fields.js";
 export async function formatCalldata(
   tx: Transaction,
   descriptor: Descriptor,
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>,
   externalDataProvider?: ExternalDataProvider,
   formatEmbeddedCalldata?: FormatCalldata,
 ): Promise<DisplayModel> {
@@ -89,6 +94,29 @@ export async function formatCalldata(
     };
   }
 
+  if (format.switch) {
+    if (!resolveCalldataDescriptor) {
+      return {
+        rawCalldataFallback: rawPreviewFromCalldata(selector, calldata),
+        warnings: [
+          warn(
+            "EMBEDDED_CALLDATA_NOT_SUPPORTED",
+            "Cannot evaluate top-level switch interaction because no external descriptor resolver is available",
+          ),
+        ],
+      };
+    }
+    return resolveTopLevelSwitch(
+      tx,
+      descriptor,
+      format.switch,
+      decoded,
+      resolveCalldataDescriptor,
+      externalDataProvider,
+      formatEmbeddedCalldata,
+    );
+  }
+
   const resolvePath: BaseResolvePath = (path: string) => {
     if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
     if (path.startsWith("$."))
@@ -120,6 +148,7 @@ export async function formatCalldata(
     descriptor.metadata,
     externalDataProvider,
     formatEmbeddedCalldata,
+    resolveCalldataDescriptor,
   );
 
   if ("warnings" in result) {
@@ -278,7 +307,7 @@ export interface FunctionInput {
  *   "approve(address spender,uint256 value)"
  *   "submitOrder((address token,uint256 amount) order,bytes32 salt)"
  */
-function parseFunctionSignatureKey(
+export function parseFunctionSignatureKey(
   key: string,
 ): { inputs: FunctionInput[]; selector: Uint8Array } | undefined {
   const openParen = key.indexOf("(");
@@ -474,14 +503,16 @@ function staticHeadSize(input: FunctionInput): number {
 export function decodeArguments(
   inputs: FunctionInput[],
   calldata: Uint8Array,
+  hasSelector: boolean = true,
 ): DecodedArguments {
   const headSize = inputs.reduce((sum, input) => {
     return sum + (isDynamicInput(input) ? 32 : staticHeadSize(input));
   }, 0);
 
-  if (calldata.length < 4 + headSize) {
+  const offset = hasSelector ? 4 : 0;
+  if (calldata.length < offset + headSize) {
     throw new Error(
-      `calldata length ${calldata.length} too small (expected at least ${4 + headSize} bytes)`,
+      `calldata length ${calldata.length} too small (expected at least ${offset + headSize} bytes)`,
     );
   }
 
@@ -489,8 +520,8 @@ export function decodeArguments(
     values: new Map(),
     arrayLengths: new Map(),
   };
-  // Skip the 4-byte selector; offsets in data are relative to params start.
-  const data = calldata.slice(4);
+  // Skip the 4-byte selector (if present); offsets in data are relative to params start.
+  const data = hasSelector ? calldata.slice(4) : calldata;
   decodeComponents(inputs, data, 0, undefined, decoded);
   return decoded;
 }
@@ -634,4 +665,62 @@ function decodeWord(kind: string, word: Uint8Array): ArgumentValue {
   }
 
   return { type: "bytes", bytes: word };
+}
+
+export async function renderFormat(
+  format: DescriptorFormatSpec,
+  decoded: DecodedArguments,
+
+  tx: Transaction,
+  descriptor: Descriptor,
+  externalDataProvider?: ExternalDataProvider,
+  formatEmbeddedCalldata?: FormatCalldata,
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>,
+): Promise<DisplayModel> {
+  console.error("RENDER_FORMAT format.intent:", format.intent);
+  const resolvePath: BaseResolvePath = (
+    path: string,
+  ): ArgumentValue | undefined => {
+    if (path.startsWith("@.")) return resolveTransactionPath(path, tx);
+    if (path.startsWith("$."))
+      return toArgumentValue(resolveMetadataValue(descriptor.metadata, path));
+
+    const key = normalizeNegativeIndices(
+      stripStructuredRootPrefix(path),
+      decoded.arrayLengths,
+    );
+    if (key === undefined) return undefined;
+    return decoded.values.get(key);
+  };
+
+  const getArrayLength = (path: string): number => {
+    const key = normalizeNegativeIndices(
+      stripStructuredRootPrefix(path),
+      decoded.arrayLengths,
+    );
+    if (key === undefined) return 0;
+    return decoded.arrayLengths.get(key) ?? 0;
+  };
+
+  const definitions = descriptor.display?.definitions ?? {};
+  const result = await applyFieldFormats(
+    format,
+    definitions,
+    resolvePath,
+    getArrayLength,
+    tx.chainId,
+    descriptor.metadata,
+    externalDataProvider,
+    formatEmbeddedCalldata,
+    resolveCalldataDescriptor,
+  );
+
+  if ("warnings" in result) {
+    return { warnings: result.warnings };
+  }
+  console.error("FORMAT:", format);
+  return { intent: format.intent, fields: result.fields };
 }

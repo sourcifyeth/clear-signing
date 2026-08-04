@@ -6,6 +6,7 @@
  */
 
 import type {
+  Descriptor,
   DescriptorFieldEncryption,
   DescriptorFieldFormat,
   DescriptorFieldFormatType,
@@ -126,6 +127,10 @@ interface FieldContext {
   externalDataProvider?: ExternalDataProvider;
   formatEmbeddedCalldata?: FormatCalldata;
   layoutResolvedValues?: Map<string, ArgumentValue>;
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>;
 }
 
 /**
@@ -144,6 +149,10 @@ export async function applyFieldFormats(
   metadata: DescriptorMetadata | undefined,
   externalDataProvider?: ExternalDataProvider,
   formatEmbeddedCalldata?: FormatCalldata,
+  resolveCalldataDescriptor?: (
+    chainId: number,
+    to: string,
+  ) => Promise<{ descriptor?: Descriptor; warning?: Warning }>,
 ): Promise<
   | {
       fields: (DisplayField | DisplayFieldGroup)[];
@@ -214,6 +223,7 @@ export async function applyFieldFormats(
     externalDataProvider,
     formatEmbeddedCalldata,
     layoutResolvedValues,
+    resolveCalldataDescriptor,
   };
 
   const fields: (DisplayField | DisplayFieldGroup)[] = [];

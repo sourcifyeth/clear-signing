@@ -6,8 +6,6 @@ import { buildFilesystemResolverOpts } from "../utils.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-
-
 function buildOpts(): FormatOptions {
   return buildFilesystemResolverOpts(__dirname, {
     calldataDescriptorFiles: [

@@ -22,7 +22,17 @@ export function evaluateSwitchExpression(
   context: SwitchContext,
 ): ArgumentValue | undefined {
   if (typeof expr !== "string") {
-    // Stage 4 layout switch handling
+    if ("path" in expr && typeof expr.path === "string") {
+      const val = context.resolvePath(expr.path);
+      if (!val) return undefined;
+      let argVal = val;
+      if (val.type === "bytes-slice")
+        argVal = { type: "bytes", bytes: val.bytes };
+      if (expr.mask && argVal.type === "uint") {
+        return { type: "uint", value: argVal.value & BigInt(expr.mask) };
+      }
+      return argVal as ArgumentValue;
+    }
     return undefined;
   }
 
@@ -145,25 +155,40 @@ export function parseSwitchCase(
   if (caseVal === "reject") return { type: "reject" };
   if (typeof caseVal === "object" && caseVal !== null) {
     if ("layout" in caseVal)
-      return { type: "layout", layout: (caseVal as unknown).layout };
+      return {
+        type: "layout",
+        layout: (caseVal as { layout: LayoutNode }).layout,
+      };
     if ("switch" in caseVal)
-      return { type: "switch", switchDef: (caseVal as unknown).switch };
+      return {
+        type: "switch",
+        switchDef: (caseVal as { switch: DescriptorFieldSwitch }).switch,
+      };
     if ("format" in caseVal)
       return {
         type: "format",
-        format: (caseVal as unknown).format,
-        params: (caseVal as unknown).params,
+        format: (caseVal as { format: string }).format,
+        params: (caseVal as { params: DescriptorFieldFormatParams }).params,
       };
     if ("label" in caseVal)
       return {
         type: "terminal",
-        label: (caseVal as unknown).label,
-        intent: (caseVal as unknown).intent,
+        label: (caseVal as { label: string }).label,
+        intent: (caseVal as { intent: "info" | "warning" }).intent,
       };
 
     const keys = Object.keys(caseVal);
     if (keys.length === 1 && keys[0].startsWith("(")) {
-      const val = (caseVal as unknown)[keys[0]];
+      const val = (
+        caseVal as Record<
+          string,
+          | {
+              fields?: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+              intent?: "info" | "warning";
+            }
+          | undefined
+        >
+      )[keys[0]];
       return {
         type: "tuple",
         tupleSig: keys[0],
