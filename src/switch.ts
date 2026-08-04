@@ -1,5 +1,12 @@
 import type { ArgumentValue, ResolvePath } from "./descriptor.js";
-import type { DescriptorFieldSwitch, SwitchCaseValue } from "./types.js";
+import type {
+  DescriptorFieldSwitch,
+  SwitchCaseValue,
+  LayoutNode,
+  DescriptorFieldFormat,
+  DescriptorFieldGroup,
+  DescriptorFieldFormatParams,
+} from "./types.js";
 import { parseBigInt, hexToBytes, bytesEqual } from "./utils.js";
 
 export interface SwitchContext {
@@ -106,15 +113,64 @@ export function resolveSwitchCase(
   if (!exprValue) return undefined;
 
   for (const [caseKey, caseValue] of Object.entries(switchDef.cases)) {
-    if (caseKey === "default") continue;
+    if (caseKey === "$default") continue;
     if (matchSwitchCase(exprValue, caseKey)) {
       return caseValue;
     }
   }
 
-  if ("default" in switchDef.cases) {
-    return switchDef.cases["default"];
+  if ("$default" in switchDef.cases) {
+    return switchDef.cases["$default"];
   }
 
+  return undefined;
+}
+
+export type ParsedSwitchCase =
+  | { type: "reject" }
+  | { type: "layout"; layout: LayoutNode }
+  | { type: "switch"; switchDef: DescriptorFieldSwitch }
+  | { type: "format"; format: string; params?: DescriptorFieldFormatParams }
+  | { type: "terminal"; label: string; intent?: "info" | "warning" }
+  | {
+      type: "tuple";
+      tupleSig: string;
+      fields: Array<DescriptorFieldFormat | DescriptorFieldGroup>;
+      intent?: "info" | "warning";
+    };
+
+export function parseSwitchCase(
+  caseVal: SwitchCaseValue,
+): ParsedSwitchCase | undefined {
+  if (caseVal === "reject") return { type: "reject" };
+  if (typeof caseVal === "object" && caseVal !== null) {
+    if ("layout" in caseVal)
+      return { type: "layout", layout: (caseVal as unknown).layout };
+    if ("switch" in caseVal)
+      return { type: "switch", switchDef: (caseVal as unknown).switch };
+    if ("format" in caseVal)
+      return {
+        type: "format",
+        format: (caseVal as unknown).format,
+        params: (caseVal as unknown).params,
+      };
+    if ("label" in caseVal)
+      return {
+        type: "terminal",
+        label: (caseVal as unknown).label,
+        intent: (caseVal as unknown).intent,
+      };
+
+    const keys = Object.keys(caseVal);
+    if (keys.length === 1 && keys[0].startsWith("(")) {
+      const val = (caseVal as unknown)[keys[0]];
+      return {
+        type: "tuple",
+        tupleSig: keys[0],
+        fields: val?.fields ?? [],
+        intent: val?.intent,
+      };
+    }
+  }
   return undefined;
 }

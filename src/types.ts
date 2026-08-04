@@ -239,8 +239,15 @@ export interface DisplayField {
  */
 export interface DisplayFieldGroup {
   label?: string;
-  fields: DisplayField[];
+  fields: (DisplayField | DisplayFieldGroup)[];
   warning?: Warning;
+  value?: never;
+  fieldType?: never;
+  format?: never;
+  rawAddress?: never;
+  tokenAddress?: never;
+  embeddedCalldata?: never;
+  separator?: never;
 }
 
 /**
@@ -590,41 +597,37 @@ export interface GitHubSource {
 }
 
 export type LayoutNode =
-  | { uint: { bytes: number; endian?: "be" | "le"; mask?: string } }
-  | { bytes: { length?: string | number; lengthFrom?: string } }
-  | { address: Record<string, never> }
-  | { bool: Record<string, never> }
+  | { type: "uint"; bytes: number; endian?: "be" | "le"; mask?: string }
+  | { type: "bytes"; length?: string | number; lengthFrom?: string }
+  | { type: "address" }
+  | { type: "bool" }
   | {
-      bitfield: {
-        bytes: number;
-        endian?: "be" | "le";
-        fields: Array<{ name: string; bit?: number; bits?: [number, number] }>;
-      };
+      type: "bitfield";
+      bytes: number;
+      endian?: "be" | "le";
+      fields: Array<{ name: string; bit?: number; bits?: [number, number] }>;
     }
   | {
-      object: {
-        fields: Array<{
-          name: string;
-          schema?: LayoutNode;
-          label?: string;
-          format?: string;
-          params?: DescriptorFieldFormatParams;
-        }>;
-      };
+      type: "object";
+      fields: Array<{
+        name: string;
+        schema?: LayoutNode;
+        label?: string;
+        format?: string;
+        params?: DescriptorFieldFormatParams;
+      }>;
     }
   | {
-      sequence: {
-        element: LayoutNode;
-        count?: string | number;
-        countFrom?: string;
-      };
+      type: "sequence";
+      element: LayoutNode;
+      count?: string | number;
+      countFrom?: string;
     }
   | {
-      switch: {
-        expression: LayoutNode;
-        payloadFrom?: string;
-        cases: Record<string, LayoutNode>;
-      };
+      type: "switch";
+      expression: LayoutNode;
+      payloadFrom?: string;
+      cases: Record<string, LayoutNode>;
     };
 
 export interface DescriptorFieldSwitch {

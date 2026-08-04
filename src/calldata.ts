@@ -260,7 +260,7 @@ function findFormatBySelector(
 }
 
 /** ABI function input parameter. */
-interface FunctionInput {
+export interface FunctionInput {
   name: string;
   type: string;
   components?: FunctionInput[];
@@ -334,7 +334,7 @@ function splitTopLevel(paramsStr: string): string[] {
   return parts;
 }
 
-function parseParamList(paramsStr: string): FunctionInput[] {
+export function parseParamList(paramsStr: string): FunctionInput[] {
   return splitTopLevel(paramsStr).map(parseParam);
 }
 
@@ -415,7 +415,7 @@ function parseArrayType(
 }
 
 /** Decoded calldata: name-based value lookup and array lengths. */
-interface DecodedArguments {
+export interface DecodedArguments {
   values: Map<string, ArgumentValue>;
   arrayLengths: Map<string, number>;
 }
@@ -471,7 +471,7 @@ function staticHeadSize(input: FunctionInput): number {
  * Supports all ABI types: static/dynamic tuples, dynamic arrays (T[]),
  * fixed-size arrays (T[k]), nested arrays, bytes/string, and bytesN.
  */
-function decodeArguments(
+export function decodeArguments(
   inputs: FunctionInput[],
   calldata: Uint8Array,
 ): DecodedArguments {

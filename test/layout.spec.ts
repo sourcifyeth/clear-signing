@@ -57,14 +57,14 @@ describe("decodeNode", () => {
     const buf = hexToBytes("0xaabbccdd");
 
     // BE
-    decodeLayoutField({ uint: { bytes: 4 } }, buf, "val1", resolved);
+    decodeLayoutField({ type: "uint", bytes: 4 }, buf, "val1", resolved);
     expect(
       (resolved.get("val1") as { type: "uint"; value: bigint }).value,
     ).toBe(0xaabbccddn);
 
     // LE
     decodeLayoutField(
-      { uint: { bytes: 4, endian: "le" } },
+      { type: "uint", bytes: 4, endian: "le" },
       buf,
       "val2",
       resolved,
@@ -75,7 +75,7 @@ describe("decodeNode", () => {
 
     // Mask (0x00ff00ff)
     decodeLayoutField(
-      { uint: { bytes: 4, mask: "0x00ff00ff" } },
+      { type: "uint", bytes: 4, mask: "0x00ff00ff" },
       buf,
       "val3",
       resolved,
@@ -89,7 +89,7 @@ describe("decodeNode", () => {
     const resolved = new Map<string, ArgumentValue>();
     const buf = hexToBytes("0xaa");
     const warning = decodeLayoutField(
-      { uint: { bytes: 4 } },
+      { type: "uint", bytes: 4 },
       buf,
       "val1",
       resolved,
@@ -103,12 +103,11 @@ describe("decodeNode", () => {
     const buf = hexToBytes("0xaa1111111111111111111111111111111111111111"); // 1 byte + 20 bytes
 
     const node: LayoutNode = {
-      object: {
-        fields: [
-          { name: "a", schema: { uint: { bytes: 1 } } },
-          { name: "b", schema: { address: {} } },
-        ],
-      },
+      type: "object",
+      fields: [
+        { name: "a", schema: { type: "uint", bytes: 1 } },
+        { name: "b", schema: { type: "address" } },
+      ],
     };
 
     decodeLayoutField(node, buf, "obj", resolved);
@@ -124,10 +123,9 @@ describe("decodeNode", () => {
     const resolved = new Map<string, ArgumentValue>();
     const buf = hexToBytes("0xaaabbb");
     const node: LayoutNode = {
-      sequence: {
-        element: { uint: { bytes: 1 } },
-        count: 3,
-      },
+      type: "sequence",
+      element: { type: "uint", bytes: 1 },
+      count: 3,
     };
     const warning = decodeLayoutField(node, buf, "seq", resolved);
     expect(warning).toBeUndefined();
@@ -148,9 +146,8 @@ describe("decodeNode", () => {
     const resolved = new Map<string, ArgumentValue>();
     const buf = hexToBytes("0xaaabbbcc"); // 4 bytes
     const node: LayoutNode = {
-      sequence: {
-        element: { uint: { bytes: 1 } },
-      },
+      type: "sequence",
+      element: { type: "uint", bytes: 1 },
     };
     const warning = decodeLayoutField(node, buf, "seq", resolved);
     expect(warning).toBeUndefined();
@@ -172,17 +169,18 @@ describe("decodeNode", () => {
     const resolved = new Map<string, ArgumentValue>();
     const buf = hexToBytes("0x02aabb");
     const node: LayoutNode = {
-      object: {
-        fields: [
-          { name: "len", schema: { uint: { bytes: 1 } } },
-          {
-            name: "items",
-            schema: {
-              sequence: { element: { uint: { bytes: 1 } }, countFrom: "len" },
-            },
+      type: "object",
+      fields: [
+        { name: "len", schema: { type: "uint", bytes: 1 } },
+        {
+          name: "items",
+          schema: {
+            type: "sequence",
+            element: { type: "uint", bytes: 1 },
+            countFrom: "len",
           },
-        ],
-      },
+        },
+      ],
     };
     const warning = decodeLayoutField(node, buf, "obj", resolved);
     expect(warning).toBeUndefined();
@@ -206,9 +204,8 @@ describe("applyFieldFormats with layout", () => {
           label: "My Layout Anchor",
           path: "$.data",
           layout: {
-            object: {
-              fields: [{ name: "a", schema: { uint: { bytes: 1 } } }],
-            },
+            type: "object",
+            fields: [{ name: "a", schema: { type: "uint", bytes: 1 } }],
           },
         },
         {

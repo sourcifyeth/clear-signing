@@ -96,8 +96,8 @@ export function decodeNode(
     return warn("RECURSION_LIMIT_EXCEEDED", "Layout depth exceeded");
   }
 
-  if ("uint" in node) {
-    const { bytes, endian, mask } = node.uint;
+  if (node.type === "uint") {
+    const { bytes, endian, mask } = node;
     if (ctx.offset + bytes > ctx.buffer.length) {
       return warn("LAYOUT_DECODE_ERROR", "OOB read in uint");
     }
@@ -116,7 +116,7 @@ export function decodeNode(
     }
 
     ctx.resolvedValues.set(currentPath, { type: "uint", value: val });
-  } else if ("address" in node) {
+  } else if (node.type === "address") {
     if (ctx.offset + 20 > ctx.buffer.length) {
       return warn("LAYOUT_DECODE_ERROR", "OOB read in address");
     }
@@ -125,7 +125,7 @@ export function decodeNode(
     ctx.offset += 20;
 
     ctx.resolvedValues.set(currentPath, { type: "address", bytes: slice });
-  } else if ("bool" in node) {
+  } else if (node.type === "bool") {
     if (ctx.offset + 1 > ctx.buffer.length) {
       return warn("LAYOUT_DECODE_ERROR", "OOB read in bool");
     }
@@ -134,8 +134,8 @@ export function decodeNode(
     ctx.offset += 1;
 
     ctx.resolvedValues.set(currentPath, { type: "bool", value: val });
-  } else if ("bytes" in node) {
-    const { length, lengthFrom } = node.bytes;
+  } else if (node.type === "bytes") {
+    const { length, lengthFrom } = node;
     let lenToRead = 0;
 
     if (length !== undefined) {
@@ -159,6 +159,11 @@ export function decodeNode(
     }
 
     if (ctx.offset + lenToRead > ctx.buffer.length) {
+      console.log("OOB bytes: ", {
+        lenToRead,
+        offset: ctx.offset,
+        bufLen: ctx.buffer.length,
+      });
       return warn("LAYOUT_DECODE_ERROR", "OOB read in bytes");
     }
 
@@ -166,8 +171,8 @@ export function decodeNode(
     ctx.offset += lenToRead;
 
     ctx.resolvedValues.set(currentPath, { type: "bytes", bytes: slice });
-  } else if ("object" in node) {
-    const { fields } = node.object;
+  } else if (node.type === "object") {
+    const { fields } = node;
 
     for (const field of fields) {
       if (field.schema) {
@@ -180,8 +185,8 @@ export function decodeNode(
         if (warning) return warning;
       }
     }
-  } else if ("sequence" in node) {
-    const { element, count, countFrom } = node.sequence;
+  } else if (node.type === "sequence") {
+    const { element, count, countFrom } = node;
     let len = -1;
 
     if (count !== undefined) {
@@ -229,10 +234,10 @@ export function decodeNode(
       // If the buffer was exactly exhausted, good. If the element decode caused an OOB error,
       // it's returned by decodeNode above.
     }
-  } else if ("bitfield" in node) {
+  } else if (node.type === "bitfield") {
     // Stage 5 stub
     return warn("UNEXPECTED_LIB_ERROR", "bitfield layout not implemented");
-  } else if ("switch" in node) {
+  } else if (node.type === "switch") {
     // Stage 4 stub
     return warn("UNEXPECTED_LIB_ERROR", "switch layout not implemented");
   }

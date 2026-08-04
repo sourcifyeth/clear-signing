@@ -25,8 +25,65 @@ import type {
   BytesSliceValue,
   ResolvePath,
 } from "./descriptor.js";
+import type { LayoutNode } from "./types.js";
+
+function extractLayoutFields(
+  node: LayoutNode,
+  basePath: string,
+  resolvedValues: Map<string, ArgumentValue>,
+): Array<DescriptorFieldFormat> {
+  const result: Array<DescriptorFieldFormat> = [];
+
+  if (node.type === "object") {
+    for (const field of node.fields) {
+      if (field.schema) {
+        const childPath = basePath ? `${basePath}.${field.name}` : field.name;
+
+        if (field.label || field.format || field.params) {
+          result.push({
+            path: childPath,
+            label: field.label,
+            format: field.format as DescriptorFieldFormatType,
+            params: field.params,
+          });
+        }
+
+        result.push(
+          ...extractLayoutFields(field.schema, childPath, resolvedValues),
+        );
+      }
+    }
+  } else if (node.type === "sequence") {
+    let i = 0;
+    while (true) {
+      const childPath = basePath ? `${basePath}.[${i}]` : `[${i}]`;
+      let hasChild = false;
+      for (const key of resolvedValues.keys()) {
+        if (key === childPath || key.startsWith(childPath + ".")) {
+          hasChild = true;
+          break;
+        }
+      }
+      if (!hasChild) break;
+
+      const elementFields = extractLayoutFields(
+        node.element,
+        childPath,
+        resolvedValues,
+      );
+      if (elementFields.length > 0) {
+        result.push(...elementFields);
+      }
+      i++;
+    }
+  }
+
+  return result;
+}
+
 import { decodeLayoutField, layoutSourceBuffer } from "./layout.js";
-import { resolveSwitchCase } from "./switch.js";
+import { resolveSwitchCase, parseSwitchCase } from "./switch.js";
+import { parseParamList, decodeArguments } from "./calldata.js";
 import {
   argumentValueEquals,
   argumentValueToBytes,
@@ -61,12 +118,14 @@ export type GetArrayLength = (path: string) => number;
 interface FieldContext {
   definitions: Record<string, DescriptorFieldFormat>;
   resolvePath: ResolvePath;
+  baseResolvePath: BaseResolvePath;
   getArrayLength: GetArrayLength;
   chainId: number | undefined;
   metadata: DescriptorMetadata | undefined;
   renderedValues: Map<string, string>;
   externalDataProvider?: ExternalDataProvider;
   formatEmbeddedCalldata?: FormatCalldata;
+  layoutResolvedValues?: Map<string, ArgumentValue>;
 }
 
 /**
@@ -147,12 +206,14 @@ export async function applyFieldFormats(
   const ctx: FieldContext = {
     definitions,
     resolvePath: sliceResolvePath,
+    baseResolvePath: baseLayoutResolvePath,
     getArrayLength,
     chainId,
     metadata,
     renderedValues,
     externalDataProvider,
     formatEmbeddedCalldata,
+    layoutResolvedValues,
   };
 
   const fields: (DisplayField | DisplayFieldGroup)[] = [];
@@ -225,7 +286,9 @@ async function processArrayField(
 async function processSingleField(
   fieldSpec: DescriptorFieldFormat,
   ctx: FieldContext,
-): Promise<{ field: DisplayField | null } | { warnings: Warning[] }> {
+): Promise<
+  { field: DisplayField | DisplayFieldGroup | null } | { warnings: Warning[] }
+> {
   const { merged, warnings: defWarnings } = mergeDefinitions(
     fieldSpec,
     ctx.definitions,
@@ -306,7 +369,16 @@ async function processSingleField(
       };
     }
 
-    if (caseMatch === "reject") {
+    const parsedCase = parseSwitchCase(caseMatch);
+    if (!parsedCase) {
+      return {
+        warnings: [
+          warn("UNEXPECTED_LIB_ERROR", "Switch case value could not be parsed"),
+        ],
+      };
+    }
+
+    if (parsedCase.type === "reject") {
       return {
         warnings: [
           warn(
@@ -315,46 +387,139 @@ async function processSingleField(
           ),
         ],
       };
-    }
+    } else if (parsedCase.type === "format") {
+      const newSpec: DescriptorFieldFormat = {
+        ...fieldSpec,
+        format: parsedCase.format as DescriptorFieldFormatType,
+        params: { ...fieldSpec.params, ...parsedCase.params },
+      };
+      delete newSpec.switch;
+      return processSingleField(newSpec, ctx);
+    } else if (parsedCase.type === "terminal") {
+      const intent = parsedCase.intent;
+      const warning =
+        typeof intent === "string" &&
+        (intent === "info" || intent === "warning")
+          ? warn("INTERACTION_INTENT", intent)
+          : undefined;
+      return {
+        field: {
+          label: parsedCase.label,
+          value: "",
+          fieldType: "string",
+          format: "raw",
+          ...(warning && { warning }),
+        },
+      };
+    } else if (parsedCase.type === "tuple") {
+      const intent = parsedCase.intent;
+      const warning =
+        typeof intent === "string" &&
+        (intent === "info" || intent === "warning")
+          ? warn("INTERACTION_INTENT", intent)
+          : undefined;
 
-    if (typeof caseMatch === "object") {
-      if ("format" in caseMatch) {
-        const newSpec: DescriptorFieldFormat = {
-          ...fieldSpec,
-          format: caseMatch.format as DescriptorFieldFormatType,
-          params: { ...fieldSpec.params, ...caseMatch.params },
+      const inputs = parseParamList(parsedCase.tupleSig);
+
+      const argValue = coerceResolvedValue(resolvedValue, "raw");
+      const calldataBytes =
+        argValue.type === "bytes" ? argValue.bytes : new Uint8Array();
+
+      try {
+        const decoded = decodeArguments(inputs, calldataBytes);
+        const tupleFormat: DescriptorFormatSpec = { fields: parsedCase.fields };
+
+        const tupleResolvePath: BaseResolvePath = (path: string) => {
+          if (
+            path.startsWith("@.") ||
+            path.startsWith("#.") ||
+            path.startsWith("$.")
+          ) {
+            return ctx.baseResolvePath(path);
+          }
+          const stripped = stripStructuredRootPrefix(path);
+          const rootMatch = stripped.match(/^([a-zA-Z0-9_]+)/);
+          if (rootMatch) {
+            const rootName = rootMatch[1];
+            if (decoded.values.has(rootName)) {
+              return decoded.values.get(rootName);
+            }
+          }
+          return ctx.baseResolvePath(path);
         };
-        delete newSpec.switch;
-        return processSingleField(newSpec, ctx);
-      } else if ("label" in caseMatch && typeof caseMatch.label === "string") {
-        const intent = caseMatch.intent;
-        const warning =
-          typeof intent === "string" &&
-          (intent === "info" || intent === "warning")
-            ? warn("INTERACTION_INTENT", intent)
-            : undefined;
+        const tupleGetArrayLength = (path: string) => {
+          const stripped = stripStructuredRootPrefix(path);
+          const rootMatch = stripped.match(/^([a-zA-Z0-9_]+)/);
+          if (rootMatch) {
+            const rootName = rootMatch[1];
+            if (decoded.arrayLengths.has(rootName)) {
+              return decoded.arrayLengths.get(rootName) || 0;
+            }
+          }
+          return ctx.getArrayLength(path);
+        };
+
+        const subResult = await applyFieldFormats(
+          tupleFormat,
+          ctx.definitions,
+          tupleResolvePath,
+          tupleGetArrayLength,
+          ctx.chainId,
+          ctx.metadata,
+          ctx.externalDataProvider,
+          ctx.formatEmbeddedCalldata,
+        );
+        if ("warnings" in subResult) return subResult;
+
         return {
           field: {
-            label: caseMatch.label,
-            value: "",
-            fieldType: "string",
-            format: "raw",
+            ...(merged.label && { label: merged.label }), // Optional group label
+            fields: subResult.fields,
             ...(warning && { warning }),
           },
         };
-      } else {
+      } catch {
         return {
           warnings: [
             warn(
-              "UNEXPECTED_LIB_ERROR",
-              "Nested switch or layout cases are not supported in field definitions",
+              "LAYOUT_DECODE_ERROR",
+              "Failed to decode tuple layout for switch case",
             ),
           ],
         };
       }
+    } else if (parsedCase.type === "layout") {
+      // Decode layout and then process remaining fields? Wait, a nested switch with {layout} inside a single field is unsupported?
+      return {
+        warnings: [
+          warn(
+            "UNEXPECTED_LIB_ERROR",
+            "Nested layout cases inside fields are not supported",
+          ),
+        ],
+      };
     }
   }
 
+  if (merged.layout && !merged.format) {
+    if (ctx.layoutResolvedValues) {
+      const extracted = extractLayoutFields(
+        merged.layout,
+        stripStructuredRootPrefix(merged.path ?? ""),
+        ctx.layoutResolvedValues,
+      );
+      if (extracted.length > 0) {
+        const processedExtracted = await processFlatFields(extracted, ctx);
+        return {
+          field: {
+            ...(merged.label && { label: merged.label }),
+            fields:
+              "fields" in processedExtracted ? processedExtracted.fields : [],
+          },
+        };
+      }
+    }
+  }
   const effectiveFormat = merged.format ?? "raw";
 
   // Convert bytes-slice to a typed ArgumentValue based on the field format,
@@ -469,12 +634,12 @@ async function processGroupArrayPath(
     };
   }
 
-  const allFields: DisplayField[] = [];
+  const allFields: Array<DisplayField | DisplayFieldGroup> = [];
   for (let i = 0; i < length; i++) {
     const prefix = `${basePath}.[${i}]`;
     const scopedResolvePath: ResolvePath = (path: string) => {
       if (path.startsWith("@.") || path.startsWith("$.")) {
-        return ctx.resolvePath(path);
+        return ctx.baseResolvePath(path);
       }
       return ctx.resolvePath(`${prefix}.${stripStructuredRootPrefix(path)}`);
     };
@@ -543,7 +708,7 @@ async function processChildArrayPaths(
     }
 
     // Bundled: pair children by index — a0[0] a1[0] a0[1] a1[1] ...
-    const allFields: DisplayField[] = [];
+    const allFields: Array<DisplayField | DisplayFieldGroup> = [];
     for (let i = 0; i < first; i++) {
       const result = await processFlatFields(
         expandArrayIndex(childFields, i),
@@ -558,7 +723,7 @@ async function processChildArrayPaths(
   }
 
   // Sequential (default): iterate each child array fully — a0[0] a0[1] ... a1[0] a1[1] ...
-  const allFields: DisplayField[] = [];
+  const allFields: Array<DisplayField | DisplayFieldGroup> = [];
   for (const child of childFields) {
     if (isFieldGroup(child)) {
       return {
@@ -606,7 +771,7 @@ async function processStructGroup(
         ...ctx,
         resolvePath: (path: string) => {
           if (path.startsWith("@.") || path.startsWith("$.")) {
-            return ctx.resolvePath(path);
+            return ctx.baseResolvePath(path);
           }
           return ctx.resolvePath(
             `${prefix}.${stripStructuredRootPrefix(path)}`,
@@ -636,8 +801,10 @@ function groupHasArrayChildren(group: DescriptorFieldGroup): boolean {
 async function processFlatFields(
   fieldSpecs: (DescriptorFieldFormat | DescriptorFieldGroup)[],
   ctx: FieldContext,
-): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
-  const fields: DisplayField[] = [];
+): Promise<
+  { fields: Array<DisplayField | DisplayFieldGroup> } | { warnings: Warning[] }
+> {
+  const fields: Array<DisplayField | DisplayFieldGroup> = [];
 
   for (const fieldSpec of fieldSpecs) {
     if (isFieldGroup(fieldSpec)) {
@@ -709,8 +876,10 @@ async function iterateArrayField(
   field: DescriptorFieldFormat,
   length: number,
   ctx: FieldContext,
-): Promise<{ fields: DisplayField[] } | { warnings: Warning[] }> {
-  const fields: DisplayField[] = [];
+): Promise<
+  { fields: Array<DisplayField | DisplayFieldGroup> } | { warnings: Warning[] }
+> {
+  const fields: Array<DisplayField | DisplayFieldGroup> = [];
   for (let i = 0; i < length; i++) {
     const indexed = expandFieldForIndex(field, i);
     const result = await processSingleField(indexed, ctx);

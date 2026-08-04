@@ -1319,7 +1319,7 @@ function resolveOperationParam(
   }
 
   for (const [caseKey, caseValue] of Object.entries(op.cases)) {
-    if (caseKey === "default") continue;
+    if (caseKey === "default" || caseKey === "$default") continue;
     if (matchSwitchCase(exprValue, caseKey)) {
       return {
         operation: caseValue as
@@ -1330,6 +1330,17 @@ function resolveOperationParam(
           | "CALLCODE",
       };
     }
+  }
+
+  if ("$default" in op.cases) {
+    return {
+      operation: op.cases["$default"] as
+        | "CALL"
+        | "DELEGATECALL"
+        | "CREATE"
+        | "CREATE2"
+        | "CALLCODE",
+    };
   }
 
   if ("default" in op.cases) {
