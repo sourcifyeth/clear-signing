@@ -7,7 +7,7 @@ This library transforms raw transaction calldata and EIP-712 typed data into hum
 Designed to drop into wallet codebases:
 
 - Runs on modern browsers, Node.js (≥22), and React Native (ESM + CJS).
-- Single runtime dependency: [`@noble/hashes`](https://github.com/paulmillr/noble-hashes).
+- Two runtime dependencies: [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) and [`@noble/curves`](https://github.com/paulmillr/noble-curves).
 - Pure formatting: No RPC client, no token/chain/ENS fetching; external data is delegated to the wallet via [`ExternalDataProvider`](#externaldataprovider).
 - No internal caching: The caller controls when descriptors and indexes are fetched.
 
@@ -315,6 +315,41 @@ const result = await format(tx, {
 ```
 
 Trust is delegated entirely to the wallet. The library never decides which contracts are trustworthy.
+
+### Attestations (ERC-8176)
+
+A descriptor controls what the user sees before they sign, so a wallet must not use unreviewed descriptors. [ERC-8176](https://github.com/ethereum/ERCs/pull/1576) adds a review layer: auditors attest each descriptor with an [EAS](https://attest.org) offchain attestation, and the registry stores the attestation files next to the descriptor (`registry/<project>/sigs/`). See the registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors) directory for the audit guidelines and the auditor profiles.
+
+Add an `attestations` policy to `descriptorResolverOptions` to enforce this review layer. The library then accepts a resolved descriptor only when one of your trusted auditors has a valid attestation over it:
+
+```typescript
+const result = await format(tx, {
+  descriptorResolverOptions: {
+    type: "github",
+    index,
+    attestations: {
+      // Auditor addresses your wallet trusts — see the registry's auditors/ directory.
+      trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
+      // Recommended: report revocations from the EAS contract. See GUIDE.md.
+      checkRevocation: async (attester, uid) => {
+        /* return true when getRevokeOffchain(attester, uid) is non-zero */
+        return false;
+      },
+    },
+  },
+});
+```
+
+For each resolved descriptor the library computes the ERC-8176 descriptor hash (keccak256 of the RFC 8785 canonical JSON of the includes-resolved descriptor), fetches each trusted attester's attestation from the registry's `sigs/` directory, and verifies it offline: canonical schema UID, attested hash, expiration, EIP-712 signature, and attestation UID. Revocation state lives on-chain, so that check is delegated to the wallet through `checkRevocation`. When no trusted attestation is valid, the result carries a `NO_TRUSTED_ATTESTATION` warning and (for calldata) the `rawCalldataFallback`.
+
+**Formatting without an `attestations` policy is for testing only.** Without it, the library uses registry descriptors without any review check. Do not ship that configuration in production.
+
+Notes:
+
+- Bundled trusted-token descriptors (`trustedTokens`) are not gated — the wallet already vouches for those contracts directly.
+- A custom resolver must implement the optional `DescriptorResolver.fetchAttestation` to satisfy an attestation policy; otherwise every resolution fails with `ATTESTATIONS_NOT_SUPPORTED`. The GitHub and filesystem resolvers implement it out of the box.
+- The building blocks are exported for custom flows: `computeDescriptorHash(descriptor)`, `verifyAttestation(attestation, descriptorHash, options?)`, and `attestationPathForDescriptor(descriptorPath, attester)`.
+- Only EAS offchain attestations (version 2) with EOA signatures are supported. Onchain attestations and ERC-1271 contract attesters need chain access and are out of scope.
 
 ### Display Model
 

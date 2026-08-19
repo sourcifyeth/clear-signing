@@ -54,6 +54,11 @@ export {
   resolveTypedDataDescriptor,
   mergeDescriptors,
 } from "./resolver.js";
+export {
+  attestationPathForDescriptor,
+  computeDescriptorHash,
+  verifyAttestation,
+} from "./attestations.js";
 
 /** EIP-712 utility helpers. */
 export const eip712 = {

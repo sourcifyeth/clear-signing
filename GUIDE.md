@@ -67,7 +67,72 @@ const trustedTokens: TrustedTokens = {
 const descriptorResolverOptions = { type: "github", index, trustedTokens };
 ```
 
-## 4. Build the `ExternalDataProvider`
+## 4. Set the attestation policy
+
+A descriptor controls what the user sees before they sign. A wrong or
+malicious descriptor can hide the real effect of a transaction. For this
+reason, do not use registry descriptors without a review check in production.
+
+[ERC-8176](https://github.com/ethereum/ERCs/pull/1576) supplies that check:
+auditors review each descriptor and attest it with an EAS offchain
+attestation. The registry stores the attestation files next to the descriptor.
+The registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors)
+directory contains the audit guidelines and a profile for each auditor, keyed
+by attester address.
+
+Select the auditors your wallet trusts and set the `attestations` policy on
+the resolver options. The library then rejects every registry descriptor that
+does not carry a valid attestation from one of them (the result gets a
+`NO_TRUSTED_ATTESTATION` warning and, for calldata, the raw fallback):
+
+```typescript
+const descriptorResolverOptions = {
+  type: "github",
+  index,
+  trustedTokens,
+  attestations: {
+    // Attester addresses from the registry's auditors/ directory,
+    // lowercase or EIP-55 checksummed.
+    trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
+    checkRevocation,
+  },
+};
+```
+
+The library verifies each attestation offline: schema, descriptor hash,
+expiration, and EIP-712 signature. Revocation state lives on the EAS contract
+on Ethereum mainnet, so the wallet supplies that check — the same delegation
+pattern as the `ExternalDataProvider`:
+
+```typescript
+// The canonical EAS contract on Ethereum mainnet.
+const EAS_ADDRESS = "0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587";
+
+const checkRevocation = async (attester: string, uid: string) => {
+  // getRevokeOffchain returns the revocation time, or 0 when not revoked.
+  const revokedAt = await readContract({
+    address: EAS_ADDRESS,
+    abi: parseAbi([
+      "function getRevokeOffchain(address revoker, bytes32 data) view returns (uint64)",
+    ]),
+    functionName: "getRevokeOffchain",
+    args: [attester, uid],
+  });
+  return revokedAt !== 0n;
+};
+```
+
+When you omit `checkRevocation`, verification runs fully offline and revoked
+attestations are not detected. Provide it in production.
+
+**Testing without attestations.** When you omit the `attestations` option
+entirely, the library formats through unreviewed descriptors. Use that mode
+only for testing — never in production.
+
+The `trustedTokens` list from §3 is not affected by the policy: the wallet
+already vouches for those contracts directly.
+
+## 5. Build the `ExternalDataProvider`
 
 The library is agnostic about how external data is fetched. To resolve token metadata, address names, NFT collections, block timestamps, and chain info, the wallet supplies an `ExternalDataProvider` — an object of async methods backed by the sources the wallet already has (RPC, token list, address book, …).
 
@@ -151,13 +216,14 @@ const externalDataProvider: ExternalDataProvider = {
   },
 };
 
-// Combine with the resolver options from §2 and §3 into the FormatOptions object
+// Combine with the resolver options from §2–§4 into the FormatOptions object
 // that's passed to every format call.
 const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "github",
     index, // from §2
     trustedTokens, // from §3
+    attestations, // from §4
   },
   externalDataProvider,
 };
@@ -169,7 +235,7 @@ To decrypt encrypted fields (`resolveDecryptedValue`), see
 [DECRYPTION.md](DECRYPTION.md). It covers the scheme-agnostic contract and
 `fhevm` (Zama Protocol), the only scheme ERC-7730 currently defines.
 
-## 5. Call the format functions
+## 6. Call the format functions
 
 Three entry points, all returning `DisplayModel` as the output:
 
@@ -181,7 +247,7 @@ Three entry points, all returning `DisplayModel` as the output:
 
 Call them as soon as you have the request and before rendering the confirmation UI — they are async (descriptor fetch + external data resolution).
 
-All three accept the same `opts` object (built in §4) as their optional second argument — reuse it across every call.
+All three accept the same `opts` object (built in §5) as their optional second argument — reuse it across every call.
 
 ### `format`
 
@@ -237,7 +303,7 @@ const batch: Eip5792Batch = {
 const display: BatchDisplayModel = await formatEip5792Batch(batch, opts);
 ```
 
-## 6. Render the `DisplayModel`
+## 7. Render the `DisplayModel`
 
 The library returns a `DisplayModel`. Display its values to the user as the confirmation screen. The library never throws — failures surface as `warnings`.
 
@@ -385,10 +451,10 @@ Surface warnings to the user. In most cases it's fine to just display the human-
 
 Warnings can appear at two levels:
 
-- **`DisplayModel.warnings`** — affect the whole result. Examples: `NO_DESCRIPTOR` (no descriptor matched the transaction or typed data), `DESCRIPTOR_FETCH_ERROR` (the registry could not be reached), `INTERPOLATION_ERROR` (the interpolated intent template could not be rendered), `INVALID_CALLDATA_HEX` / `CALLDATA_DECODE_ERROR` (the calldata could not be parsed).
+- **`DisplayModel.warnings`** — affect the whole result. Examples: `NO_DESCRIPTOR` (no descriptor matched the transaction or typed data), `NO_TRUSTED_ATTESTATION` (a descriptor matched, but no trusted auditor attested it — see §4), `DESCRIPTOR_FETCH_ERROR` (the registry could not be reached), `INTERPOLATION_ERROR` (the interpolated intent template could not be rendered), `INVALID_CALLDATA_HEX` / `CALLDATA_DECODE_ERROR` (the calldata could not be parsed).
 - **`DisplayField.warning`** / **`DisplayFieldGroup.warning`** — affect a single rendered value or group. Examples: `UNKNOWN_TOKEN` (`resolveToken` returned null), `UNKNOWN_ADDRESS` (no name resolved), `UNKNOWN_CHAIN` (`resolveChainInfo` returned null), `EMPTY_ARRAY` (an array argument was empty). If there is a warning, the field's `value` falls back to a raw representation; consider rendering a per-field badge or warning indicator.
 
-When `DisplayModel.warnings` contains `NO_DESCRIPTOR` (calldata only), the model also carries a `rawCalldataFallback` with the function selector and raw ABI words — show it as a last-resort fallback so the user still sees _something_.
+When `DisplayModel.warnings` contains `NO_DESCRIPTOR` or `NO_TRUSTED_ATTESTATION` (calldata only), the model also carries a `rawCalldataFallback` with the function selector and raw ABI words — show it as a last-resort fallback so the user still sees _something_.
 
 ### Grouping
 

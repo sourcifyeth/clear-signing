@@ -105,7 +105,9 @@ export type WarningCode =
   | "BATCH_CONTRACT_CREATION"
   | "BATCH_INTERPOLATION_INCOMPLETE"
   | "BATCH_EMPTY"
-  | "CYCLIC_INCLUDES";
+  | "CYCLIC_INCLUDES"
+  | "NO_TRUSTED_ATTESTATION"
+  | "ATTESTATIONS_NOT_SUPPORTED";
 
 /** Warning from formatting. */
 export interface Warning {
@@ -473,6 +475,33 @@ export interface TrustedTokens {
   [chainId: number]: { [tokenAddress: string]: TokenStandard };
 }
 
+/**
+ * ERC-8176 attestation policy. Controls which auditors (EAS attesters) the
+ * wallet trusts to have reviewed descriptors.
+ */
+export interface AttestationOptions {
+  /**
+   * Addresses of the attesters (auditors) whose attestations the wallet
+   * trusts. A descriptor is only accepted when at least one listed attester
+   * has a valid attestation over it.
+   *
+   * Both lowercase and EIP-55 checksummed addresses are accepted.
+   */
+  trustedAttesters: string[];
+
+  /**
+   * Checks whether the attester revoked the attestation. Revocation state
+   * lives on the canonical EAS contract on Ethereum mainnet
+   * (0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587): call
+   * `getRevokeOffchain(attester, uid)` and return true when the result is
+   * non-zero (revoked).
+   *
+   * When omitted, verification runs fully offline and revocations are not
+   * detected. Production wallets should provide this check.
+   */
+  checkRevocation?: (attester: string, uid: string) => Promise<boolean>;
+}
+
 export interface BaseResolverOptions {
   /**
    * Wallet-provided trusted token list. Used to generate descriptors for tokens
@@ -483,6 +512,23 @@ export interface BaseResolverOptions {
    * Both lowercase and checksummed token addresses are accepted.
    */
   trustedTokens?: TrustedTokens;
+
+  /**
+   * ERC-8176 attestation policy. When set, a resolved registry descriptor is
+   * only used when one of the listed trusted attesters has a valid
+   * attestation over it; otherwise resolution fails with a
+   * `NO_TRUSTED_ATTESTATION` warning (or `ATTESTATIONS_NOT_SUPPORTED` when
+   * the resolver cannot fetch attestations).
+   *
+   * When omitted, descriptors are used without any attestation check. That
+   * mode is intended for testing only — production wallets should always set
+   * an attestation policy.
+   *
+   * Bundled trusted-token descriptors (see {@link BaseResolverOptions.trustedTokens})
+   * are not subject to this policy: the wallet already vouches for those
+   * contracts directly.
+   */
+  attestations?: AttestationOptions;
 }
 
 export type GitHubResolverOptions = BaseResolverOptions & {
@@ -521,6 +567,24 @@ export type CustomResolverOptions = BaseResolverOptions & {
 export interface DescriptorResolver {
   index: RegistryIndex;
   fetchDescriptor: (path: string) => Promise<Descriptor>;
+
+  /**
+   * Fetches the ERC-8176 offchain attestation issued by `attester` for the
+   * descriptor at `descriptorPath` (the same path `fetchDescriptor` receives).
+   * `attester` is passed as an EIP-55 checksummed address. Return `null` when
+   * the attester published no attestation for the descriptor; throw on I/O
+   * failures.
+   *
+   * Optional — but a resolver without it cannot satisfy an
+   * {@link AttestationOptions} policy, so every resolution then fails with
+   * `ATTESTATIONS_NOT_SUPPORTED`. The built-in GitHub and filesystem
+   * resolvers implement it via the registry's `sigs/` file convention (see
+   * `attestationPathForDescriptor`).
+   */
+  fetchAttestation?: (
+    descriptorPath: string,
+    attester: string,
+  ) => Promise<OffchainAttestation | null>;
 }
 
 export interface RegistryIndex {
@@ -573,6 +637,71 @@ export interface GitHubSource {
   repo: string;
   ref: string;
 }
+
+/** EIP-712 domain of an EAS offchain attestation. */
+export interface OffchainAttestationDomain {
+  name?: string;
+  version?: string;
+  chainId?: string | number;
+  verifyingContract?: string;
+}
+
+/** The signed `Attest` message of an EAS offchain attestation. */
+export interface OffchainAttestationMessage {
+  version?: number;
+  /** EAS schema UID (bytes32 hex). */
+  schema?: string;
+  recipient?: string;
+  /** Unix seconds; EAS serializes uint64 values as decimal strings. */
+  time?: string | number;
+  /** Unix seconds, or 0 for a non-expiring attestation. */
+  expirationTime?: string | number;
+  revocable?: boolean;
+  refUID?: string;
+  /** Schema-encoded payload — for ERC-8176 the bytes32 descriptor hash. */
+  data?: string;
+  salt?: string;
+}
+
+/** ECDSA signature components of an EAS offchain attestation. */
+export interface OffchainAttestationSignature {
+  v?: number;
+  r?: string;
+  s?: string;
+}
+
+/** The `sig` envelope of an EAS offchain attestation. */
+export interface OffchainAttestationSig {
+  version?: number;
+  /** Deterministic offchain attestation UID (bytes32 hex). */
+  uid?: string;
+  domain?: OffchainAttestationDomain;
+  primaryType?: string;
+  types?: Record<string, TypeMember[]>;
+  message?: OffchainAttestationMessage;
+  signature?: OffchainAttestationSignature;
+}
+
+/**
+ * An EAS offchain attestation, as stored in the registry's `sigs/`
+ * directories per ERC-8176. Like {@link Descriptor}, all fields are optional:
+ * attestation files come from external sources with no runtime schema
+ * validation, so readers must guard every access.
+ */
+export interface OffchainAttestation {
+  sig?: OffchainAttestationSig;
+  /** The attester address the file declares. The signature is authoritative. */
+  signer?: string;
+}
+
+/**
+ * Result of verifying a single offchain attestation: the recovered attester
+ * address (EIP-55 checksummed) on success, or a human-readable failure
+ * reason. Whether the attester is trusted is the caller's decision.
+ */
+export type AttestationVerificationResult =
+  | { attester: string }
+  | { reason: string };
 
 export type DescriptorFieldFormatType =
   | "raw"

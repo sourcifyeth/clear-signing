@@ -46,6 +46,47 @@ export function asciiToBytes(str: string): Uint8Array {
   return bytes;
 }
 
+/** Encode a string as UTF-8 bytes without relying on TextEncoder (React Native compatible). */
+export function utf8ToBytes(str: string): Uint8Array {
+  const bytes: number[] = [];
+  for (const char of str) {
+    // for..of iterates code points, so surrogate pairs arrive combined;
+    // an unpaired surrogate is replaced with U+FFFD like TextEncoder does.
+    let code = char.codePointAt(0) ?? 0;
+    if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      bytes.push(
+        0xe0 | (code >> 12),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
+    } else {
+      bytes.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f),
+      );
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+/** Concatenate multiple Uint8Arrays into one. */
+export function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(arrays.reduce((sum, a) => sum + a.length, 0));
+  let offset = 0;
+  for (const array of arrays) {
+    result.set(array, offset);
+    offset += array.length;
+  }
+  return result;
+}
+
 /** Convert hex string to bytes. */
 export function hexToBytes(hex: string): Uint8Array {
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -176,12 +217,12 @@ export function boolToBytes(value: boolean): Uint8Array {
   return new Uint8Array([value ? 1 : 0]);
 }
 
-/** Convert a bigint to a 32-byte big-endian Uint8Array (two's complement for negative values). */
-export function bigIntToBytes(value: bigint): Uint8Array {
-  const bytes = new Uint8Array(32);
+/** Convert a bigint to a big-endian Uint8Array of `byteLength` bytes (default 32; two's complement for negative values). */
+export function bigIntToBytes(value: bigint, byteLength = 32): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
   let n = value;
-  if (n < 0n) n = (1n << 256n) + n;
-  for (let i = 31; i >= 0; i--) {
+  if (n < 0n) n = (1n << BigInt(byteLength * 8)) + n;
+  for (let i = byteLength - 1; i >= 0; i--) {
     bytes[i] = Number(n & 0xffn);
     n >>= 8n;
   }

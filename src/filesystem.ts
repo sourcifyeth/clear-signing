@@ -23,7 +23,13 @@
  */
 
 import { readFile } from "node:fs/promises";
-import type { Descriptor, DescriptorResolver, RegistryIndex } from "./types.js";
+import { attestationPathForDescriptor } from "./attestations.js";
+import type {
+  Descriptor,
+  DescriptorResolver,
+  OffchainAttestation,
+  RegistryIndex,
+} from "./types.js";
 
 export type { DescriptorResolver };
 
@@ -58,6 +64,18 @@ export function createFilesystemResolver(
       const filePath = `${options.descriptorDirectory}/${path}`;
       const content = await readFile(filePath, "utf-8");
       return JSON.parse(content) as Descriptor;
+    },
+    fetchAttestation: async (path, attester) => {
+      const filePath = `${options.descriptorDirectory}/${attestationPathForDescriptor(path, attester)}`;
+      let content: string;
+      try {
+        content = await readFile(filePath, "utf-8");
+      } catch (error) {
+        // A missing sigs/ file means the attester published no attestation.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+      return JSON.parse(content) as OffchainAttestation;
     },
   };
 }

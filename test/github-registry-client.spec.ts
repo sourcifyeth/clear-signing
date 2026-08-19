@@ -4,6 +4,7 @@ import {
   DEFAULT_REF,
   fetchRegistryFilePaths,
   fetchRegistryFile,
+  fetchOptionalRegistryFile,
 } from "../src/github-registry-client.js";
 
 // ---------------------------------------------------------------------------
@@ -172,5 +173,50 @@ describe("fetchRegistryFile", () => {
         ref: DEFAULT_REF,
       }),
     ).rejects.toThrow(/HTTP 404/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchOptionalRegistryFile
+// ---------------------------------------------------------------------------
+
+describe("fetchOptionalRegistryFile", () => {
+  const SIGS_PATH =
+    "registry/tether/sigs/calldata-usdt.eip155-1-0x3846c3A30E62075Fa916216b35EF04B8F53931f6.json";
+  const url = `https://raw.githubusercontent.com/ethereum/clear-signing-erc7730-registry/master/${SIGS_PATH}`;
+
+  it("fetches an existing file by repo-relative path", async () => {
+    const body = { sig: { version: 2 }, signer: "0x3846" };
+    mockFetch(new Map([[url, body]]));
+
+    const result = await fetchOptionalRegistryFile(SIGS_PATH, {
+      repo: DEFAULT_REPO,
+      ref: DEFAULT_REF,
+    });
+    expect(result).toEqual(body);
+  });
+
+  it("returns null on a 404 response", async () => {
+    mockFetch(new Map());
+
+    const result = await fetchOptionalRegistryFile(SIGS_PATH, {
+      repo: DEFAULT_REPO,
+      ref: DEFAULT_REF,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("throws on a non-404 error response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("Server Error", { status: 500 })),
+    );
+
+    await expect(
+      fetchOptionalRegistryFile(SIGS_PATH, {
+        repo: DEFAULT_REPO,
+        ref: DEFAULT_REF,
+      }),
+    ).rejects.toThrow(/HTTP 500/);
   });
 });
