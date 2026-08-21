@@ -37,15 +37,6 @@ export function keccak256Str(hex: string): string {
   return bytesToHex(keccak256(hexToBytes(hex)));
 }
 
-/** Encode an ASCII string to bytes without relying on TextEncoder (React Native compatible). */
-export function asciiToBytes(str: string): Uint8Array {
-  const bytes = new Uint8Array(str.length);
-  for (let i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i);
-  }
-  return bytes;
-}
-
 /** Encode a string as UTF-8 bytes without relying on TextEncoder (React Native compatible). */
 export function utf8ToBytes(str: string): Uint8Array {
   const bytes: number[] = [];
@@ -74,17 +65,6 @@ export function utf8ToBytes(str: string): Uint8Array {
     }
   }
   return new Uint8Array(bytes);
-}
-
-/** Concatenate multiple Uint8Arrays into one. */
-export function concatBytes(...arrays: Uint8Array[]): Uint8Array {
-  const result = new Uint8Array(arrays.reduce((sum, a) => sum + a.length, 0));
-  let offset = 0;
-  for (const array of arrays) {
-    result.set(array, offset);
-    offset += array.length;
-  }
-  return result;
 }
 
 /** Convert hex string to bytes. */
@@ -121,7 +101,7 @@ export function toChecksumAddress(bytes: Uint8Array): string {
   }
 
   const lower = bytesToHex(bytes).slice(2).toLowerCase();
-  const hash = keccak256(asciiToBytes(lower));
+  const hash = keccak256(utf8ToBytes(lower));
 
   let result = "0x";
   for (let i = 0; i < lower.length; i++) {
@@ -189,9 +169,24 @@ export function coerceBigInt(value: unknown): bigint | undefined {
   return undefined;
 }
 
+/** Parse a chain ID given as a number or as a decimal / 0x-hex string. */
+export function parseChainId(
+  value: number | string | undefined,
+): number | undefined {
+  const parsed = coerceBigInt(value);
+  if (
+    parsed === undefined ||
+    parsed < 0n ||
+    parsed > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    return undefined;
+  }
+  return Number(parsed);
+}
+
 /** Compute function selector from signature. */
 export function selectorForSignature(signature: string): Uint8Array {
-  const hash = keccak256(asciiToBytes(signature));
+  const hash = keccak256(utf8ToBytes(signature));
   return hash.slice(0, 4);
 }
 
@@ -244,6 +239,17 @@ export function bytesToSignedBigInt(bytes: Uint8Array, bits?: number): bigint {
   const bitLen = BigInt(bits ?? bytes.length * 8);
   const signBit = 1n << (bitLen - 1n);
   return unsigned & signBit ? unsigned - (1n << bitLen) : unsigned;
+}
+
+/** Concatenate multiple Uint8Arrays into one. */
+export function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(arrays.reduce((sum, a) => sum + a.length, 0));
+  let offset = 0;
+  for (const array of arrays) {
+    result.set(array, offset);
+    offset += array.length;
+  }
+  return result;
 }
 
 /** Byte-wise equality check for two Uint8Arrays. */

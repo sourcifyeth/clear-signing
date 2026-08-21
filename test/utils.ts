@@ -6,7 +6,7 @@ import type {
   RegistryIndex,
   TypeMember,
 } from "../src/types.js";
-import { asciiToBytes, bytesToHex, keccak256 } from "../src/utils.js";
+import { bytesToHex, keccak256, utf8ToBytes } from "../src/utils.js";
 
 /**
  * Compute the EIP-712 `encodeType` string for a primary type, throwing if
@@ -75,7 +75,7 @@ export function buildFilesystemResolverOpts(
     for (const encodeTypeStr of encodeTypes) {
       const primaryType = extractPrimaryType(encodeTypeStr);
       if (!primaryType) continue;
-      const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+      const hash = bytesToHex(keccak256(utf8ToBytes(encodeTypeStr)));
       const list = hashesByPrimaryType.get(primaryType) ?? [];
       list.push(hash);
       hashesByPrimaryType.set(primaryType, list);

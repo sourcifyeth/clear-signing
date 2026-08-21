@@ -157,6 +157,30 @@ describe("example-eip712.json — PermitSingle", () => {
     expect(result.warnings).toBeUndefined();
   });
 
+  it("accepts domain.chainId as a decimal or 0x-hex string", async () => {
+    const opts = buildOpts({ resolveToken });
+
+    for (const chainId of ["1", "0x1"]) {
+      const data: TypedData = {
+        ...PERMIT_SINGLE,
+        domain: { ...PERMIT_SINGLE.domain, chainId },
+      };
+      const result = await formatTypedData(data, opts);
+
+      expect(result.intent).toBe("Authorize spending of token");
+      assert(result.fields);
+      expect(result.fields).toHaveLength(3);
+
+      // resolveToken only answers for the numeric chain ID, so a resolved
+      // amount proves the string was normalized before reaching the provider.
+      const amountField = result.fields[1];
+      assert(!isFieldGroup(amountField));
+      expect(amountField.value).toBe("1 USDC");
+      expect(amountField.warning).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    }
+  });
+
   it("returns UNKNOWN_TOKEN warning when token cannot be resolved", async () => {
     const opts = buildOpts();
 

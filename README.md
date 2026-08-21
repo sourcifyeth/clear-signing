@@ -163,6 +163,13 @@ The library delegates all external data resolution to the wallet. The wallet may
 ```typescript
 interface ExternalDataProvider {
   /**
+   * Raw chain access for checks the library performs itself. Required when an AttestationOptions policy
+   * is set: the ERC-8176 revocation check reads the EAS contract on Ethereum
+   * mainnet.
+   */
+  chainClient?: ChainClient;
+
+  /**
    * Resolution for addressName formats. The wallet should verify whether the
    * address matches any of the provided accepted types (e.g., "eoa", "contract", ...)
    * if able to. If none of the types match, set typeMatch to false so the library
@@ -219,6 +226,14 @@ interface ExternalDataProvider {
       contractAddress?: string;
     },
   ) => Promise<DecryptedValueResult | null>;
+}
+
+interface ChainClient {
+  /** Performs eth_call against `chainId` and returns the 0x-hex return data. */
+  call: (
+    chainId: number,
+    request: { to: string; data: string },
+  ) => Promise<string>;
 }
 ```
 
@@ -295,6 +310,43 @@ const result = await format(tx, {
 });
 ```
 
+### Attestations (ERC-8176)
+
+A descriptor controls what the user sees before they sign. A wallet must not use unreviewed descriptors. [ERC-8176](https://github.com/ethereum/ERCs/pull/1576) adds a review layer: auditors attest each descriptor with an [EAS](https://attest.org) offchain attestation. The registry stores the attestation files next to the descriptor, in `registry/<project>/sigs/`. The registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors) directory lists the auditors and the audit guidelines.
+
+Set an `attestations` policy to enable this check. The library then accepts a descriptor only when one of your trusted auditors has a valid attestation for it:
+
+```typescript
+const result = await format(tx, {
+  descriptorResolverOptions: {
+    type: "github",
+    index,
+    attestations: {
+      // Auditor addresses your wallet trusts — see the registry's auditors/ directory.
+      trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
+    },
+  },
+  externalDataProvider: {
+    // Required when `attestations` is set. The library uses this raw eth_call
+    // access to read the revocation state from the EAS contract on Ethereum
+    // mainnet. See GUIDE.md.
+    chainClient: {
+      call: async (chainId, { to, data }) => rpcEthCall(chainId, to, data),
+    },
+  },
+});
+```
+
+The library verifies each attestation offline (schema, descriptor hash, expiration, signature, UID). Then it reads the revocation state through `externalDataProvider.chainClient`. When no trusted attestation is valid, the result carries a `NO_TRUSTED_ATTESTATION` warning and, for calldata, the `rawCalldataFallback`.
+
+**Without an `attestations` policy, the library uses registry descriptors without any review check. Use that mode for testing only.**
+
+Notes:
+
+- The policy needs `externalDataProvider.chainClient`, and a custom resolver must implement `DescriptorResolver.fetchAttestation`. Otherwise every gated resolution fails with `ATTESTATION_OPTIONS_INCOMPLETE`.
+- Bundled trusted-token descriptors (`trustedTokens`) are not gated.
+- Only EAS offchain attestations (version 2) with EOA signatures are supported.
+
 ### Trusted token lists
 
 The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions (`transfer`, `approve`, `transferFrom`, `safeTransferFrom`, `setApprovalForAll`), add a `trustedTokens` list to `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard` (addresses lowercase or EIP-55 checksummed). When **no registry descriptor resolves** for a transaction's contract, the library looks it up there; if listed, the transaction is rendered from a **bundled ERC-20 / ERC-721 template descriptor** instead of falling back to raw calldata. A registry descriptor always takes precedence.
@@ -315,41 +367,6 @@ const result = await format(tx, {
 ```
 
 Trust is delegated entirely to the wallet. The library never decides which contracts are trustworthy.
-
-### Attestations (ERC-8176)
-
-A descriptor controls what the user sees before they sign, so a wallet must not use unreviewed descriptors. [ERC-8176](https://github.com/ethereum/ERCs/pull/1576) adds a review layer: auditors attest each descriptor with an [EAS](https://attest.org) offchain attestation, and the registry stores the attestation files next to the descriptor (`registry/<project>/sigs/`). See the registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors) directory for the audit guidelines and the auditor profiles.
-
-Add an `attestations` policy to `descriptorResolverOptions` to enforce this review layer. The library then accepts a resolved descriptor only when one of your trusted auditors has a valid attestation over it:
-
-```typescript
-const result = await format(tx, {
-  descriptorResolverOptions: {
-    type: "github",
-    index,
-    attestations: {
-      // Auditor addresses your wallet trusts — see the registry's auditors/ directory.
-      trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
-      // Recommended: report revocations from the EAS contract. See GUIDE.md.
-      checkRevocation: async (attester, uid) => {
-        /* return true when getRevokeOffchain(attester, uid) is non-zero */
-        return false;
-      },
-    },
-  },
-});
-```
-
-For each resolved descriptor the library computes the ERC-8176 descriptor hash (keccak256 of the RFC 8785 canonical JSON of the includes-resolved descriptor), fetches each trusted attester's attestation from the registry's `sigs/` directory, and verifies it offline: canonical schema UID, attested hash, expiration, EIP-712 signature, and attestation UID. Revocation state lives on-chain, so that check is delegated to the wallet through `checkRevocation`. When no trusted attestation is valid, the result carries a `NO_TRUSTED_ATTESTATION` warning and (for calldata) the `rawCalldataFallback`.
-
-**Formatting without an `attestations` policy is for testing only.** Without it, the library uses registry descriptors without any review check. Do not ship that configuration in production.
-
-Notes:
-
-- Bundled trusted-token descriptors (`trustedTokens`) are not gated — the wallet already vouches for those contracts directly.
-- A custom resolver must implement the optional `DescriptorResolver.fetchAttestation` to satisfy an attestation policy; otherwise every resolution fails with `ATTESTATIONS_NOT_SUPPORTED`. The GitHub and filesystem resolvers implement it out of the box.
-- The building blocks are exported for custom flows: `computeDescriptorHash(descriptor)`, `verifyAttestation(attestation, descriptorHash, options?)`, and `attestationPathForDescriptor(descriptorPath, attester)`.
-- Only EAS offchain attestations (version 2) with EOA signatures are supported. Onchain attestations and ERC-1271 contract attesters need chain access and are out of scope.
 
 ### Display Model
 

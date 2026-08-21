@@ -9,10 +9,12 @@ import { fetchPrebuiltRegistryIndex } from "./github-registry-index.js";
 import {
   attestationPathForDescriptor,
   computeDescriptorHash,
+  isAttestationRevoked,
   verifyAttestation,
 } from "./attestations.js";
 import type {
   AttestationOptions,
+  ChainClient,
   CustomResolverOptions,
   Descriptor,
   DescriptorResolver,
@@ -26,12 +28,13 @@ import type {
 } from "./types.js";
 import { buildBundledTokenDescriptor } from "./bundled-descriptors.js";
 import {
-  asciiToBytes,
   bytesToHex,
   hexToBytes,
   keccak256,
   normalizeAddress,
+  parseChainId,
   toChecksumAddress,
+  utf8ToBytes,
   warn,
 } from "./utils.js";
 
@@ -77,21 +80,27 @@ async function createResolver(
 /**
  * Resolves a calldata descriptor by `(chainId, contractAddress)`. Returns
  * a `{ descriptor }` envelope on success, or a `{ warning }` envelope when
- * resolution fails — `NO_DESCRIPTOR` when nothing is indexed for the pair,
- * `CYCLIC_INCLUDES` when the `includes` chain self-references, and
- * `NO_TRUSTED_ATTESTATION` / `ATTESTATIONS_NOT_SUPPORTED` when an
- * `options.attestations` policy is set but not satisfied.
+ * resolution fails:
+ *
+ * - `NO_DESCRIPTOR` — nothing is indexed for the pair.
+ * - `CYCLIC_INCLUDES` — the `includes` chain self-references.
+ * - `ATTESTATION_OPTIONS_INCOMPLETE` — an `options.attestations` policy is
+ *   set, but `chainClient` is missing or the resolver has no
+ *   `fetchAttestation`.
+ * - `NO_TRUSTED_ATTESTATION` — no trusted attester has a valid attestation
+ *   for the descriptor. The policy reads revocation state through
+ *   `chainClient`.
  *
  * If no descriptor is indexed for the chain and address, the method also checks
  * the optional `options.trustedTokens` list for a matching trusted token. In case
  * of a matching trusted token, a token descriptor is generated on the fly. The
- * attestation policy does not apply to these bundled descriptors — the wallet
- * already vouches for the listed contracts directly.
+ * attestation policy does not apply to these bundled descriptors.
  */
 export async function resolveCalldataDescriptor(
   chainId: number,
   to: string,
   options?: GitHubResolverOptions | CustomResolverOptions,
+  chainClient?: ChainClient,
 ): Promise<ResolveDescriptorResult> {
   const resolver = await createResolver(options);
   const path =
@@ -103,6 +112,7 @@ export async function resolveCalldataDescriptor(
       path,
       resolved,
       options?.attestations,
+      chainClient,
     );
   }
 
@@ -142,17 +152,25 @@ function lookupTrustedToken(
  *
  * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
  * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
- * the message's EIP-712 `encodeType` string. Returns `NO_DESCRIPTOR` if no
- * candidate matches, `CYCLIC_INCLUDES` if the `includes` chain self-references,
- * `NO_TRUSTED_ATTESTATION` / `ATTESTATIONS_NOT_SUPPORTED` if an
- * `options.attestations` policy is set but not satisfied, or `{ descriptor }`
- * on success.
+ * the message's EIP-712 `encodeType` string. Returns a `{ descriptor }`
+ * envelope on success, or a `{ warning }` envelope when resolution fails:
+ *
+ * - `NO_DESCRIPTOR` — no candidate matches.
+ * - `CYCLIC_INCLUDES` — the `includes` chain self-references.
+ * - `ATTESTATION_OPTIONS_INCOMPLETE` — an `options.attestations` policy is
+ *   set, but `chainClient` is missing or the resolver has no
+ *   `fetchAttestation`.
+ * - `NO_TRUSTED_ATTESTATION` — no trusted attester has a valid attestation
+ *   for the descriptor. The policy reads revocation state through
+ *   `chainClient`.
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
   options?: GitHubResolverOptions | CustomResolverOptions,
+  chainClient?: ChainClient,
 ): Promise<ResolveDescriptorResult> {
-  const { chainId, verifyingContract } = typedData.domain;
+  const chainId = parseChainId(typedData.domain.chainId);
+  const { verifyingContract } = typedData.domain;
   if (chainId === undefined || !verifyingContract) {
     return noDescriptorWarning(chainId, verifyingContract);
   }
@@ -170,7 +188,7 @@ export async function resolveTypedDataDescriptor(
     typedData.types,
   );
   if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
-  const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+  const hash = bytesToHex(keccak256(utf8ToBytes(encodeTypeStr)));
 
   const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
   if (!match) return noDescriptorWarning(chainId, verifyingContract);
@@ -180,6 +198,7 @@ export async function resolveTypedDataDescriptor(
     match.path,
     resolved,
     options?.attestations,
+    chainClient,
   );
 }
 
@@ -190,24 +209,32 @@ export async function resolveTypedDataDescriptor(
  * (includes-merged) content. Passes the result through unchanged when no
  * policy is set or resolution already failed.
  *
- * Returns an `ATTESTATIONS_NOT_SUPPORTED` warning when the resolver does not
- * implement `fetchAttestation`, and `NO_TRUSTED_ATTESTATION` (with the
- * per-attester failure reasons in the message) when no trusted attestation
- * verifies. Attestation fetch and `checkRevocation` I/O errors still throw,
- * consistent with descriptor fetching.
+ * `verifyAttestation` throws on a failed check; that error is caught here
+ * and becomes a per-attester failure reason. Attestation fetch and
+ * `chainClient` I/O errors still throw, consistent with descriptor fetching.
  */
 async function applyAttestationPolicy(
   resolver: DescriptorResolver,
   path: string,
   resolved: ResolveDescriptorResult,
   options: AttestationOptions | undefined,
+  chainClient: ChainClient | undefined,
 ): Promise<ResolveDescriptorResult> {
   if (!options || "warning" in resolved) return resolved;
+
+  if (!chainClient) {
+    return {
+      warning: warn(
+        "ATTESTATION_OPTIONS_INCOMPLETE",
+        "An attestation policy is set but no chainClient is available for the revocation check",
+      ),
+    };
+  }
 
   if (!resolver.fetchAttestation) {
     return {
       warning: warn(
-        "ATTESTATIONS_NOT_SUPPORTED",
+        "ATTESTATION_OPTIONS_INCOMPLETE",
         "An attestation policy is set but the descriptor resolver does not implement fetchAttestation",
       ),
     };
@@ -228,17 +255,23 @@ async function applyAttestationPolicy(
     const attestation = await resolver.fetchAttestation(path, attester);
     if (!attestation) continue;
 
-    const result = await verifyAttestation(attestation, descriptorHash, {
-      checkRevocation: options.checkRevocation,
-    });
-    if ("reason" in result) {
-      failures.push(`${attester}: ${result.reason}`);
+    let verified: ReturnType<typeof verifyAttestation>;
+    try {
+      verified = verifyAttestation(attestation, descriptorHash);
+    } catch (error) {
+      failures.push(
+        `${attester}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       continue;
     }
-    if (normalizeAddress(result.attester) !== normalizeAddress(attester)) {
+    if (normalizeAddress(verified.attester) !== normalizeAddress(attester)) {
       failures.push(
-        `${attester}: attestation was signed by ${result.attester}`,
+        `${attester}: attestation was signed by ${verified.attester}`,
       );
+      continue;
+    }
+    if (await isAttestationRevoked(chainClient, attester, verified.uid)) {
+      failures.push(`${attester}: attestation ${verified.uid} was revoked`);
       continue;
     }
 

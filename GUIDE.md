@@ -44,14 +44,51 @@ Two advanced options you typically won't need:
 - **`createGitHubRegistryIndex(source?)`** — walks the registry tree and builds the index in-process. Significantly slower than `fetchPrebuiltRegistryIndex` (one fetch per descriptor file). Use when the prebuilt indexes are stale, missing entries, or when pointing at a fork that doesn't publish them.
 - **Custom resolvers** — anything matching the `DescriptorResolver` shape (in-memory map, custom HTTP endpoint, etc.) can be wrapped in `{ type: "custom", resolver }`. One custom resolver ships in the library: the Node-only filesystem resolver at `@ethereum-sourcify/clear-signing/filesystem`, which loads descriptor JSON files from a local directory. See the README for details.
 
-## 3. Build the trusted token list
+## 3. Set the attestation policy
 
-The registry cannot hold a descriptor for every token. To still render plain
-ERC-20 and ERC-721 interactions, pass a `trustedTokens` list inside
-`descriptorResolverOptions`. It maps `chainId → tokenAddress → standard`. If a
-transaction's contract is listed there, the transaction is rendered from a
-bundled ERC-20 / ERC-721 template. Only include tokens in this object that you
-**trust** to be safe to interact with.
+A descriptor controls what the user sees before they sign. A wrong or malicious descriptor can hide the real effect of a transaction. For this reason, do not use registry descriptors that haven't been audited in production.
+
+[ERC-8176](https://github.com/ethereum/ERCs/pull/1576) supplies that check: auditors review each descriptor and attest it with an EAS offchain attestation. The registry stores the attestation files next to the descriptor. The registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors) directory contains the audit guidelines and a profile for each auditor, keyed by attester address.
+
+Select the auditors your wallet trusts and set the `attestations` policy on the resolver options. The library then rejects every registry descriptor that does not carry a valid attestation from one of them (the result gets a `NO_TRUSTED_ATTESTATION` warning):
+
+```typescript
+const descriptorResolverOptions = {
+  type: "github",
+  index,
+  attestations: {
+    // Attester addresses from the registry's auditors/ directory,
+    // lowercase or EIP-55 checksummed.
+    trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
+  },
+};
+```
+
+The library verifies each attestation offline: schema, descriptor hash, expiration, and EIP-712 signature. Then it reads the revocation state from the EAS contract on Ethereum mainnet. That read needs an RPC connection, which the wallet supplies as a `ChainClient` on the `ExternalDataProvider` (§5). The client is a raw `eth_call` hook — the library selects the contract, encodes the call, and decodes the result:
+
+```typescript
+// Use the provider library your wallet already has. viem is only an example.
+import { createPublicClient, http } from "viem";
+import { mainnet } from "viem/chains";
+
+const mainnetClient = createPublicClient({ chain: mainnet, transport: http() });
+
+const chainClient: ChainClient = {
+  call: async (chainId, { to, data }) => {
+    if (chainId !== mainnet.id) throw new Error(`No RPC for chain ${chainId}`);
+    const { data: result } = await mainnetClient.call({ to, data });
+    return result ?? "0x";
+  },
+};
+```
+
+The chain client is required for attestation verification. A transport error from the client surfaces as `DESCRIPTOR_FETCH_ERROR`.
+
+**Testing without attestations.** When you omit the `attestations` option entirely, the library formats through unreviewed descriptors. Use that mode only for testing — never in production.
+
+## 4. Build the trusted token list
+
+The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions, pass a `trustedTokens` list inside `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard`. If a transaction's contract is listed there, the transaction is rendered from a bundled ERC-20 / ERC-721 template. Only include tokens in this object that you **trust** to be safe to interact with.
 
 ```typescript
 import type { TrustedTokens } from "@ethereum-sourcify/clear-signing";
@@ -64,79 +101,23 @@ const trustedTokens: TrustedTokens = {
   },
 };
 
-const descriptorResolverOptions = { type: "github", index, trustedTokens };
-```
-
-## 4. Set the attestation policy
-
-A descriptor controls what the user sees before they sign. A wrong or
-malicious descriptor can hide the real effect of a transaction. For this
-reason, do not use registry descriptors without a review check in production.
-
-[ERC-8176](https://github.com/ethereum/ERCs/pull/1576) supplies that check:
-auditors review each descriptor and attest it with an EAS offchain
-attestation. The registry stores the attestation files next to the descriptor.
-The registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors)
-directory contains the audit guidelines and a profile for each auditor, keyed
-by attester address.
-
-Select the auditors your wallet trusts and set the `attestations` policy on
-the resolver options. The library then rejects every registry descriptor that
-does not carry a valid attestation from one of them (the result gets a
-`NO_TRUSTED_ATTESTATION` warning and, for calldata, the raw fallback):
-
-```typescript
 const descriptorResolverOptions = {
   type: "github",
   index,
+  attestations,
   trustedTokens,
-  attestations: {
-    // Attester addresses from the registry's auditors/ directory,
-    // lowercase or EIP-55 checksummed.
-    trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
-    checkRevocation,
-  },
 };
 ```
 
-The library verifies each attestation offline: schema, descriptor hash,
-expiration, and EIP-712 signature. Revocation state lives on the EAS contract
-on Ethereum mainnet, so the wallet supplies that check — the same delegation
-pattern as the `ExternalDataProvider`:
-
-```typescript
-// The canonical EAS contract on Ethereum mainnet.
-const EAS_ADDRESS = "0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587";
-
-const checkRevocation = async (attester: string, uid: string) => {
-  // getRevokeOffchain returns the revocation time, or 0 when not revoked.
-  const revokedAt = await readContract({
-    address: EAS_ADDRESS,
-    abi: parseAbi([
-      "function getRevokeOffchain(address revoker, bytes32 data) view returns (uint64)",
-    ]),
-    functionName: "getRevokeOffchain",
-    args: [attester, uid],
-  });
-  return revokedAt !== 0n;
-};
-```
-
-When you omit `checkRevocation`, verification runs fully offline and revoked
-attestations are not detected. Provide it in production.
-
-**Testing without attestations.** When you omit the `attestations` option
-entirely, the library formats through unreviewed descriptors. Use that mode
-only for testing — never in production.
-
-The `trustedTokens` list from §3 is not affected by the policy: the wallet
-already vouches for those contracts directly.
+The attestation policy from §3 does not apply to this list: the wallet already vouches for those contracts directly.
 
 ## 5. Build the `ExternalDataProvider`
 
 The library is agnostic about how external data is fetched. To resolve token metadata, address names, NFT collections, block timestamps, and chain info, the wallet supplies an `ExternalDataProvider` — an object of async methods backed by the sources the wallet already has (RPC, token list, address book, …).
 
 Every method is optional. If a method is missing or returns `null`, the corresponding field falls back to raw formatting and the `DisplayModel` carries an explanatory warning (e.g. `UNKNOWN_TOKEN`, `UNKNOWN_ADDRESS`, `UNKNOWN_CHAIN`).
+
+The provider also carries the `chainClient` from §3. It is the one non-semantic member: a raw `eth_call` hook for checks the library performs itself against fixed onchain state. Currently only used for reading EAS revocations.
 
 ```typescript
 const externalDataProvider: ExternalDataProvider = {
@@ -214,6 +195,9 @@ const externalDataProvider: ExternalDataProvider = {
     const result: DecryptedValueResult | null = { value: "0x00000000000f4240" };
     return result;
   },
+
+  // Raw eth_call access for the ERC-8176 revocation check (§3).
+  chainClient,
 };
 
 // Combine with the resolver options from §2–§4 into the FormatOptions object
@@ -222,8 +206,8 @@ const opts: FormatOptions = {
   descriptorResolverOptions: {
     type: "github",
     index, // from §2
-    trustedTokens, // from §3
-    attestations, // from §4
+    attestations, // from §3
+    trustedTokens, // from §4
   },
   externalDataProvider,
 };
@@ -451,10 +435,10 @@ Surface warnings to the user. In most cases it's fine to just display the human-
 
 Warnings can appear at two levels:
 
-- **`DisplayModel.warnings`** — affect the whole result. Examples: `NO_DESCRIPTOR` (no descriptor matched the transaction or typed data), `NO_TRUSTED_ATTESTATION` (a descriptor matched, but no trusted auditor attested it — see §4), `DESCRIPTOR_FETCH_ERROR` (the registry could not be reached), `INTERPOLATION_ERROR` (the interpolated intent template could not be rendered), `INVALID_CALLDATA_HEX` / `CALLDATA_DECODE_ERROR` (the calldata could not be parsed).
+- **`DisplayModel.warnings`** — affect the whole result. Examples: `NO_DESCRIPTOR` (no descriptor matched the transaction or typed data), `NO_TRUSTED_ATTESTATION` (a descriptor matched, but no trusted auditor attested it — see §3), `DESCRIPTOR_FETCH_ERROR` (the registry could not be reached), `INTERPOLATION_ERROR` (the interpolated intent template could not be rendered), `INVALID_CALLDATA_HEX` / `CALLDATA_DECODE_ERROR` (the calldata could not be parsed).
 - **`DisplayField.warning`** / **`DisplayFieldGroup.warning`** — affect a single rendered value or group. Examples: `UNKNOWN_TOKEN` (`resolveToken` returned null), `UNKNOWN_ADDRESS` (no name resolved), `UNKNOWN_CHAIN` (`resolveChainInfo` returned null), `EMPTY_ARRAY` (an array argument was empty). If there is a warning, the field's `value` falls back to a raw representation; consider rendering a per-field badge or warning indicator.
 
-When `DisplayModel.warnings` contains `NO_DESCRIPTOR` or `NO_TRUSTED_ATTESTATION` (calldata only), the model also carries a `rawCalldataFallback` with the function selector and raw ABI words — show it as a last-resort fallback so the user still sees _something_.
+When `DisplayModel.warnings` contains `NO_DESCRIPTOR` or `NO_TRUSTED_ATTESTATION`, the model also carries a `rawCalldataFallback` (calldata only) with the function selector and raw ABI words — show it as a last-resort fallback so the user still sees _something_.
 
 ### Grouping
 

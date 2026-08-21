@@ -54,7 +54,7 @@ export type FieldType =
 export interface TypedDataDomain {
   name?: string;
   version?: string;
-  chainId?: number;
+  chainId?: number | string;
   verifyingContract?: string;
   salt?: string;
 }
@@ -107,7 +107,7 @@ export type WarningCode =
   | "BATCH_EMPTY"
   | "CYCLIC_INCLUDES"
   | "NO_TRUSTED_ATTESTATION"
-  | "ATTESTATIONS_NOT_SUPPORTED";
+  | "ATTESTATION_OPTIONS_INCOMPLETE";
 
 /** Warning from formatting. */
 export interface Warning {
@@ -363,8 +363,43 @@ export interface DecryptedValueResult {
   value: string;
 }
 
+/** A read-only `eth_call` request. */
+export interface EthCallRequest {
+  /** Target contract address. */
+  to: string;
+  /** 0x-prefixed hex calldata. */
+  data: string;
+}
+
+/**
+ * Wallet-provided raw chain access. The semantic resolvers on
+ * {@link ExternalDataProvider} let the wallet serve data from any source. The
+ * chain client is different: the library selects the contract, encodes the
+ * call, and decodes the result. The wallet only supplies the RPC connection.
+ *
+ * Currently only used to check the ERC-8176 revocation state of an
+ * attestation on the EAS contract on Ethereum mainnet.
+ */
+export interface ChainClient {
+  /**
+   * Performs `eth_call` against `chainId` and returns the 0x-prefixed hex
+   * return data. Throw on transport failures and reverts; the library
+   * handles them. Return the data exactly as the node returns it — including
+   * `0x` for empty return data — and never substitute a value on failure.
+   */
+  call: (chainId: number, request: EthCallRequest) => Promise<string>;
+}
+
 /** Wallet-provided async resolvers for external data needed by the formatter. */
 export interface ExternalDataProvider {
+  /**
+   * Raw chain access for checks the library performs itself (see
+   * {@link ChainClient}). Required when an {@link AttestationOptions} policy
+   * is set: the ERC-8176 revocation check reads the EAS contract on Ethereum
+   * mainnet.
+   */
+  chainClient?: ChainClient;
+
   /**
    * Resolution for addressName formats. The wallet should verify whether the
    * address matches any of the provided accepted types (e.g., "eoa", "contract", ...)
@@ -467,6 +502,23 @@ export interface FormatOptions {
   // resolvedImplementationAddress?: string;
 }
 
+/**
+ * ERC-8176 attestation policy. Controls which auditors (EAS attesters) the
+ * wallet trusts to have reviewed descriptors.
+ *
+ * The policy needs an {@link ExternalDataProvider.chainClient}: the library
+ * reads the revocation state of each attestation from the EAS contract on
+ * Ethereum mainnet.
+ */
+export interface AttestationOptions {
+  /**
+   * Addresses of the attesters (auditors) whose attestations the wallet
+   * trusts. A descriptor is only accepted when at least one listed attester
+   * has a valid attestation over it.
+   */
+  trustedAttesters: string[];
+}
+
 /** Token standards for descriptor generation. */
 export type TokenStandard = "erc20" | "erc721";
 
@@ -475,34 +527,23 @@ export interface TrustedTokens {
   [chainId: number]: { [tokenAddress: string]: TokenStandard };
 }
 
-/**
- * ERC-8176 attestation policy. Controls which auditors (EAS attesters) the
- * wallet trusts to have reviewed descriptors.
- */
-export interface AttestationOptions {
-  /**
-   * Addresses of the attesters (auditors) whose attestations the wallet
-   * trusts. A descriptor is only accepted when at least one listed attester
-   * has a valid attestation over it.
-   *
-   * Both lowercase and EIP-55 checksummed addresses are accepted.
-   */
-  trustedAttesters: string[];
-
-  /**
-   * Checks whether the attester revoked the attestation. Revocation state
-   * lives on the canonical EAS contract on Ethereum mainnet
-   * (0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587): call
-   * `getRevokeOffchain(attester, uid)` and return true when the result is
-   * non-zero (revoked).
-   *
-   * When omitted, verification runs fully offline and revocations are not
-   * detected. Production wallets should provide this check.
-   */
-  checkRevocation?: (attester: string, uid: string) => Promise<boolean>;
-}
-
 export interface BaseResolverOptions {
+  /**
+   * ERC-8176 attestation policy. When set, a resolved registry descriptor is
+   * only used when one of the listed trusted attesters has a valid
+   * attestation over it; otherwise resolution fails with a
+   * `NO_TRUSTED_ATTESTATION` warning. The revocation check requires an
+   * {@link ExternalDataProvider.chainClient}.
+   *
+   * When omitted, descriptors are used without any attestation check. That
+   * mode is intended for testing only — production wallets should always set
+   * an attestation policy.
+   *
+   * Bundled trusted-token descriptors (see {@link BaseResolverOptions.trustedTokens})
+   * are not subject to this policy.
+   */
+  attestations?: AttestationOptions;
+
   /**
    * Wallet-provided trusted token list. Used to generate descriptors for tokens
    * on the fly. Standard tokens usually don't have a descriptor in the registry.
@@ -512,23 +553,6 @@ export interface BaseResolverOptions {
    * Both lowercase and checksummed token addresses are accepted.
    */
   trustedTokens?: TrustedTokens;
-
-  /**
-   * ERC-8176 attestation policy. When set, a resolved registry descriptor is
-   * only used when one of the listed trusted attesters has a valid
-   * attestation over it; otherwise resolution fails with a
-   * `NO_TRUSTED_ATTESTATION` warning (or `ATTESTATIONS_NOT_SUPPORTED` when
-   * the resolver cannot fetch attestations).
-   *
-   * When omitted, descriptors are used without any attestation check. That
-   * mode is intended for testing only — production wallets should always set
-   * an attestation policy.
-   *
-   * Bundled trusted-token descriptors (see {@link BaseResolverOptions.trustedTokens})
-   * are not subject to this policy: the wallet already vouches for those
-   * contracts directly.
-   */
-  attestations?: AttestationOptions;
 }
 
 export type GitHubResolverOptions = BaseResolverOptions & {
@@ -575,11 +599,7 @@ export interface DescriptorResolver {
    * the attester published no attestation for the descriptor; throw on I/O
    * failures.
    *
-   * Optional — but a resolver without it cannot satisfy an
-   * {@link AttestationOptions} policy, so every resolution then fails with
-   * `ATTESTATIONS_NOT_SUPPORTED`. The built-in GitHub and filesystem
-   * resolvers implement it via the registry's `sigs/` file convention (see
-   * `attestationPathForDescriptor`).
+   * Required when {@link AttestationOptions} policy is set.
    */
   fetchAttestation?: (
     descriptorPath: string,
@@ -638,14 +658,6 @@ export interface GitHubSource {
   ref: string;
 }
 
-/** EIP-712 domain of an EAS offchain attestation. */
-export interface OffchainAttestationDomain {
-  name?: string;
-  version?: string;
-  chainId?: string | number;
-  verifyingContract?: string;
-}
-
 /** The signed `Attest` message of an EAS offchain attestation. */
 export interface OffchainAttestationMessage {
   version?: number;
@@ -663,8 +675,8 @@ export interface OffchainAttestationMessage {
   salt?: string;
 }
 
-/** ECDSA signature components of an EAS offchain attestation. */
-export interface OffchainAttestationSignature {
+/** An Ethereum secp256k1 ECDSA signature: `r`, `s`, and the recovery id `v`. */
+export interface EcdsaSignature {
   v?: number;
   r?: string;
   s?: string;
@@ -675,33 +687,21 @@ export interface OffchainAttestationSig {
   version?: number;
   /** Deterministic offchain attestation UID (bytes32 hex). */
   uid?: string;
-  domain?: OffchainAttestationDomain;
+  domain?: TypedDataDomain;
   primaryType?: string;
   types?: Record<string, TypeMember[]>;
   message?: OffchainAttestationMessage;
-  signature?: OffchainAttestationSignature;
+  signature?: EcdsaSignature;
 }
 
 /**
  * An EAS offchain attestation, as stored in the registry's `sigs/`
- * directories per ERC-8176. Like {@link Descriptor}, all fields are optional:
- * attestation files come from external sources with no runtime schema
- * validation, so readers must guard every access.
+ * directories per ERC-8176.
  */
 export interface OffchainAttestation {
   sig?: OffchainAttestationSig;
-  /** The attester address the file declares. The signature is authoritative. */
   signer?: string;
 }
-
-/**
- * Result of verifying a single offchain attestation: the recovered attester
- * address (EIP-55 checksummed) on success, or a human-readable failure
- * reason. Whether the attester is trusted is the caller's decision.
- */
-export type AttestationVerificationResult =
-  | { attester: string }
-  | { reason: string };
 
 export type DescriptorFieldFormatType =
   | "raw"

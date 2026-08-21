@@ -20,22 +20,25 @@ import {
   isFieldGroup,
   resolveCalldataDescriptor,
   resolveTypedDataDescriptor,
-  verifyAttestation,
 } from "../../src/index.js";
+import {
+  isAttestationRevoked,
+  verifyAttestation,
+} from "../../src/attestations.js";
 import type {
   AttestationOptions,
+  ChainClient,
   Descriptor,
   DescriptorResolver,
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
   OffchainAttestation,
-  OffchainAttestationDomain,
   OffchainAttestationMessage,
   TrustedTokens,
+  TypedDataDomain,
 } from "../../src/types.js";
 import {
-  asciiToBytes,
   bigIntToBytes,
   bytesToHex,
   concatBytes,
@@ -54,6 +57,15 @@ const ALICE = "0x1234567890abcdef1234567890abcdef12345678";
 const checksum = (addr: string) => toChecksumAddress(hexToBytes(addr));
 const word = (hex: string) => hex.padStart(64, "0");
 const addrWord = (addr: string) => word(addr.slice(2).toLowerCase());
+
+const EAS_ADDRESS = "0xa1207f3bba224e2c9c3c6d5af63d0eb1582ce587";
+const GET_REVOKE_OFFCHAIN = "0xb469318d";
+const ZERO_WORD = "0x" + "00".repeat(32);
+
+/** Chain client whose EAS reads report every attestation as not revoked. */
+const notRevoked: ChainClient = { call: async () => ZERO_WORD };
+/** Chain client whose EAS reads report a revocation timestamp. */
+const revoked: ChainClient = { call: async () => "0x" + word("6880b8d8") };
 
 const descriptor = JSON.parse(
   readFileSync(`${__dirname}/calldata-usdt.json`, "utf-8"),
@@ -77,7 +89,7 @@ const ATTEST_TYPE =
   "Attest(uint16 version,bytes32 schema,address recipient,uint64 time,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,bytes32 salt)";
 const EIP712_DOMAIN_TYPE =
   "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)";
-const EAS_DOMAIN: OffchainAttestationDomain = {
+const EAS_DOMAIN: TypedDataDomain = {
   name: "EAS Attestation",
   version: "0.26",
   chainId: "1",
@@ -115,7 +127,7 @@ function leftPadAddress(address: string): Uint8Array {
 }
 
 function attestDigest(
-  domain: OffchainAttestationDomain,
+  domain: TypedDataDomain,
   message: OffchainAttestationMessage,
 ): Uint8Array {
   const domainSeparator = keccak256(
@@ -168,7 +180,7 @@ function offchainUid(message: OffchainAttestationMessage): string {
 
 function signAttestation(
   message: OffchainAttestationMessage,
-  domain: OffchainAttestationDomain = EAS_DOMAIN,
+  domain: TypedDataDomain = EAS_DOMAIN,
 ): OffchainAttestation {
   const signature = secp256k1.sign(
     attestDigest(domain, message),
@@ -263,132 +275,146 @@ describe("attestationPathForDescriptor", () => {
 // ---------------------------------------------------------------------------
 
 describe("verifyAttestation", () => {
-  it("verifies the real registry attestation and recovers the attester", async () => {
-    const result = await verifyAttestation(registryAttestation, descriptorHash);
-    expect(result).toEqual({ attester: CYFRIN_ATTESTER });
+  it("verifies the real registry attestation and recovers the attester", () => {
+    expect(verifyAttestation(registryAttestation, descriptorHash)).toEqual({
+      attester: CYFRIN_ATTESTER,
+      uid: registryAttestation.sig?.uid,
+    });
   });
 
-  it("verifies a generated attestation with a bounded expiration", async () => {
+  it("verifies a generated attestation with a bounded expiration", () => {
     const attestation = signAttestation(
       attestMessage(descriptorHash, { expirationTime: FAR_FUTURE }),
     );
-    const result = await verifyAttestation(attestation, descriptorHash);
-    expect(result).toEqual({ attester: TEST_ATTESTER });
+    expect(verifyAttestation(attestation, descriptorHash)).toEqual({
+      attester: TEST_ATTESTER,
+      uid: attestation.sig?.uid,
+    });
   });
 
-  it("accepts an attestation without the optional uid and signer fields", async () => {
+  it("accepts an attestation without the optional uid and signer fields", () => {
     const attestation = signAttestation(attestMessage(descriptorHash));
+    const uid = attestation.sig?.uid;
     delete attestation.sig?.uid;
     delete attestation.signer;
-    const result = await verifyAttestation(attestation, descriptorHash);
-    expect(result).toEqual({ attester: TEST_ATTESTER });
+    expect(verifyAttestation(attestation, descriptorHash)).toEqual({
+      attester: TEST_ATTESTER,
+      uid,
+    });
   });
 
-  it("passes the recovered attester and recomputed uid to checkRevocation", async () => {
-    const checkRevocation = vi.fn(async () => false);
-    const result = await verifyAttestation(
-      registryAttestation,
-      descriptorHash,
-      {
-        checkRevocation,
-      },
-    );
-    expect(result).toEqual({ attester: CYFRIN_ATTESTER });
-    expect(checkRevocation).toHaveBeenCalledExactlyOnceWith(
-      CYFRIN_ATTESTER,
-      registryAttestation.sig?.uid,
-    );
+  it("accepts a numeric domain chainId", () => {
+    const attestation = signAttestation(attestMessage(descriptorHash), {
+      ...EAS_DOMAIN,
+      chainId: 1,
+    });
+    expect(verifyAttestation(attestation, descriptorHash)).toEqual({
+      attester: TEST_ATTESTER,
+      uid: attestation.sig?.uid,
+    });
   });
 
-  it("rejects a revoked attestation", async () => {
-    const result = await verifyAttestation(
-      registryAttestation,
-      descriptorHash,
-      {
-        checkRevocation: async () => true,
-      },
-    );
-    assert("reason" in result);
-    expect(result.reason).toContain("revoked");
-  });
-
-  it("rejects an expired attestation", async () => {
+  it("throws on an expired attestation", () => {
     const attestation = signAttestation(
       attestMessage(descriptorHash, { expirationTime: "1000000000" }),
     );
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain("expired");
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
+      "attestation expired at 1000000000",
+    );
   });
 
-  it("rejects a non-canonical schema", async () => {
+  it("throws on a non-canonical schema", () => {
     const attestation = signAttestation(
       attestMessage(descriptorHash, { schema: "0x" + "ab".repeat(32) }),
     );
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain("not the canonical ERC-8176 schema");
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
+      "not the canonical ERC-8176 schema",
+    );
   });
 
-  it("rejects when the attested hash differs from the computed hash", async () => {
+  it("throws when the attested hash differs from the computed hash", () => {
     const otherHash = "0x" + "cd".repeat(32);
     const attestation = signAttestation(attestMessage(otherHash));
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain(
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
       `attested descriptor hash ${otherHash} does not match`,
     );
   });
 
-  it("rejects an unsupported offchain attestation version", async () => {
+  it("throws on an unsupported offchain attestation version", () => {
     const attestation = signAttestation(
       attestMessage(descriptorHash, { version: 1 }),
     );
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain(
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
       "unsupported offchain attestation version 1",
     );
   });
 
-  it("rejects a domain that is not the canonical EAS contract on mainnet", async () => {
+  it("throws on a domain that is not the canonical EAS contract on mainnet", () => {
     const attestation = signAttestation(attestMessage(descriptorHash), {
       ...EAS_DOMAIN,
       chainId: "11155111",
     });
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain("canonical EAS contract");
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
+      "canonical EAS contract",
+    );
   });
 
-  it("rejects a tampered message (signature recovers a different address)", async () => {
+  it("throws on a tampered message (signature recovers a different address)", () => {
     const attestation = signAttestation(attestMessage(descriptorHash));
     assert(attestation.sig?.message);
     attestation.sig.message.time = "1785288537"; // +1s after signing
     // Keep the uid consistent with the tampered message so the signature
     // check is what fails.
     attestation.sig.uid = offchainUid(attestation.sig.message);
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain(`not the declared signer ${TEST_ATTESTER}`);
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
+      `not the declared signer ${TEST_ATTESTER}`,
+    );
   });
 
-  it("rejects a tampered uid", async () => {
+  it("throws on a tampered uid", () => {
     const attestation = signAttestation(attestMessage(descriptorHash));
     assert(attestation.sig);
     attestation.sig.uid = "0x" + "ee".repeat(32);
-    const result = await verifyAttestation(attestation, descriptorHash);
-    assert("reason" in result);
-    expect(result.reason).toContain("does not match the computed uid");
+    expect(() => verifyAttestation(attestation, descriptorHash)).toThrow(
+      "does not match the computed uid",
+    );
   });
 
-  it("rejects a structurally incomplete attestation", async () => {
-    const result = await verifyAttestation(
-      { signer: TEST_ATTESTER },
-      descriptorHash,
+  it("throws on a structurally incomplete attestation", () => {
+    expect(() =>
+      verifyAttestation({ signer: TEST_ATTESTER }, descriptorHash),
+    ).toThrow("malformed attestation");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAttestationRevoked
+// ---------------------------------------------------------------------------
+
+describe("isAttestationRevoked", () => {
+  const uid = registryAttestation.sig?.uid ?? "";
+
+  it("reads getRevokeOffchain(attester, uid) on the mainnet EAS contract", async () => {
+    const call = vi.fn(async () => ZERO_WORD);
+    expect(await isAttestationRevoked({ call }, CYFRIN_ATTESTER, uid)).toBe(
+      false,
     );
-    assert("reason" in result);
-    expect(result.reason).toContain("malformed attestation");
+    expect(call).toHaveBeenCalledExactlyOnceWith(1, {
+      to: EAS_ADDRESS,
+      data: GET_REVOKE_OFFCHAIN + addrWord(CYFRIN_ATTESTER) + uid.slice(2),
+    });
+  });
+
+  it("reports a non-zero revocation timestamp as revoked", async () => {
+    expect(await isAttestationRevoked(revoked, CYFRIN_ATTESTER, uid)).toBe(
+      true,
+    );
+  });
+
+  it("throws when the eth_call result is not a 32-byte word", async () => {
+    await expect(
+      isAttestationRevoked({ call: async () => "0x" }, CYFRIN_ATTESTER, uid),
+    ).rejects.toThrow("Unexpected getRevokeOffchain result of 0 bytes");
   });
 });
 
@@ -409,7 +435,14 @@ const externalData: ExternalDataProvider = {
 
 const TRANSFER = "0xa9059cbb" + addrWord(ALICE) + word("f4240"); // 1 USDT
 
-function tetherOpts(attestations?: AttestationOptions): FormatOptions {
+/**
+ * Build format options for the Tether fixture. `chainClient` defaults to a
+ * client that reports no revocations; pass `null` to omit it.
+ */
+function tetherOpts(
+  attestations?: AttestationOptions,
+  chainClient: ChainClient | null = notRevoked,
+): FormatOptions {
   const fsOpts = buildFilesystemResolverOpts(
     __dirname,
     {
@@ -417,7 +450,7 @@ function tetherOpts(attestations?: AttestationOptions): FormatOptions {
         { chainId: CHAIN_ID, address: USDT, file: "calldata-usdt.json" },
       ],
     },
-    externalData,
+    chainClient ? { ...externalData, chainClient } : externalData,
   );
   if (!attestations) return fsOpts;
   const resolverOptions = fsOpts.descriptorResolverOptions;
@@ -533,30 +566,62 @@ describe("attestation policy — format() with the filesystem resolver", () => {
   it("rejects the descriptor when the attestation was revoked", async () => {
     const result = await format(
       tx,
-      tetherOpts({
-        trustedAttesters: [CYFRIN_ATTESTER],
-        checkRevocation: async () => true,
-      }),
+      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER] }, revoked),
     );
     expect(result.warnings?.[0].code).toBe("NO_TRUSTED_ATTESTATION");
     expect(result.warnings?.[0].message).toContain("revoked");
     expect(result.rawCalldataFallback?.selector).toBe("0xa9059cbb");
   });
 
-  it("formats when checkRevocation reports the attestation as not revoked", async () => {
-    const checkRevocation = vi.fn(async () => false);
+  it("reads the revocation state through the chainClient", async () => {
+    const call = vi.fn(async () => ZERO_WORD);
     const result = await format(
       tx,
-      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER], checkRevocation }),
+      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER] }, { call }),
     );
     assertTetherTransfer(result);
-    expect(checkRevocation).toHaveBeenCalledExactlyOnceWith(
-      CYFRIN_ATTESTER,
-      registryAttestation.sig?.uid,
-    );
+    assert(registryAttestation.sig?.uid);
+    expect(call).toHaveBeenCalledExactlyOnceWith(1, {
+      to: EAS_ADDRESS,
+      data:
+        GET_REVOKE_OFFCHAIN +
+        addrWord(CYFRIN_ATTESTER) +
+        registryAttestation.sig.uid.slice(2),
+    });
   });
 
-  it("returns ATTESTATIONS_NOT_SUPPORTED for a resolver without fetchAttestation", async () => {
+  it("returns ATTESTATION_OPTIONS_INCOMPLETE when the provider has no chainClient", async () => {
+    const result = await format(
+      tx,
+      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER] }, null),
+    );
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("ATTESTATION_OPTIONS_INCOMPLETE");
+    expect(result.warnings[0].message).toContain("chainClient");
+    expect(result.rawCalldataFallback?.selector).toBe("0xa9059cbb");
+  });
+
+  it("reports a chainClient transport error as DESCRIPTOR_FETCH_ERROR", async () => {
+    const result = await format(
+      tx,
+      tetherOpts(
+        { trustedAttesters: [CYFRIN_ATTESTER] },
+        {
+          call: async () => {
+            throw new Error("rpc down");
+          },
+        },
+      ),
+    );
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("DESCRIPTOR_FETCH_ERROR");
+    expect(result.warnings[0].message).toContain("rpc down");
+    expect(result.rawCalldataFallback).toBeUndefined();
+  });
+
+  it("returns ATTESTATION_OPTIONS_INCOMPLETE for a resolver without fetchAttestation", async () => {
     const resolver: DescriptorResolver = {
       index: {
         calldataIndex: {
@@ -572,11 +637,12 @@ describe("attestation policy — format() with the filesystem resolver", () => {
         resolver,
         attestations: { trustedAttesters: [CYFRIN_ATTESTER] },
       },
-      externalDataProvider: externalData,
+      externalDataProvider: { ...externalData, chainClient: notRevoked },
     });
     assert(result.warnings);
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0].code).toBe("ATTESTATIONS_NOT_SUPPORTED");
+    expect(result.warnings[0].code).toBe("ATTESTATION_OPTIONS_INCOMPLETE");
+    expect(result.warnings[0].message).toContain("fetchAttestation");
     expect(result.rawCalldataFallback?.selector).toBe("0xa9059cbb");
   });
 
@@ -590,7 +656,8 @@ describe("attestation policy — format() with the filesystem resolver", () => {
         index: { calldataIndex: {}, typedDataIndex: {} },
         trustedTokens,
         // No attestation exists for the bundled descriptor, but the wallet
-        // vouches for the token directly, so formatting must still work.
+        // vouches for the token directly, so formatting must still work —
+        // even without a chainClient.
         attestations: { trustedAttesters: [CYFRIN_ATTESTER] },
       },
       externalDataProvider: externalData,
@@ -670,6 +737,7 @@ describe("attestation policy — includes resolution", () => {
           resolver: buildResolver({ [sigsPath]: attestation }),
           attestations: { trustedAttesters: [TEST_ATTESTER] },
         },
+        externalDataProvider: { chainClient: notRevoked },
       },
     );
 
@@ -694,6 +762,7 @@ describe("attestation policy — includes resolution", () => {
           resolver: buildResolver({ [sigsPath]: attestation }),
           attestations: { trustedAttesters: [TEST_ATTESTER] },
         },
+        externalDataProvider: { chainClient: notRevoked },
       },
     );
 
@@ -747,7 +816,7 @@ describe("attestation policy — resolveTypedDataDescriptor", () => {
               {
                 path: "eip712-mail.json",
                 encodeTypeHashes: [
-                  bytesToHex(keccak256(asciiToBytes(ENCODE_TYPE))),
+                  bytesToHex(keccak256(utf8ToBytes(ENCODE_TYPE))),
                 ],
               },
             ],
@@ -764,23 +833,78 @@ describe("attestation policy — resolveTypedDataDescriptor", () => {
     const attestation = signAttestation(
       attestMessage(computeDescriptorHash(eip712Descriptor)),
     );
-    const result = await resolveTypedDataDescriptor(typedData, {
-      type: "custom",
-      resolver: buildResolver({
-        [`sigs/eip712-mail.eip155-1-${TEST_ATTESTER}.json`]: attestation,
-      }),
-      attestations: { trustedAttesters: [TEST_ATTESTER] },
-    });
+    const result = await resolveTypedDataDescriptor(
+      typedData,
+      {
+        type: "custom",
+        resolver: buildResolver({
+          [`sigs/eip712-mail.eip155-1-${TEST_ATTESTER}.json`]: attestation,
+        }),
+        attestations: { trustedAttesters: [TEST_ATTESTER] },
+      },
+      notRevoked,
+    );
     assert("descriptor" in result);
     expect(result.descriptor).toEqual(eip712Descriptor);
   });
 
+  it("rejects an attestation file signed by an address other than the trusted attester", async () => {
+    // A valid attestation by the test key, stored under Cyfrin's file name.
+    const attestation = signAttestation(
+      attestMessage(computeDescriptorHash(eip712Descriptor)),
+    );
+    const call = vi.fn(async () => ZERO_WORD);
+    const result = await resolveTypedDataDescriptor(
+      typedData,
+      {
+        type: "custom",
+        resolver: buildResolver({
+          [`sigs/eip712-mail.eip155-1-${CYFRIN_ATTESTER}.json`]: attestation,
+        }),
+        attestations: { trustedAttesters: [CYFRIN_ATTESTER] },
+      },
+      { call },
+    );
+    assert("warning" in result);
+    expect(result.warning.code).toBe("NO_TRUSTED_ATTESTATION");
+    expect(result.warning.message).toContain(
+      `${CYFRIN_ATTESTER}: attestation was signed by ${TEST_ATTESTER}`,
+    );
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("does not read the chain when an attestation fails verification", async () => {
+    const call = vi.fn(async () => ZERO_WORD);
+    const attestation = signAttestation(attestMessage("0x" + "cd".repeat(32)));
+    const result = await resolveTypedDataDescriptor(
+      typedData,
+      {
+        type: "custom",
+        resolver: buildResolver({
+          [`sigs/eip712-mail.eip155-1-${TEST_ATTESTER}.json`]: attestation,
+        }),
+        attestations: { trustedAttesters: [TEST_ATTESTER] },
+      },
+      { call },
+    );
+    assert("warning" in result);
+    expect(result.warning.code).toBe("NO_TRUSTED_ATTESTATION");
+    expect(result.warning.message).toContain(
+      "does not match the computed hash",
+    );
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("fails with NO_TRUSTED_ATTESTATION when no attestation exists", async () => {
-    const result = await resolveTypedDataDescriptor(typedData, {
-      type: "custom",
-      resolver: buildResolver({}),
-      attestations: { trustedAttesters: [TEST_ATTESTER] },
-    });
+    const result = await resolveTypedDataDescriptor(
+      typedData,
+      {
+        type: "custom",
+        resolver: buildResolver({}),
+        attestations: { trustedAttesters: [TEST_ATTESTER] },
+      },
+      notRevoked,
+    );
     assert("warning" in result);
     expect(result.warning.code).toBe("NO_TRUSTED_ATTESTATION");
     expect(result.warning.message).toContain("eip712-mail.json");

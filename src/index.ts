@@ -30,7 +30,7 @@ import {
   extractPrimaryType,
   formatEip712,
 } from "./eip712.js";
-import { warn } from "./utils.js";
+import { parseChainId, warn } from "./utils.js";
 import type {
   DisplayModel,
   FormatOptions,
@@ -57,7 +57,6 @@ export {
 export {
   attestationPathForDescriptor,
   computeDescriptorHash,
-  verifyAttestation,
 } from "./attestations.js";
 
 /** EIP-712 utility helpers. */
@@ -88,6 +87,7 @@ export async function format(
         tx.chainId,
         tx.to,
         opts?.descriptorResolverOptions,
+        opts?.externalDataProvider?.chainClient,
       );
 
       if ("warning" in result) {
@@ -231,7 +231,8 @@ export async function formatTypedData(
   opts?: FormatOptions,
 ): Promise<DisplayModel> {
   try {
-    const { chainId, verifyingContract } = typedData.domain;
+    const chainId = parseChainId(typedData.domain.chainId);
+    const { verifyingContract } = typedData.domain;
 
     if (!chainId || !verifyingContract) {
       return {
@@ -249,6 +250,7 @@ export async function formatTypedData(
       const result = await resolveTypedDataDescriptor(
         typedData,
         opts?.descriptorResolverOptions,
+        opts?.externalDataProvider?.chainClient,
       );
       if ("warning" in result) {
         return { warnings: [result.warning] };

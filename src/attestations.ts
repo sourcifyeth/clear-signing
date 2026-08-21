@@ -3,10 +3,9 @@
  *
  * Auditors attest ERC-7730 descriptors with EAS offchain attestations over a
  * canonical `bytes32 descriptorHash` schema. This module implements the
- * offline parts of the ERC-8176 verification procedure: descriptor hashing,
- * attestation signature verification, and the registry's `sigs/` file
- * convention. Revocation state lives on-chain, so checking it is delegated to
- * the wallet via `AttestationOptions.checkRevocation`.
+ * ERC-8176 verification procedure: descriptor hashing, attestation signature
+ * verification, the revocation check on the EAS contract (through the
+ * wallet's `ChainClient`), and the registry's `sigs/` file convention.
  *
  * See https://github.com/ethereum/ERCs/pull/1576 and the registry's
  * `auditors/` directory for the audit process.
@@ -14,21 +13,24 @@
 
 import { secp256k1 } from "@noble/curves/secp256k1";
 import type {
-  AttestationVerificationResult,
+  ChainClient,
   Descriptor,
+  EcdsaSignature,
   OffchainAttestation,
-  OffchainAttestationDomain,
   OffchainAttestationMessage,
-  OffchainAttestationSignature,
+  TypedDataDomain,
 } from "./types.js";
 import {
   bigIntToBytes,
   bytesToHex,
+  bytesToUnsignedBigInt,
   coerceBigInt,
   concatBytes,
   hexToBytes,
   keccak256,
   normalizeAddress,
+  parseChainId,
+  selectorForSignature,
   toChecksumAddress,
   utf8ToBytes,
 } from "./utils.js";
@@ -40,6 +42,11 @@ const ERC8176_SCHEMA_UID =
 /** The canonical EAS contract the schema is registered on (Ethereum mainnet). */
 const EAS_MAINNET_ADDRESS = "0xa1207f3bba224e2c9c3c6d5af63d0eb1582ce587";
 const EAS_MAINNET_CHAIN_ID = 1;
+
+/** `getRevokeOffchain(address revoker, bytes32 data) returns (uint64)`. */
+const GET_REVOKE_OFFCHAIN_SELECTOR = selectorForSignature(
+  "getRevokeOffchain(address,bytes32)",
+);
 
 /** The EAS offchain attestation version ERC-8176 attestations use. */
 const OFFCHAIN_ATTESTATION_VERSION = 2;
@@ -92,9 +99,6 @@ export function computeDescriptorHash(descriptor: Descriptor): string {
  * at `descriptorPath`, following the registry convention
  * `<dir>/sigs/<name>.eip155-1-<checksummedAttester>.json`. The path is
  * relative to the same root as `descriptorPath`.
- *
- * Accepts a lowercase or EIP-55 checksummed attester address; throws when the
- * address is not a valid 20-byte hex address.
  */
 export function attestationPathForDescriptor(
   descriptorPath: string,
@@ -111,74 +115,68 @@ export function attestationPathForDescriptor(
   return `${dir}sigs/${name}.eip155-${EAS_MAINNET_CHAIN_ID}-${toChecksumAddress(address)}.json`;
 }
 
+/** The outcome of a successful {@link verifyAttestation}. */
+type VerifiedAttestation = {
+  /** Recovered attester address, EIP-55 checksummed. */
+  attester: string;
+  /** Recomputed EAS offchain attestation UID (bytes32 hex). */
+  uid: string;
+};
+
 /**
  * Verify a single ERC-8176 offchain attestation against a descriptor hash
- * (as computed by {@link computeDescriptorHash}). Follows the ERC's
- * verification procedure:
+ * (as computed by {@link computeDescriptorHash}). Follows the offline steps
+ * of the ERC's verification procedure:
  *
  *   1. the schema is the canonical ERC-8176 schema,
  *   2. the attested data equals `descriptorHash`,
  *   3. the EIP-712 domain pins the canonical EAS contract on Ethereum mainnet,
  *   4. `expirationTime` (0 = never expires) has not passed,
- *   5. the EIP-712 signature recovers the attester,
- *   6. the recomputed offchain attestation UID matches the declared one, and
- *   7. the attester has not revoked the attestation — checked through
- *      `options.checkRevocation` when provided, skipped otherwise.
- *
- * Returns the recovered attester on success. Whether that attester is
- * trusted (the ERC's final step) is the caller's decision.
- *
- * Only EAS offchain attestation version 2 and EOA attesters are supported;
- * ERC-1271 contract attesters and onchain attestations need chain access and
- * are out of scope for this library.
+ *   5. the EIP-712 signature recovers the attester, and
+ *   6. the recomputed offchain attestation UID matches the declared one.
  */
-export async function verifyAttestation(
+export function verifyAttestation(
   attestation: OffchainAttestation,
   descriptorHash: string,
-  options?: {
-    checkRevocation?: (attester: string, uid: string) => Promise<boolean>;
-  },
-): Promise<AttestationVerificationResult> {
+): VerifiedAttestation {
   const { domain, message, signature } = attestation.sig ?? {};
   if (!domain || !message || !signature) {
-    return {
-      reason:
-        "malformed attestation: sig.domain, sig.message, or sig.signature is missing",
-    };
+    throw new Error(
+      "malformed attestation: sig.domain, sig.message, or sig.signature is missing",
+    );
   }
 
   if (message.version !== OFFCHAIN_ATTESTATION_VERSION) {
-    return {
-      reason: `unsupported offchain attestation version ${String(message.version)}`,
-    };
+    throw new Error(
+      `unsupported offchain attestation version ${String(message.version)}`,
+    );
   }
   if (
     typeof message.schema !== "string" ||
     message.schema.toLowerCase() !== ERC8176_SCHEMA_UID
   ) {
-    return {
-      reason: `schema ${String(message.schema)} is not the canonical ERC-8176 schema`,
-    };
+    throw new Error(
+      `schema ${String(message.schema)} is not the canonical ERC-8176 schema`,
+    );
   }
   if (
     typeof message.data !== "string" ||
     message.data.toLowerCase() !== descriptorHash.toLowerCase()
   ) {
-    return {
-      reason: `attested descriptor hash ${String(message.data)} does not match the computed hash ${descriptorHash}`,
-    };
+    throw new Error(
+      `attested descriptor hash ${String(message.data)} does not match the computed hash ${descriptorHash}`,
+    );
   }
   if (
     typeof domain.name !== "string" ||
     typeof domain.version !== "string" ||
-    Number(domain.chainId) !== EAS_MAINNET_CHAIN_ID ||
+    parseChainId(domain.chainId) !== EAS_MAINNET_CHAIN_ID ||
     typeof domain.verifyingContract !== "string" ||
     normalizeAddress(domain.verifyingContract) !== EAS_MAINNET_ADDRESS
   ) {
-    return {
-      reason:
-        "attestation domain does not pin the canonical EAS contract on Ethereum mainnet",
-    };
+    throw new Error(
+      "attestation domain does not pin the canonical EAS contract on Ethereum mainnet",
+    );
   }
 
   const time = coerceBigInt(message.time);
@@ -191,13 +189,13 @@ export async function verifyAttestation(
     typeof message.refUID !== "string" ||
     typeof message.salt !== "string"
   ) {
-    return { reason: "malformed attestation: message fields are missing" };
+    throw new Error("malformed attestation: message fields are missing");
   }
   if (
     expirationTime !== 0n &&
     expirationTime <= BigInt(Math.floor(Date.now() / 1000))
   ) {
-    return { reason: `attestation expired at ${expirationTime}` };
+    throw new Error(`attestation expired at ${expirationTime}`);
   }
 
   let attester: string;
@@ -207,7 +205,7 @@ export async function verifyAttestation(
     attester = toChecksumAddress(recoverSigner(digest, signature));
     uid = computeOffchainUid(message, time, expirationTime);
   } catch {
-    return { reason: "malformed attestation: invalid signature or encoding" };
+    throw new Error("malformed attestation: invalid signature or encoding");
   }
 
   const { signer } = attestation;
@@ -216,9 +214,9 @@ export async function verifyAttestation(
     (typeof signer !== "string" ||
       normalizeAddress(signer) !== normalizeAddress(attester))
   ) {
-    return {
-      reason: `signature recovers ${attester}, not the declared signer ${String(signer)}`,
-    };
+    throw new Error(
+      `signature recovers ${attester}, not the declared signer ${String(signer)}`,
+    );
   }
 
   const declaredUid = attestation.sig?.uid;
@@ -226,19 +224,44 @@ export async function verifyAttestation(
     declaredUid !== undefined &&
     (typeof declaredUid !== "string" || declaredUid.toLowerCase() !== uid)
   ) {
-    return {
-      reason: `declared attestation uid ${String(declaredUid)} does not match the computed uid ${uid}`,
-    };
+    throw new Error(
+      `declared attestation uid ${String(declaredUid)} does not match the computed uid ${uid}`,
+    );
   }
 
-  if (
-    options?.checkRevocation &&
-    (await options.checkRevocation(attester, uid))
-  ) {
-    return { reason: `attestation ${uid} was revoked by ${attester}` };
-  }
+  return { attester, uid };
+}
 
-  return { attester };
+/**
+ * Read `getRevokeOffchain(attester, uid)` on the canonical EAS contract on
+ * Ethereum mainnet through `chainClient`. EAS stores the revocation
+ * timestamp under `(revoker, data)`; a non-zero value means the attester
+ * revoked the attestation.
+ */
+export async function isAttestationRevoked(
+  chainClient: ChainClient,
+  attester: string,
+  uid: string,
+): Promise<boolean> {
+  const data = bytesToHex(
+    concatBytes(
+      GET_REVOKE_OFFCHAIN_SELECTOR,
+      addressWord(attester),
+      bytes32(uid),
+    ),
+  );
+  const result = hexToBytes(
+    await chainClient.call(EAS_MAINNET_CHAIN_ID, {
+      to: EAS_MAINNET_ADDRESS,
+      data,
+    }),
+  );
+  if (result.length !== 32) {
+    throw new Error(
+      `Unexpected getRevokeOffchain result of ${result.length} bytes`,
+    );
+  }
+  return bytesToUnsignedBigInt(result) !== 0n;
 }
 
 /** Decode a bytes32 hex string, throwing when it is not exactly 32 bytes. */
@@ -259,7 +282,7 @@ function addressWord(address: string): Uint8Array {
 
 /** Compute the EIP-712 signing digest of an EAS `Attest` message. */
 function computeAttestDigest(
-  domain: OffchainAttestationDomain,
+  domain: TypedDataDomain,
   message: OffchainAttestationMessage,
   time: bigint,
   expirationTime: bigint,
@@ -295,7 +318,7 @@ function computeAttestDigest(
 /** Recover the 20-byte signer address of an ECDSA signature over `digest`. */
 function recoverSigner(
   digest: Uint8Array,
-  signature: OffchainAttestationSignature,
+  signature: EcdsaSignature,
 ): Uint8Array {
   const { r, s, v } = signature;
   if (typeof r !== "string" || typeof s !== "string" || typeof v !== "number") {
@@ -312,16 +335,10 @@ function recoverSigner(
 }
 
 /**
- * Recompute the deterministic EAS offchain attestation UID (version 2):
- * keccak256 of the packed encoding
- * `(uint16 version, bytes utf8(schema), address recipient, address attester,
- * uint64 time, uint64 expirationTime, bool revocable, bytes32 refUID,
- * bytes data, bytes32 salt, uint32 bump)` with the attester fixed to the
- * zero address and bump fixed to 0, matching the EAS SDK.
- *
- * Recomputing (rather than trusting the declared `sig.uid`) matters for
- * revocation: `getRevokeOffchain` is keyed by uid, so a tampered uid would
- * otherwise hide an existing revocation.
+ * Recompute the EAS v2 offchain attestation UID: keccak256 of the packed
+ * message fields with a zero-address attester and bump 0 (as in the EAS SDK).
+ * The declared `sig.uid` is not trusted: `getRevokeOffchain` is keyed by uid,
+ * so a tampered uid could hide a revocation.
  */
 function computeOffchainUid(
   message: OffchainAttestationMessage,
