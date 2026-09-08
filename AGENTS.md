@@ -18,7 +18,8 @@ src/
 ├── formatters.ts               # Individual format handlers: renderField(), formatRaw(), etc.
 ├── calldata.ts                 # Calldata path: formatCalldata(), signature parsing, ABI decoding
 ├── eip712.ts                   # EIP-712 path: formatEip712(), encodeType matching, type resolution
-├── resolver.ts                 # Descriptor lookup, includes resolution, and descriptor merging
+├── resolver.ts                 # Descriptor lookup, includes resolution, descriptor merging, attestation policy
+├── attestations.ts             # ERC-8176: descriptor hash (JCS), offchain attestation verification, sigs/ paths
 ├── bundled-descriptors.ts      # Bundled ERC-20/721 templates → buildBundledTokenDescriptor()
 ├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
@@ -81,6 +82,21 @@ src/
   `extractPrimaryType` for `resolver.ts` and `github-registry-index.ts`; the
   rest is module-private.
 
+- **`attestations.ts`** — ERC-8176 descriptor attestations. Exports
+  `computeDescriptorHash` (keccak256 of the RFC 8785 / JCS canonical JSON of the
+  includes-resolved descriptor), `verifyAttestation` (offline verification of
+  an EAS offchain attestation: canonical schema UID, attested hash, EIP-712
+  domain pin to the mainnet EAS contract, expiration, ECDSA recovery, offchain
+  UID recomputation; throws on the first failed check and returns
+  `{ attester, uid }`), `isAttestationRevoked` (the revocation read —
+  `getRevokeOffchain(attester, uid)` on the mainnet EAS contract through the
+  wallet's `ChainClient`), and
+  `attestationPathForDescriptor` (the registry's
+  `<dir>/sigs/<name>.eip155-1-<checksummedAttester>.json` convention). The JCS
+  canonicalizer is module-private — for `JSON.parse` output it is exactly
+  `JSON.stringify` with recursively sorted keys. The trusted-attester policy
+  loop itself lives in `resolver.ts` (`applyAttestationPolicy`).
+
 - **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 template descriptors (the
   registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` files, transcribed as TS
   `const`s in `bundled/erc20.ts` and `bundled/erc721.ts`). Exports
@@ -101,6 +117,12 @@ src/
        → registry index lookup by (chainId, to); on a miss, if
          options.trustedTokens tags the contract, return
          buildBundledTokenDescriptor(standard, chainId, to)
+       → on an index hit, applyAttestationPolicy() — when options.attestations
+         is set, the resolved descriptor is only accepted with a valid
+         attestation from a trusted attester (bundled trusted-token
+         descriptors are exempt). The revocation read goes through
+         opts.externalDataProvider.chainClient, which format() passes to
+         the resolver as a separate parameter
    → calldata.formatCalldata(tx, descriptor, externalDataProvider?)
        → findFormatBySelector() matches selector to a display.formats entry
        → decodeArguments() decodes calldata into { values, arrayLengths } maps
@@ -117,6 +139,7 @@ src/
        → looks up (chainId, verifyingContract, primaryType) in typedDataIndex
        → disambiguates entries by matching keccak256(encodeType) against
          each entry's encodeTypeHashes
+       → applyAttestationPolicy() — same attestation gating as the calldata path
    → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
        → findFormatSpec() matches display.formats key via encodeType string
        → applyFieldFormats() (from fields.ts) renders each field
@@ -163,6 +186,68 @@ different semantics (ERC-20 `value` → tokenAmount vs. ERC-721 `tokenId` → nf
 so the calldata alone cannot disambiguate them. Trust is delegated entirely to the
 wallet.
 
+## Descriptor Attestations (ERC-8176)
+
+`descriptorResolverOptions.attestations` (type `AttestationOptions`, declared on
+the shared `BaseResolverOptions`) turns on the ERC-8176 review gate: a resolved
+registry descriptor is only accepted when one of `trustedAttesters` has a valid
+EAS offchain attestation over it. Without the option, descriptors are used
+unverified — README and GUIDE mark that mode as testing-only.
+
+Key mechanics:
+
+- The gate runs in `applyAttestationPolicy` (`resolver.ts`) **after** includes
+  resolution, because the ERC defines the descriptor hash over the fully
+  resolved descriptor: `keccak256(JCS(mergedDescriptor))` (`computeDescriptorHash`).
+- Attestations are fetched per trusted attester via the optional
+  `DescriptorResolver.fetchAttestation(descriptorPath, checksummedAttester)`.
+  The GitHub resolver builds the registry `sigs/` path
+  (`attestationPathForDescriptor`) and treats HTTP 404 as "no attestation"
+  (`fetchOptionalRegistryFile`); the filesystem resolver treats ENOENT the same
+  way. A custom resolver without `fetchAttestation` fails every gated
+  resolution with `ATTESTATION_OPTIONS_INCOMPLETE`.
+- `verifyAttestation` (`attestations.ts`) checks: schema is the canonical
+  ERC-8176 schema UID, attested `data` equals the computed descriptor hash,
+  EIP-712 domain pins the canonical EAS contract on Ethereum mainnet,
+  `expirationTime` (0 = never) has not passed, the signature recovers the
+  attester (EOA only), and the recomputed EAS v2 offchain UID matches the
+  declared one (a tampered uid would otherwise hide a revocation). It is
+  synchronous and **throws** a plain `Error` on the first failed check;
+  `applyAttestationPolicy` catches it and turns the message into a
+  per-attester failure reason. This is the one place where a thrown error is
+  a normal outcome rather than an I/O failure — it never escapes the
+  resolver.
+- After a successful verification, `applyAttestationPolicy` reads the
+  revocation state with `isAttestationRevoked` (`attestations.ts`):
+  `getRevokeOffchain(attester, uid)` on the canonical EAS contract on Ethereum
+  mainnet, encoded and decoded in the library and sent through the wallet's
+  `ChainClient.call(1, { to, data })`. A non-zero word means revoked; a
+  result that is not exactly 32 bytes throws. The read runs outside the
+  `try`, so its transport errors propagate as `DESCRIPTOR_FETCH_ERROR`.
+- **`ChainClient`** (`types.ts`) is the wallet's raw, read-only RPC access:
+  `call(chainId, { to, data }) → hex`. It lives on
+  `ExternalDataProvider.chainClient` next to the semantic resolvers, but it is
+  a different kind of hook: the library decides what to call and how to decode
+  it; the wallet only supplies the transport. Today only the revocation read
+  uses it; any future raw chain read (e.g. logs) belongs on the same object.
+  The resolver layer never sees the full provider — `format()` /
+  `formatTypedData()` pass only `externalDataProvider?.chainClient` as the
+  last parameter of `resolveCalldataDescriptor` /
+  `resolveTypedDataDescriptor`. Standalone callers pass their own.
+- An attestation policy without a `chainClient` also fails with
+  `ATTESTATION_OPTIONS_INCOMPLETE`. One code covers both setup gaps (missing
+  `chainClient`, missing `fetchAttestation`); the message names the gap.
+- Failure surfaces as a `NO_TRUSTED_ATTESTATION` warning (with per-attester
+  reasons in the message); `format()` then falls back to `rawCalldataFallback`
+  exactly like `NO_DESCRIPTOR`. Attestation fetch and `chainClient` I/O
+  errors still throw (→ `DESCRIPTOR_FETCH_ERROR` in `index.ts`), consistent
+  with descriptor fetching.
+- Bundled trusted-token descriptors are **not** gated — `trustedTokens` trust
+  is already delegated to the wallet. Note the ordering: a registry index hit
+  that fails the attestation policy does _not_ fall back to `trustedTokens`.
+- Only EAS offchain attestation version 2 with EOA signatures is supported.
+  Onchain attestations and ERC-1271 contract attesters are out of scope.
+
 ## Descriptor Sources
 
 `FormatOptions.descriptorResolverOptions` is a discriminated union:
@@ -191,7 +276,7 @@ const opts: FormatOptions = {
 
 **How it works:**
 
-1. The public `resolveCalldataDescriptor` / `resolveTypedDataDescriptor` accept the same `GitHubResolverOptions | CustomResolverOptions` value that `FormatOptions.descriptorResolverOptions` carries. They build a `DescriptorResolver` (`{ index, fetchDescriptor }`) via the module-private `createResolver`. For `type: "github"` without an explicit `options.index`, `createResolver` calls `fetchPrebuiltRegistryIndex(source)` to fetch `index.calldata.json` and `index.eip712.json` in parallel. For `type: "custom"`, it returns `options.resolver` unchanged. **No internal caching** — every resolve call builds a fresh resolver, so callers should pre-fetch the index once and pass the same `descriptorResolverOptions.index` to every `format()` call.
+1. The public `resolveCalldataDescriptor` / `resolveTypedDataDescriptor` accept the same `GitHubResolverOptions | CustomResolverOptions` value that `FormatOptions.descriptorResolverOptions` carries. They build a `DescriptorResolver` (`{ index, fetchDescriptor, fetchAttestation? }`) via the module-private `createResolver`. For `type: "github"` without an explicit `options.index`, `createResolver` calls `fetchPrebuiltRegistryIndex(source)` to fetch `index.calldata.json` and `index.eip712.json` in parallel. For `type: "custom"`, it returns `options.resolver` unchanged. **No internal caching** — every resolve call builds a fresh resolver, so callers should pre-fetch the index once and pass the same `descriptorResolverOptions.index` to every `format()` call.
 2. The fetched index has two maps:
    - `calldataIndex: Record<caip10, path>` — keyed by `context.contract.deployments[].{chainId, address}`
    - `typedDataIndex: Record<caip10, Record<primaryType, TypedDataIndexEntry[]>>` — keyed by `context.eip712.deployments[].{chainId, address}`, then by primary type. Each entry carries the descriptor `path` and the keccak256 hashes of every `encodeType` it declares (`display.formats` keys), so multiple descriptors at the same `(chainId, verifyingContract, primaryType)` triple can be disambiguated at lookup time.
@@ -443,6 +528,14 @@ ERC-7730 defines multiple path prefixes:
 
 Container paths are resolved by `resolveTransactionPath()` and `resolveTypedDataPath()` in `descriptor.ts`.
 
+`TypedDataDomain.chainId` is `number | string` — `eth_signTypedData_v4`
+payloads and EAS attestation files carry it as a decimal or `0x`-hex string.
+Every reader normalizes it with `parseChainId()` (`utils.ts`) before use: the
+typed-data index key, the deployment binding check, the `@.chainId` container
+path, the container chain ID passed to the field pipeline, and the EAS domain
+pin in `attestations.ts`. The same type describes the EIP-712 domain of an
+offchain attestation (`OffchainAttestationSig.domain`).
+
 ### Warnings
 
 Warnings are returned in the `DisplayModel.warnings` array and on individual `DisplayField.warning`. All warning codes are the `WarningCode` string literal union defined in `types.ts`. Use the `warn(code, message)` helper from `utils.ts` to create them. **Never use out-parameters for warnings — always return them in the result object.**
@@ -506,6 +599,7 @@ Tests live in `test/`. Current test files:
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
+- `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
 
 ### Test guidelines
 
@@ -541,6 +635,7 @@ Output is ESM with TypeScript declarations.
 ## Dependencies
 
 - `@noble/hashes` — Keccak256 (browser + Node compatible)
+- `@noble/curves` — secp256k1 signature recovery for attestation verification (browser + Node compatible)
 - `typescript` (dev)
 - `vitest` (dev)
 
@@ -606,6 +701,22 @@ import { formatAmountWithDecimals } from "./utils";
 const display = formatAmountWithDecimals(1000000n, 6); // "1"
 ```
 
+### Where types live
+
+`types.ts` holds the public type surface only: everything a consumer can
+receive from or pass to an exported function (`index.ts` re-exports all of it
+with `export type *`). A type belongs there when it is a parameter or return
+type of a public function, a member of a public interface, or a nested part
+of one (e.g. `Descriptor` → `DescriptorContext`, `OffchainAttestation` →
+`OffchainAttestationMessage`).
+
+A type that a consumer can never reach stays in the module that owns it —
+module-private, or exported for other internal modules only. Examples:
+`RenderFieldResult` in `formatters.ts`, `ArgumentValue` in `descriptor.ts`.
+Do not add such types to `types.ts`. When an internal type becomes reachable
+(a function that returns it gets exported from `index.ts`), move it to
+`types.ts` in the same change.
+
 ## Gotchas
 
 1. **JSON imports require assertion:** `import data from './file.json' with { type: 'json' };` — and for that reason the bundled descriptors (`src/bundled/*.ts`) are committed as TypeScript `const`s, **not** imported JSON. Import attributes caused build/tooling trouble; plain TS bundles as code in every target (ESM/CJS/RN/browser) with no `resolveJsonModule`, no esbuild JSON loader, and no import-attribute support required, and gives the objects compile-time `Descriptor` typing.
@@ -613,7 +724,7 @@ const display = formatAmountWithDecimals(1000000n, 6); // "1"
 3. **Selector matching is case-sensitive** on function names
 4. **Address normalization:** Always lowercase for comparisons
 5. **Minimize exports:** Only export symbols that are imported by other modules. Keep internal helpers module-private.
-6. **Check `utils.ts` before writing helpers:** Always check if `utils.ts` already has a function for what you need (e.g. `hexToBytes`, `bytesToHex`, `bytesToAscii`, `asciiToBytes`, `bigIntToBytes`, `bytesToBigInt`, etc.) before writing a new one — in both `src/` and `test/` files.
+6. **Check `utils.ts` before writing helpers:** Always check if `utils.ts` already has a function for what you need (e.g. `hexToBytes`, `bytesToHex`, `bytesToAscii`, `utf8ToBytes`, `concatBytes`, `bigIntToBytes`, `bytesToUnsignedBigInt`, `parseChainId`, etc.) before writing a new one — in both `src/` and `test/` files.
 7. **Argument value conversion:** To turn a JS literal (descriptor constant, EIP-712 message value, `ifNotIn`/`mustMatch` candidate) into an `ArgumentValue`, use `toArgumentValue` from `descriptor.ts` — it infers the type from the value shape. Compare two `ArgumentValue`s with `argumentValueEquals` (cross-matches `uint`/`int` via bigint). Prefer these over bespoke per-type matching helpers.
 
 ## Descriptor Type — Defensive Programming

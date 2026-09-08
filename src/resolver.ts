@@ -1,16 +1,26 @@
 import {
   DEFAULT_REPO,
   DEFAULT_REF,
+  fetchOptionalRegistryFile,
   fetchRegistryFile,
 } from "./github-registry-client.js";
 import { computeEncodeType } from "./eip712.js";
 import { fetchPrebuiltRegistryIndex } from "./github-registry-index.js";
+import {
+  attestationPathForDescriptor,
+  computeDescriptorHash,
+  isAttestationRevoked,
+  verifyAttestation,
+} from "./attestations.js";
 import type {
+  AttestationOptions,
+  ChainClient,
   CustomResolverOptions,
   Descriptor,
   DescriptorResolver,
   GitHubResolverOptions,
   GitHubSource,
+  OffchainAttestation,
   TokenStandard,
   TrustedTokens,
   TypedData,
@@ -18,12 +28,13 @@ import type {
 } from "./types.js";
 import { buildBundledTokenDescriptor } from "./bundled-descriptors.js";
 import {
-  asciiToBytes,
   bytesToHex,
   hexToBytes,
   keccak256,
   normalizeAddress,
+  parseChainId,
   toChecksumAddress,
+  utf8ToBytes,
   warn,
 } from "./utils.js";
 
@@ -56,6 +67,11 @@ async function createResolver(
         index,
         fetchDescriptor: async (path) =>
           (await fetchRegistryFile(path, source)) as Descriptor,
+        fetchAttestation: async (path, attester) =>
+          (await fetchOptionalRegistryFile(
+            attestationPathForDescriptor(path, attester),
+            source,
+          )) as OffchainAttestation | null,
       };
     }
   }
@@ -64,22 +80,41 @@ async function createResolver(
 /**
  * Resolves a calldata descriptor by `(chainId, contractAddress)`. Returns
  * a `{ descriptor }` envelope on success, or a `{ warning }` envelope when
- * resolution fails — `NO_DESCRIPTOR` when nothing is indexed for the pair,
- * `CYCLIC_INCLUDES` when the `includes` chain self-references.
+ * resolution fails:
+ *
+ * - `NO_DESCRIPTOR` — nothing is indexed for the pair.
+ * - `CYCLIC_INCLUDES` — the `includes` chain self-references.
+ * - `ATTESTATION_OPTIONS_INCOMPLETE` — an `options.attestations` policy is
+ *   set, but `chainClient` is missing or the resolver has no
+ *   `fetchAttestation`.
+ * - `NO_TRUSTED_ATTESTATION` — no trusted attester has a valid attestation
+ *   for the descriptor. The policy reads revocation state through
+ *   `chainClient`.
  *
  * If no descriptor is indexed for the chain and address, the method also checks
  * the optional `options.trustedTokens` list for a matching trusted token. In case
- * of a matching trusted token, a token descriptor is generated on the fly.
+ * of a matching trusted token, a token descriptor is generated on the fly. The
+ * attestation policy does not apply to these bundled descriptors.
  */
 export async function resolveCalldataDescriptor(
   chainId: number,
   to: string,
   options?: GitHubResolverOptions | CustomResolverOptions,
+  chainClient?: ChainClient,
 ): Promise<ResolveDescriptorResult> {
   const resolver = await createResolver(options);
   const path =
     resolver.index.calldataIndex[`eip155:${chainId}:${normalizeAddress(to)}`];
-  if (path) return resolveWithIncludes(resolver, path);
+  if (path) {
+    const resolved = await resolveWithIncludes(resolver, path);
+    return applyAttestationPolicy(
+      resolver,
+      path,
+      resolved,
+      options?.attestations,
+      chainClient,
+    );
+  }
 
   // No registry descriptor. Check if a trusted token matches.
   const standard = lookupTrustedToken(options?.trustedTokens, chainId, to);
@@ -117,15 +152,25 @@ function lookupTrustedToken(
  *
  * Looks up candidates by `(chainId, verifyingContract, primaryType)`, then
  * picks the entry whose `encodeTypeHashes` contain the keccak256 hash of
- * the message's EIP-712 `encodeType` string. Returns `NO_DESCRIPTOR` if no
- * candidate matches, `CYCLIC_INCLUDES` if the `includes` chain self-references,
- * or `{ descriptor }` on success.
+ * the message's EIP-712 `encodeType` string. Returns a `{ descriptor }`
+ * envelope on success, or a `{ warning }` envelope when resolution fails:
+ *
+ * - `NO_DESCRIPTOR` — no candidate matches.
+ * - `CYCLIC_INCLUDES` — the `includes` chain self-references.
+ * - `ATTESTATION_OPTIONS_INCOMPLETE` — an `options.attestations` policy is
+ *   set, but `chainClient` is missing or the resolver has no
+ *   `fetchAttestation`.
+ * - `NO_TRUSTED_ATTESTATION` — no trusted attester has a valid attestation
+ *   for the descriptor. The policy reads revocation state through
+ *   `chainClient`.
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
   options?: GitHubResolverOptions | CustomResolverOptions,
+  chainClient?: ChainClient,
 ): Promise<ResolveDescriptorResult> {
-  const { chainId, verifyingContract } = typedData.domain;
+  const chainId = parseChainId(typedData.domain.chainId);
+  const { verifyingContract } = typedData.domain;
   if (chainId === undefined || !verifyingContract) {
     return noDescriptorWarning(chainId, verifyingContract);
   }
@@ -143,11 +188,103 @@ export async function resolveTypedDataDescriptor(
     typedData.types,
   );
   if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
-  const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+  const hash = bytesToHex(keccak256(utf8ToBytes(encodeTypeStr)));
 
   const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
   if (!match) return noDescriptorWarning(chainId, verifyingContract);
-  return resolveWithIncludes(resolver, match.path);
+  const resolved = await resolveWithIncludes(resolver, match.path);
+  return applyAttestationPolicy(
+    resolver,
+    match.path,
+    resolved,
+    options?.attestations,
+    chainClient,
+  );
+}
+
+/**
+ * Enforces an ERC-8176 attestation policy on a resolved descriptor: the
+ * descriptor is accepted only when at least one of the policy's
+ * `trustedAttesters` has a valid attestation over its resolved
+ * (includes-merged) content. Passes the result through unchanged when no
+ * policy is set or resolution already failed.
+ *
+ * `verifyAttestation` throws on a failed check; that error is caught here
+ * and becomes a per-attester failure reason. Attestation fetch and
+ * `chainClient` I/O errors still throw, consistent with descriptor fetching.
+ */
+async function applyAttestationPolicy(
+  resolver: DescriptorResolver,
+  path: string,
+  resolved: ResolveDescriptorResult,
+  options: AttestationOptions | undefined,
+  chainClient: ChainClient | undefined,
+): Promise<ResolveDescriptorResult> {
+  if (!options || "warning" in resolved) return resolved;
+
+  if (!chainClient) {
+    return {
+      warning: warn(
+        "ATTESTATION_OPTIONS_INCOMPLETE",
+        "An attestation policy is set but no chainClient is available for the revocation check",
+      ),
+    };
+  }
+
+  if (!resolver.fetchAttestation) {
+    return {
+      warning: warn(
+        "ATTESTATION_OPTIONS_INCOMPLETE",
+        "An attestation policy is set but the descriptor resolver does not implement fetchAttestation",
+      ),
+    };
+  }
+
+  const descriptorHash = computeDescriptorHash(resolved.descriptor);
+  const failures: string[] = [];
+
+  for (const trusted of options.trustedAttesters) {
+    let attester: string;
+    try {
+      attester = toChecksumAddress(hexToBytes(trusted));
+    } catch {
+      failures.push(`invalid attester address '${trusted}'`);
+      continue;
+    }
+
+    const attestation = await resolver.fetchAttestation(path, attester);
+    if (!attestation) continue;
+
+    let verified: ReturnType<typeof verifyAttestation>;
+    try {
+      verified = verifyAttestation(attestation, descriptorHash);
+    } catch (error) {
+      failures.push(
+        `${attester}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    if (normalizeAddress(verified.attester) !== normalizeAddress(attester)) {
+      failures.push(
+        `${attester}: attestation was signed by ${verified.attester}`,
+      );
+      continue;
+    }
+    if (await isAttestationRevoked(chainClient, attester, verified.uid)) {
+      failures.push(`${attester}: attestation ${verified.uid} was revoked`);
+      continue;
+    }
+
+    return resolved;
+  }
+
+  const detail = failures.length > 0 ? ` (${failures.join("; ")})` : "";
+  return {
+    warning: warn(
+      "NO_TRUSTED_ATTESTATION",
+      `No valid attestation from a trusted attester found for descriptor '${path}'${detail}`,
+    ),
+  };
 }
 
 function noDescriptorWarning(

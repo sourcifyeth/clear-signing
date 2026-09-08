@@ -21,7 +21,7 @@ import {
   resolveTypedDataPath,
   stripStructuredRootPrefix,
 } from "./descriptor.js";
-import { warn } from "./utils.js";
+import { parseChainId, warn } from "./utils.js";
 import { applyFieldFormats } from "./fields.js";
 
 /**
@@ -86,7 +86,7 @@ export async function formatEip712(
     definitions,
     resolvePath,
     getArrayLength,
-    typedData.domain.chainId,
+    parseChainId(typedData.domain.chainId),
     descriptor.metadata,
     externalDataProvider,
     formatEmbeddedCalldata,

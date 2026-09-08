@@ -7,7 +7,7 @@ This library transforms raw transaction calldata and EIP-712 typed data into hum
 Designed to drop into wallet codebases:
 
 - Runs on modern browsers, Node.js (≥22), and React Native (ESM + CJS).
-- Single runtime dependency: [`@noble/hashes`](https://github.com/paulmillr/noble-hashes).
+- Two runtime dependencies: [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) and [`@noble/curves`](https://github.com/paulmillr/noble-curves).
 - Pure formatting: No RPC client, no token/chain/ENS fetching; external data is delegated to the wallet via [`ExternalDataProvider`](#externaldataprovider).
 - No internal caching: The caller controls when descriptors and indexes are fetched.
 
@@ -163,6 +163,13 @@ The library delegates all external data resolution to the wallet. The wallet may
 ```typescript
 interface ExternalDataProvider {
   /**
+   * Raw chain access for checks the library performs itself. Required when an AttestationOptions policy
+   * is set: the ERC-8176 revocation check reads the EAS contract on Ethereum
+   * mainnet.
+   */
+  chainClient?: ChainClient;
+
+  /**
    * Resolution for addressName formats. The wallet should verify whether the
    * address matches any of the provided accepted types (e.g., "eoa", "contract", ...)
    * if able to. If none of the types match, set typeMatch to false so the library
@@ -219,6 +226,14 @@ interface ExternalDataProvider {
       contractAddress?: string;
     },
   ) => Promise<DecryptedValueResult | null>;
+}
+
+interface ChainClient {
+  /** Performs eth_call against `chainId` and returns the 0x-hex return data. */
+  call: (
+    chainId: number,
+    request: { to: string; data: string },
+  ) => Promise<string>;
 }
 ```
 
@@ -294,6 +309,43 @@ const result = await format(tx, {
   descriptorResolverOptions: { type: "custom", resolver },
 });
 ```
+
+### Attestations (ERC-8176)
+
+A descriptor controls what the user sees before they sign. A wallet must not use unreviewed descriptors. [ERC-8176](https://github.com/ethereum/ERCs/pull/1576) adds a review layer: auditors attest each descriptor with an [EAS](https://attest.org) offchain attestation. The registry stores the attestation files next to the descriptor, in `registry/<project>/sigs/`. The registry's [`auditors/`](https://github.com/ethereum/clear-signing-erc7730-registry/tree/master/auditors) directory lists the auditors and the audit guidelines.
+
+Set an `attestations` policy to enable this check. The library then accepts a descriptor only when one of your trusted auditors has a valid attestation for it:
+
+```typescript
+const result = await format(tx, {
+  descriptorResolverOptions: {
+    type: "github",
+    index,
+    attestations: {
+      // Auditor addresses your wallet trusts — see the registry's auditors/ directory.
+      trustedAttesters: ["0x3846c3A30E62075Fa916216b35EF04B8F53931f6"],
+    },
+  },
+  externalDataProvider: {
+    // Required when `attestations` is set. The library uses this raw eth_call
+    // access to read the revocation state from the EAS contract on Ethereum
+    // mainnet. See GUIDE.md.
+    chainClient: {
+      call: async (chainId, { to, data }) => rpcEthCall(chainId, to, data),
+    },
+  },
+});
+```
+
+The library verifies each attestation offline (schema, descriptor hash, expiration, signature, UID). Then it reads the revocation state through `externalDataProvider.chainClient`. When no trusted attestation is valid, the result carries a `NO_TRUSTED_ATTESTATION` warning and, for calldata, the `rawCalldataFallback`.
+
+**Without an `attestations` policy, the library uses registry descriptors without any review check. Use that mode for testing only.**
+
+Notes:
+
+- The policy needs `externalDataProvider.chainClient`, and a custom resolver must implement `DescriptorResolver.fetchAttestation`. Otherwise every gated resolution fails with `ATTESTATION_OPTIONS_INCOMPLETE`.
+- Bundled trusted-token descriptors (`trustedTokens`) are not gated.
+- Only EAS offchain attestations (version 2) with EOA signatures are supported.
 
 ### Trusted token lists
 

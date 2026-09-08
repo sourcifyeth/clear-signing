@@ -7,10 +7,10 @@ import {
 } from "./github-registry-client.js";
 import { extractPrimaryType } from "./eip712.js";
 import {
-  asciiToBytes,
   bytesToHex,
   keccak256,
   normalizeAddress,
+  utf8ToBytes,
 } from "./utils.js";
 
 /** File names of the prebuilt indexes published in the registry root. */
@@ -98,7 +98,7 @@ function indexDescriptor(
   for (const encodeTypeStr of Object.keys(formats)) {
     const primaryType = extractPrimaryType(encodeTypeStr);
     if (!primaryType) continue;
-    const hash = bytesToHex(keccak256(asciiToBytes(encodeTypeStr)));
+    const hash = bytesToHex(keccak256(utf8ToBytes(encodeTypeStr)));
     const list = hashesByPrimaryType.get(primaryType) ?? [];
     list.push(hash);
     hashesByPrimaryType.set(primaryType, list);

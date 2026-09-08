@@ -17,13 +17,14 @@ import type {
   TypedData,
 } from "./types.js";
 import {
-  asciiToBytes,
   bigIntToBytes,
   boolToBytes,
   bytesEqual,
   hexToBytes,
   isAddressString,
   normalizeAddress,
+  parseChainId,
+  utf8ToBytes,
 } from "./utils.js";
 
 /**
@@ -55,7 +56,8 @@ export function isEip712DescriptorBoundTo(
   descriptor: Descriptor,
   typedData: TypedData,
 ): boolean {
-  const { chainId, verifyingContract } = typedData.domain;
+  const chainId = parseChainId(typedData.domain.chainId);
+  const { verifyingContract } = typedData.domain;
   const eip712 = descriptor.context?.eip712;
 
   // Check deployments
@@ -80,7 +82,16 @@ export function isEip712DescriptorBoundTo(
     const messageDomain = typedData.domain as Record<string, unknown>;
     for (const [key, expected] of Object.entries(domainConstraint)) {
       const actual = messageDomain[key];
-      if (String(actual) !== String(expected)) return false;
+      if (key === "chainId") {
+        if (
+          parseChainId(actual as number | string | undefined) !==
+          parseChainId(expected as number | string | undefined)
+        ) {
+          return false;
+        }
+      } else if (String(actual) !== String(expected)) {
+        return false;
+      }
     }
   }
 
@@ -219,7 +230,7 @@ export function resolvedToAddress(
  * - uint/int → 32-byte big-endian (two's complement for negative int)
  * - address → 20 bytes
  * - bytes → raw bytes
- * - string → ASCII bytes
+ * - string → UTF-8 bytes
  * - bool → 1 byte
  */
 export function argumentValueToBytes(value: ArgumentValue): Uint8Array {
@@ -232,7 +243,7 @@ export function argumentValueToBytes(value: ArgumentValue): Uint8Array {
     case "bytes":
       return value.bytes;
     case "string":
-      return asciiToBytes(value.value);
+      return utf8ToBytes(value.value);
     case "bool":
       return boolToBytes(value.value);
   }
@@ -419,9 +430,11 @@ export function resolveTypedDataPath(
         type: "address",
         bytes: hexToBytes(typedData.domain.verifyingContract),
       };
-    case "@.chainId":
-      if (typedData.domain.chainId === undefined) return undefined;
-      return { type: "uint", value: BigInt(typedData.domain.chainId) };
+    case "@.chainId": {
+      const chainId = parseChainId(typedData.domain.chainId);
+      if (chainId === undefined) return undefined;
+      return { type: "uint", value: BigInt(chainId) };
+    }
     default:
       return undefined;
   }
