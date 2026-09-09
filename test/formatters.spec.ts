@@ -14,6 +14,9 @@ import {
   renderTokenAmount,
   tokenAmountMessage,
   resolveTokenAddress,
+  resolveMapReference,
+  resolveParamMapReferences,
+  isMapReference,
   formatDate,
   formatTimestamp,
   formatEnum,
@@ -2101,5 +2104,253 @@ describe("renderField", () => {
       undefined,
     );
     expect(result.rendered).toBe("7");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// metadata.maps references
+// ---------------------------------------------------------------------------
+
+describe("isMapReference", () => {
+  it("accepts a well-formed map reference", () => {
+    expect(
+      isMapReference({ map: "$.metadata.maps.underlying", keyPath: "@.to" }),
+    ).toBe(true);
+  });
+
+  it("rejects strings, null and partial objects", () => {
+    expect(isMapReference("$.metadata.maps.underlying")).toBe(false);
+    expect(isMapReference(null)).toBe(false);
+    expect(isMapReference({ map: "$.metadata.maps.underlying" })).toBe(false);
+    expect(isMapReference({ keyPath: "@.to" })).toBe(false);
+  });
+});
+
+describe("resolveMapReference", () => {
+  const metadata: DescriptorMetadata = {
+    maps: {
+      underlying: {
+        $keyType: "wrapper address",
+        values: {
+          "0xe978F22157048E5DB8E5d07971376e86671672B2":
+            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893":
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        },
+      },
+      byChain: {
+        values: { "1": "0x0000000000000000000000000000000000000001" },
+      },
+    },
+  };
+
+  const resolveTo =
+    (bytes: Uint8Array): ResolvePath =>
+    (path) =>
+      path === "@.to" ? { type: "address", bytes } : undefined;
+
+  it("resolves a checksummed key from a lowercased address value", () => {
+    const resolve = resolveTo(
+      hexToBytes("0xda9396b82634Ea99243cE51258B6A5Ae512D4893"),
+    );
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        resolve,
+        metadata,
+      ),
+    ).toBe("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+  });
+
+  it("resolves an integer key", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "@.chainId" ? { type: "uint", value: 1n } : undefined;
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.byChain", keyPath: "@.chainId" },
+        resolve,
+        metadata,
+      ),
+    ).toBe("0x0000000000000000000000000000000000000001");
+  });
+
+  it("returns undefined on a key miss", () => {
+    const resolve = resolveTo(
+      hexToBytes("0x0000000000000000000000000000000000000009"),
+    );
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        resolve,
+        metadata,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for an unknown map or missing metadata", () => {
+    const resolve = resolveTo(
+      hexToBytes("0xda9396b82634Ea99243cE51258B6A5Ae512D4893"),
+    );
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.nope", keyPath: "@.to" },
+        resolve,
+        metadata,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        resolve,
+        undefined,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when the keyPath itself does not resolve", () => {
+    expect(
+      resolveMapReference(
+        { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        noopResolvePath,
+        metadata,
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("resolveTokenAddress with a map reference", () => {
+  const metadata: DescriptorMetadata = {
+    maps: {
+      underlying: {
+        values: {
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893":
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        },
+      },
+      broken: { values: { "0x1": "not-an-address" } },
+    },
+  };
+
+  const field = {
+    params: { token: { map: "$.metadata.maps.underlying", keyPath: "@.to" } },
+  };
+
+  it("resolves the underlying token for the called wrapper", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "@.to"
+        ? {
+            type: "address",
+            bytes: hexToBytes("0xda9396b82634Ea99243cE51258B6A5Ae512D4893"),
+          }
+        : undefined;
+    expect(resolveTokenAddress(field, resolve, metadata)).toBe(
+      "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+    );
+  });
+
+  it("returns undefined on a miss instead of throwing", () => {
+    const resolve: ResolvePath = (path) =>
+      path === "@.to"
+        ? {
+            type: "address",
+            bytes: hexToBytes("0x0000000000000000000000000000000000000009"),
+          }
+        : undefined;
+    expect(resolveTokenAddress(field, resolve, metadata)).toBeUndefined();
+  });
+
+  it("returns undefined when the mapped value is not an address", () => {
+    const brokenField = {
+      params: { token: { map: "$.metadata.maps.broken", keyPath: "@.to" } },
+    };
+    const resolve: ResolvePath = () => ({ type: "string", value: "0x1" });
+    expect(resolveTokenAddress(brokenField, resolve, metadata)).toBeUndefined();
+  });
+
+  it("does not treat a map reference as a $.metadata.token reference", () => {
+    expect(resolveMetadataToken(field, {}).hasMetadataRef).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// metadata.maps: generic param substitution
+// ---------------------------------------------------------------------------
+
+describe("resolveParamMapReferences", () => {
+  const metadata: DescriptorMetadata = {
+    maps: {
+      underlying: {
+        values: {
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893":
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        },
+      },
+      scale: { values: { "0xda9396b82634Ea99243cE51258B6A5Ae512D4893": 18 } },
+    },
+  };
+  const resolveTo: ResolvePath = (path) =>
+    path === "@.to"
+      ? {
+          type: "address",
+          bytes: hexToBytes("0xda9396b82634Ea99243cE51258B6A5Ae512D4893"),
+        }
+      : undefined;
+
+  it("passes through params with no map reference", () => {
+    const params = { tokenPath: "@.to", threshold: "0x800" };
+    const result = resolveParamMapReferences(params, resolveTo, metadata);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params).toBe(params);
+  });
+
+  it("returns undefined params untouched", () => {
+    const result = resolveParamMapReferences(undefined, resolveTo, metadata);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params).toBeUndefined();
+  });
+
+  it("substitutes a map reference on any constant param", () => {
+    // decimals is one of the params the schema newly declares map-capable.
+    const result = resolveParamMapReferences(
+      {
+        token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        decimals: { map: "$.metadata.maps.scale", keyPath: "@.to" },
+      },
+      resolveTo,
+      metadata,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.params?.token).toBe(
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      );
+      // Values keep their JSON type, so a numeric param stays numeric.
+      expect(result.params?.decimals).toBe(18);
+    }
+  });
+
+  it("reports the offending param on a lookup miss", () => {
+    const resolveMissing: ResolvePath = () => ({
+      type: "address",
+      bytes: hexToBytes("0x0000000000000000000000000000000000000009"),
+    });
+    const result = resolveParamMapReferences(
+      { token: { map: "$.metadata.maps.underlying", keyPath: "@.to" } },
+      resolveMissing,
+      metadata,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.unresolved).toBe("token");
+  });
+
+  it("does not mutate the params object it was given", () => {
+    const params = {
+      token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+    };
+    resolveParamMapReferences(params, resolveTo, metadata);
+    expect(params.token).toEqual({
+      map: "$.metadata.maps.underlying",
+      keyPath: "@.to",
+    });
   });
 });

@@ -6,8 +6,11 @@ import type {
   BlockTimestampResult,
   ChainInfoResult,
   DescriptorFieldFormat,
+  DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
+  DescriptorMapReference,
   DescriptorMetadata,
+  DescriptorMetadataMap,
   EmbeddedCalldata,
   ExternalDataProvider,
   FormatCalldata,
@@ -226,7 +229,7 @@ export async function formatTokenAmount(
     };
   }
 
-  const chainIdResult = resolveChainId(field, resolvePath);
+  const chainIdResult = resolveChainId(field, resolvePath, metadata);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
     return {
       rendered: renderRaw(value),
@@ -250,7 +253,7 @@ export async function formatTokenAmount(
     };
   }
 
-  const tokenAddress = resolveTokenAddress(field, resolvePath);
+  const tokenAddress = resolveTokenAddress(field, resolvePath, metadata);
   if (!tokenAddress) {
     return {
       rendered: renderRaw(value),
@@ -372,7 +375,9 @@ export function resolveMetadataToken(
   | { hasMetadataRef: true; token: TokenResult | undefined } {
   const params = field.params ?? {};
   const tokenSpec = params.token ?? params.tokenPath;
-  if (tokenSpec !== "$.metadata.token") return { hasMetadataRef: false };
+  if (typeof tokenSpec !== "string" || tokenSpec !== "$.metadata.token") {
+    return { hasMetadataRef: false };
+  }
 
   const meta = metadata?.token;
   if (!meta?.ticker || meta.decimals === undefined) {
@@ -389,19 +394,160 @@ export function resolveMetadataToken(
   };
 }
 
+/** Type guard for a `{ map, keyPath }` map reference param. */
+export function isMapReference(
+  value: unknown,
+): value is DescriptorMapReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as DescriptorMapReference).map === "string" &&
+    typeof (value as DescriptorMapReference).keyPath === "string"
+  );
+}
+
+/**
+ * Narrow a param that may carry a map reference down to its constant form.
+ *
+ * References are substituted by {@link resolveParamMapReferences} before any
+ * field is rendered, so by the time a format handler reads a param it is always
+ * a constant. This guard keeps the handlers honest for the case where they are
+ * driven directly, treating a leftover reference as an absent param.
+ */
+function asConstant<T>(value: T | DescriptorMapReference): T | undefined {
+  return isMapReference(value) ? undefined : (value as T);
+}
+
+/**
+ * Canonical string form of a resolved path value, for use as a `metadata.maps`
+ * lookup key. Addresses and byte strings are lowercased hex so that
+ * checksummed keys in the descriptor still match; integers are decimal.
+ */
+function mapKeyFromResolved(
+  value: ReturnType<ResolvePath>,
+): string | undefined {
+  if (!value) return undefined;
+  switch (value.type) {
+    case "address":
+      return bytesToHex(value.bytes).toLowerCase();
+    case "bytes":
+    case "bytes-slice":
+      return bytesToHex(value.bytes).toLowerCase();
+    case "uint":
+    case "int":
+      return value.value.toString();
+    case "string":
+      return value.value;
+    case "bool":
+      return value.value ? "true" : "false";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Resolve a `{ map, keyPath }` reference against `metadata.maps`.
+ *
+ * Returns undefined when the map is unknown, the key cannot be resolved, or no
+ * entry matches. Per ERC-7730 a miss means the descriptor does not apply to
+ * this transaction, so callers surface it as a resolution failure rather than
+ * silently substituting a default.
+ */
+export function resolveMapReference(
+  ref: DescriptorMapReference,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+): string | number | boolean | undefined {
+  const mapDef = resolveMetadataValue(metadata, ref.map) as
+    | DescriptorMetadataMap
+    | undefined;
+  const values = mapDef?.values;
+  if (!values || typeof values !== "object") return undefined;
+
+  const key = mapKeyFromResolved(resolvePath(ref.keyPath));
+  if (key === undefined) return undefined;
+
+  // Direct hit first, then a case-insensitive sweep so that checksummed
+  // address keys match a lowercased resolved key (and vice versa).
+  const direct = values[key];
+  if (direct !== undefined) return direct;
+
+  const lowered = key.toLowerCase();
+  for (const [candidate, mapped] of Object.entries(values)) {
+    if (candidate.toLowerCase() === lowered) return mapped;
+  }
+
+  return undefined;
+}
+
+/**
+ * Substitute every `metadata.maps` reference in a params object with its
+ * resolved constant.
+ *
+ * Per ERC-7730, a map reference may stand in for any constant parameter value,
+ * so substitution is generic rather than per-format: `token`, `threshold`,
+ * `nativeCurrencyAddress`, `senderAddress`, the `unit` scale and `chainId` are
+ * all handled by the same pass. Values keep their JSON type, so a map yielding
+ * an integer still satisfies a numeric param such as `decimals`.
+ *
+ * A lookup miss means the descriptor does not describe the transaction it is
+ * being applied to, so the caller MUST abandon the whole format rather than
+ * render the remaining fields — the returned `unresolved` entry names the
+ * offending parameter for the diagnostic.
+ */
+export function resolveParamMapReferences(
+  params: DescriptorFieldFormatParams | undefined,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+):
+  | { ok: true; params: DescriptorFieldFormatParams | undefined }
+  | { ok: false; unresolved: string } {
+  if (!params) return { ok: true, params };
+
+  let substituted: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(params)) {
+    if (!isMapReference(value)) continue;
+    const mapped = resolveMapReference(value, resolvePath, metadata);
+    if (mapped === undefined) {
+      return { ok: false, unresolved: name };
+    }
+    substituted ??= { ...(params as Record<string, unknown>) };
+    substituted[name] = mapped;
+  }
+
+  return {
+    ok: true,
+    params: (substituted as DescriptorFieldFormatParams | undefined) ?? params,
+  };
+}
+
 /**
  * Resolve the ERC-20 token address for a tokenAmount field.
  *
  * Per the spec, `token` takes priority over `tokenPath`. Both can be either
- * a constant address or a path reference.
+ * a constant address, a path reference, or (for `token`) a `metadata.maps`
+ * reference for context-dependent constants.
  */
 export function resolveTokenAddress(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
+  metadata?: DescriptorMetadata,
 ): string | undefined {
   const params = field.params ?? {};
   const token = params.token ?? params.tokenPath;
   if (!token) return undefined;
+
+  // Context-dependent constant via metadata.maps. Normally already substituted
+  // by resolveParamMapReferences before rendering; handled here too so the
+  // helper is correct when called directly.
+  if (isMapReference(token)) {
+    const mapped = resolveMapReference(token, resolvePath, metadata);
+    return typeof mapped === "string" && isAddressString(mapped)
+      ? mapped.toLowerCase()
+      : undefined;
+  }
+
+  if (typeof token !== "string") return undefined;
 
   // Constant address
   if (isAddressString(token)) {
@@ -528,7 +674,7 @@ export function resolveCollectionAddress(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const collection = params.collection ?? params.collectionPath;
+  const collection = asConstant(params.collection) ?? params.collectionPath;
   if (!collection) return undefined;
 
   // Constant address
@@ -670,8 +816,8 @@ export function formatUnit(
     return typeMismatch(value, "uint or int", "unit");
 
   const params = fieldOptions.params ?? {};
-  const base = resolveUnitBase(params.base, metadata);
-  const decimals = params.decimals ?? 0;
+  const base = resolveUnitBase(asConstant(params.base), metadata);
+  const decimals = asConstant(params.decimals) ?? 0;
   const prefix = params.prefix === true;
 
   const formatted = formatAmountWithDecimals(value.value, decimals);
@@ -901,7 +1047,7 @@ function resolveCallee(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const spec = params.callee ?? params.calleePath;
+  const spec = asConstant(params.callee) ?? params.calleePath;
   if (!spec) return undefined;
 
   if (isAddressString(spec)) {
@@ -925,7 +1071,7 @@ function resolveAmountParam(
   resolvePath: ResolvePath,
 ): bigint | undefined {
   const params = field.params ?? {};
-  const spec = params.amount ?? params.amountPath;
+  const spec = asConstant(params.amount) ?? params.amountPath;
   if (!spec) return undefined;
 
   const resolved = resolvePath(spec);
@@ -954,7 +1100,7 @@ function resolveSpenderParam(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const spec = params.spender ?? params.spenderPath;
+  const spec = asConstant(params.spender) ?? params.spenderPath;
   if (!spec) return undefined;
 
   if (isAddressString(spec)) {
@@ -978,7 +1124,7 @@ function resolveSelectorParam(
   resolvePath: ResolvePath,
 ): Uint8Array | undefined {
   const params = field.params ?? {};
-  const spec = params.selector ?? params.selectorPath;
+  const spec = asConstant(params.selector) ?? params.selectorPath;
   if (!spec) return undefined;
 
   if (typeof spec === "string" && spec.startsWith("0x") && spec.length === 10) {
@@ -1188,6 +1334,7 @@ export async function formatTokenTicker(
 function resolveChainId(
   field: FieldFormatOptions,
   resolvePath: ResolvePath,
+  metadata?: DescriptorMetadata,
 ):
   | { hasChainIdParam: false }
   | { hasChainIdParam: true; value: number | undefined } {
@@ -1196,6 +1343,15 @@ function resolveChainId(
   if (!spec) return { hasChainIdParam: false };
 
   if (typeof spec === "number") return { hasChainIdParam: true, value: spec };
+
+  if (isMapReference(spec)) {
+    const mapped = resolveMapReference(spec, resolvePath, metadata);
+    const n = mapped === undefined ? NaN : Number(mapped);
+    return {
+      hasChainIdParam: true,
+      value: Number.isInteger(n) && n > 0 ? n : undefined,
+    };
+  }
 
   if (typeof spec === "string") {
     const n = Number(spec);

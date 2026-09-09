@@ -79,13 +79,42 @@
       ]
     }
   },
-  "metadata": { "contractName": "ConfidentialWrapper" },
+  "metadata": {
+    "contractName": "ConfidentialWrapper",
+    "maps": {
+      "underlying": {
+        "$keyType": "wrapper address",
+        "values": {
+          "0xe978F22157048E5DB8E5d07971376e86671672B2": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "0xAe0207C757Aa2B4019Ad96edD0092ddc63EF0c50": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "0x85dE671c3bec1aDeD752c3Cea943521181C826bc": "0xBA2C598E11eD093079cC324FCa5BbbA99F616E83",
+          "0x80CB147Fd86dC6dEe3Eee7e4Cee33d1397d98071": "0xA12CC123ba206d4031D1c7f6223D1C2Ec249f4f3",
+          "0xa873750ccBafD5ec7Dd13bfD5237d7129832eDD9": "0x27f6c8289550fCE67f6B50BeD1F519966aFE5287",
+          "0x73cc9aF9d6BEFdb3c3fAf8a5E8c05Cb95FdaEEf1": "0x68749665FF8D2d112Fa859AA293F07A622782F38",
+          "0xBA4cFF6ED6F7Cb2A58776dECa4E984b498446762": "0xbeeffABcd0dB09589Dd21854aa760C52aB4bf04F",
+          "0x66Bf74E96900D1a19c7070D939D124f2F565C458": "0xbEEF00A59B577423653A1526c7009bdE103F542B",
+          "0x7c5BF43B851c1dff1a4feE8dB225b87f2C223639": "0x9b5Cd13b8eFbB58Dc25A05CF411D8056058aDFfF",
+          "0x4E7B06D78965594eB5EF5414c357ca21E1554491": "0xa7dA08FafDC9097Cc0E7D4f113A61e31d7e8e9b0",
+          "0x46208622DA27d91db4f0393733C8BA082ed83158": "0xff54739b16576FA5402F211D0b938469Ab9A5f3F",
+          "0xaa5612FA27c927a0c7961f5AEFEE5ba3A0F9C891": "0xFf021fB13cA64e5354c62c954b949a88cfDEb25E",
+          "0xf2D628d2598aF4eAF94CB76a437Ff86CA78FfbFB": "0x75355a85c6FB9df5f0C80FF54e8747EEe9a0BF57",
+          "0xfCE5c7069c5525eF6c8C2b2E35A745bA20a2F7CC": "0x93c931278A2aad1916783F952f94276eA5111442",
+          "0xe4FcF848739845BC81Dee1d5352cf3844F0a60C7": "0x24377AE4AA0C45ecEe71225007f17c5D423dd940",
+          "0x167DC962808B32CFFFc7e14B5018c0bE06A3A208": "0xf6Ef9ADB61A48E29E36bc873070A46A3D2667ff3",
+          "0x13F7d34A4f0102734F19E3Ff16e068Fe194B28c4": "0x6AB54988261AEC573a2CA13cF802d3B1114f864C"
+        }
+      }
+    }
+  },
   "display": {
     "definitions": {
       "encryptedAmount": {
         "label": "Amount",
         "format": "tokenAmount",
-        "params": { "tokenPath": "@.to" },
+        "params": {
+          "tokenPath": "@.to"
+        },
         "encryption": {
           "scheme": "fhevm",
           "plaintextType": "uint64",
@@ -95,44 +124,85 @@
       "receiver": {
         "label": "Receiver",
         "format": "addressName",
-        "params": { "types": ["eoa", "contract"] }
+        "params": {
+          "types": ["eoa", "contract"]
+        }
       },
       "holder": {
         "label": "Holder",
         "format": "addressName",
-        "params": { "types": ["eoa", "contract"] }
+        "params": {
+          "types": ["eoa", "contract"]
+        }
       },
-      "inputProof": { "label": "Encryption proof", "format": "raw" },
-      "decryptionProof": { "label": "Decryption proof", "format": "raw" },
-      "callbackData": { "label": "Callback data", "format": "raw" }
+      "inputProof": {
+        "label": "Encryption proof",
+        "format": "raw"
+      },
+      "decryptionProof": {
+        "label": "Decryption proof",
+        "format": "raw"
+      },
+      "callbackData": {
+        "label": "Callback data",
+        "format": "raw"
+      }
     },
     "formats": {
-      "wrap(address to, uint256 amount)": {
+      "wrap(address to,uint256 amount)": {
         "$id": "wrap",
         "intent": "Shield",
         "interpolatedIntent": "Shield {amount} to {to}",
         "fields": [
-          { "path": "amount", "label": "Amount", "format": "raw" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" }
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "tokenAmount",
+            "params": {
+              "token": {
+                "map": "$.metadata.maps.underlying",
+                "keyPath": "@.to"
+              }
+            }
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          }
         ]
       },
-      "unwrap(address from, address to, bytes32 amount)": {
+      "unwrap(address from,address to,bytes32 amount)": {
         "$id": "unwrap",
         "intent": "Request to unshield",
-        "interpolatedIntent": "Request to unshield from {from} to {to}",
+        "interpolatedIntent": "Request to unshield {amount} from {from} to {to}",
         "fields": [
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
-          { "path": "amount", "$ref": "$.display.definitions.encryptedAmount" }
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.encryptedAmount"
+          }
         ]
       },
-      "unwrap(address from, address to, bytes32 encryptedAmount, bytes inputProof)": {
+      "unwrap(address from,address to,bytes32 encryptedAmount,bytes inputProof)": {
         "$id": "unwrapWithProof",
         "intent": "Request to unshield",
-        "interpolatedIntent": "Request to unshield from {from} to {to}",
+        "interpolatedIntent": "Request to unshield {encryptedAmount} from {from} to {to}",
         "fields": [
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "encryptedAmount",
             "$ref": "$.display.definitions.encryptedAmount"
@@ -144,7 +214,7 @@
           }
         ]
       },
-      "finalizeUnwrap(bytes32 unwrapRequestId, uint64 unwrapAmountCleartext, bytes decryptionProof)": {
+      "finalizeUnwrap(bytes32 unwrapRequestId,uint64 unwrapAmountCleartext,bytes decryptionProof)": {
         "$id": "finalizeUnwrap",
         "intent": "Finalize unshield",
         "interpolatedIntent": "Finalize unshield of {unwrapAmountCleartext}",
@@ -153,9 +223,15 @@
             "path": "unwrapAmountCleartext",
             "label": "Amount",
             "format": "tokenAmount",
-            "params": { "tokenPath": "@.to" }
+            "params": {
+              "tokenPath": "@.to"
+            }
           },
-          { "path": "unwrapRequestId", "label": "Request ID", "format": "raw" },
+          {
+            "path": "unwrapRequestId",
+            "label": "Request ID",
+            "format": "raw"
+          },
           {
             "path": "decryptionProof",
             "$ref": "$.display.definitions.decryptionProof",
@@ -163,16 +239,22 @@
           }
         ]
       },
-      "confidentialTransfer(address to, bytes32 amount)": {
+      "confidentialTransfer(address to,bytes32 amount)": {
         "$id": "cTransfer",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {amount} to {to}",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.encryptedAmount" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" }
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.encryptedAmount"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          }
         ]
       },
-      "confidentialTransfer(address to, bytes32 encryptedAmount, bytes inputProof)": {
+      "confidentialTransfer(address to,bytes32 encryptedAmount,bytes inputProof)": {
         "$id": "cTransferWithProof",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {encryptedAmount} to {to}",
@@ -181,7 +263,10 @@
             "path": "encryptedAmount",
             "$ref": "$.display.definitions.encryptedAmount"
           },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "inputProof",
             "$ref": "$.display.definitions.inputProof",
@@ -189,17 +274,26 @@
           }
         ]
       },
-      "confidentialTransferFrom(address from, address to, bytes32 amount)": {
+      "confidentialTransferFrom(address from,address to,bytes32 amount)": {
         "$id": "cTransferFrom",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {amount} from {from} to {to}",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.encryptedAmount" },
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" }
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.encryptedAmount"
+          },
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          }
         ]
       },
-      "confidentialTransferFrom(address from, address to, bytes32 encryptedAmount, bytes inputProof)": {
+      "confidentialTransferFrom(address from,address to,bytes32 encryptedAmount,bytes inputProof)": {
         "$id": "cTransferFromWithProof",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {encryptedAmount} from {from} to {to}",
@@ -208,8 +302,14 @@
             "path": "encryptedAmount",
             "$ref": "$.display.definitions.encryptedAmount"
           },
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "inputProof",
             "$ref": "$.display.definitions.inputProof",
@@ -217,13 +317,19 @@
           }
         ]
       },
-      "confidentialTransferAndCall(address to, bytes32 amount, bytes data)": {
+      "confidentialTransferAndCall(address to,bytes32 amount,bytes data)": {
         "$id": "cTransferAndCall",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {amount} to {to}",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.encryptedAmount" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.encryptedAmount"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "data",
             "$ref": "$.display.definitions.callbackData",
@@ -231,7 +337,7 @@
           }
         ]
       },
-      "confidentialTransferAndCall(address to, bytes32 encryptedAmount, bytes inputProof, bytes data)": {
+      "confidentialTransferAndCall(address to,bytes32 encryptedAmount,bytes inputProof,bytes data)": {
         "$id": "cTransferAndCallWithProof",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {encryptedAmount} to {to}",
@@ -240,7 +346,10 @@
             "path": "encryptedAmount",
             "$ref": "$.display.definitions.encryptedAmount"
           },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "inputProof",
             "$ref": "$.display.definitions.inputProof",
@@ -253,14 +362,23 @@
           }
         ]
       },
-      "confidentialTransferFromAndCall(address from, address to, bytes32 amount, bytes data)": {
+      "confidentialTransferFromAndCall(address from,address to,bytes32 amount,bytes data)": {
         "$id": "cTransferFromAndCall",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {amount} from {from} to {to}",
         "fields": [
-          { "path": "amount", "$ref": "$.display.definitions.encryptedAmount" },
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "amount",
+            "$ref": "$.display.definitions.encryptedAmount"
+          },
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "data",
             "$ref": "$.display.definitions.callbackData",
@@ -268,7 +386,7 @@
           }
         ]
       },
-      "confidentialTransferFromAndCall(address from, address to, bytes32 encryptedAmount, bytes inputProof, bytes data)": {
+      "confidentialTransferFromAndCall(address from,address to,bytes32 encryptedAmount,bytes inputProof,bytes data)": {
         "$id": "cTransferFromAndCallWithProof",
         "intent": "Confidential transfer",
         "interpolatedIntent": "Confidential transfer of {encryptedAmount} from {from} to {to}",
@@ -277,8 +395,14 @@
             "path": "encryptedAmount",
             "$ref": "$.display.definitions.encryptedAmount"
           },
-          { "path": "from", "$ref": "$.display.definitions.holder" },
-          { "path": "to", "$ref": "$.display.definitions.receiver" },
+          {
+            "path": "from",
+            "$ref": "$.display.definitions.holder"
+          },
+          {
+            "path": "to",
+            "$ref": "$.display.definitions.receiver"
+          },
           {
             "path": "inputProof",
             "$ref": "$.display.definitions.inputProof",
@@ -291,28 +415,33 @@
           }
         ]
       },
-      "setOperator(address operator, uint48 until)": {
+      "setOperator(address operator,uint48 until)": {
         "$id": "setOperator",
-        "intent": "Authorize operator",
-        "interpolatedIntent": "Authorize operator {operator} until {until}",
+        "intent": "Set operator authorization",
+        "interpolatedIntent": "Set {operator} authorization to expire on {until}",
         "fields": [
           {
             "path": "operator",
-            "label": "Authorize operator",
+            "label": "Operator",
             "format": "addressName",
-            "params": { "types": ["eoa", "contract"] }
+            "params": {
+              "types": ["eoa", "contract"]
+            }
           },
           {
             "path": "until",
             "label": "Authorized until",
             "format": "date",
-            "params": { "encoding": "timestamp" }
+            "params": {
+              "encoding": "timestamp"
+            }
           }
         ]
       },
       "requestDiscloseEncryptedAmount(bytes32 encryptedAmount)": {
         "$id": "requestDiscloseEncryptedAmount",
         "intent": "Request public disclosure",
+        "interpolatedIntent": "Request public disclosure of {encryptedAmount}",
         "fields": [
           {
             "path": "encryptedAmount",
@@ -320,20 +449,31 @@
           }
         ]
       },
-      "discloseEncryptedAmount(bytes32 encryptedAmount, uint64 cleartextAmount, bytes decryptionProof)": {
+      "discloseEncryptedAmount(bytes32 encryptedAmount,uint64 cleartextAmount,bytes decryptionProof)": {
         "$id": "discloseEncryptedAmount",
-        "intent": "Disclose amount publicly",
-        "interpolatedIntent": "Disclose {cleartextAmount} publicly",
+        "intent": "Disclose encrypted amount publicly",
+        "interpolatedIntent": "Disclose {encryptedAmount} publicly as {cleartextAmount}",
         "fields": [
+          {
+            "path": "encryptedAmount",
+            "label": "Encrypted amount reference",
+            "format": "tokenAmount",
+            "params": {
+              "tokenPath": "@.to"
+            },
+            "encryption": {
+              "scheme": "fhevm",
+              "plaintextType": "uint64",
+              "fallbackLabel": "[Encrypted Amount]"
+            }
+          },
           {
             "path": "cleartextAmount",
             "label": "Amount",
             "format": "tokenAmount",
-            "params": { "tokenPath": "@.to" }
-          },
-          {
-            "path": "encryptedAmount",
-            "$ref": "$.display.definitions.encryptedAmount"
+            "params": {
+              "tokenPath": "@.to"
+            }
           },
           {
             "path": "decryptionProof",

@@ -339,4 +339,115 @@ describe("Zama ConfidentialWrapper", () => {
       expect(result.warnings).toBeUndefined();
     });
   });
+
+  // =========================================================================
+  // wrap: the underlying token comes from metadata.maps, keyed on @.to
+  // =========================================================================
+  describe("wrap (metadata.maps)", () => {
+    // wrap(address to, uint256 amount)
+    const WRAP_SELECTOR = "0xbf376c7a";
+    const RECEIVER_WORD =
+      "00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c8";
+    const CWETH = "0xda9396b82634Ea99243cE51258B6A5Ae512D4893";
+    const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    const UNMAPPED = "0x0000000000000000000000000000000000000099";
+
+    const resolveUnderlying: ExternalDataProvider["resolveToken"] = async (
+      chainId,
+      tokenAddress,
+    ) => {
+      if (chainId === CHAIN_ID && tokenAddress === WETH) {
+        return { name: "Wrapped Ether", symbol: "WETH", decimals: 18 };
+      }
+      return null;
+    };
+
+    it("resolves the underlying token of the called wrapper", async () => {
+      const opts = buildFilesystemResolverOpts(
+        __dirname,
+        {
+          calldataDescriptorFiles: [
+            {
+              chainId: CHAIN_ID,
+              address: CWETH,
+              file: "calldata-ConfidentialWrapper.json",
+            },
+          ],
+        },
+        { resolveToken: resolveUnderlying },
+      );
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CWETH,
+          data:
+            WRAP_SELECTOR +
+            RECEIVER_WORD +
+            "0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+        },
+        opts,
+      );
+
+      // 1e18 formatted with the *underlying's* 18 decimals, not the wrapper's 6.
+      assert(result.fields);
+      const amountField = result.fields[0];
+      assert(!isFieldGroup(amountField));
+      expect(amountField.label).toBe("Amount");
+      expect(amountField.value).toBe("1 WETH");
+      expect(amountField.format).toBe("tokenAmount");
+      expect(amountField.fieldType).toBe("uint");
+      expect(amountField.tokenAddress).toBe(
+        toChecksumAddress(hexToBytes(WETH)),
+      );
+      expect(amountField.warning).toBeUndefined();
+
+      expect(result.intent).toBe("Shield");
+      expect(result.interpolatedIntent).toBe(
+        `Shield 1 WETH to ${toChecksumAddress(hexToBytes(RECEIVER))}`,
+      );
+      expect(result.rawCalldataFallback).toBeUndefined();
+      expect(result.warnings).toBeUndefined();
+    });
+
+    it("abandons the whole format when no map entry matches the deployment", async () => {
+      // The descriptor lists this deployment but its map has no entry for it —
+      // per ERC-7730 the descriptor does not describe this transaction, so the
+      // wallet must fall back rather than render a partially resolved format.
+      const opts = buildFilesystemResolverOpts(
+        __dirname,
+        {
+          calldataDescriptorFiles: [
+            {
+              chainId: CHAIN_ID,
+              address: UNMAPPED,
+              file: "calldata-MapMissWrapper.json",
+            },
+          ],
+        },
+        { resolveToken: resolveUnderlying },
+      );
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: UNMAPPED,
+          data:
+            WRAP_SELECTOR +
+            RECEIVER_WORD +
+            "0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+        },
+        opts,
+      );
+
+      expect(result.fields).toBeUndefined();
+      expect(result.intent).toBeUndefined();
+      expect(result.interpolatedIntent).toBeUndefined();
+      expect(result.rawCalldataFallback?.selector).toBe(WRAP_SELECTOR);
+      expect(result.warnings?.map((w) => w.code)).toEqual([
+        "DESCRIPTOR_NOT_APPLICABLE",
+      ]);
+      expect(result.warnings?.[0].message).toContain("token");
+    });
+  });
 });

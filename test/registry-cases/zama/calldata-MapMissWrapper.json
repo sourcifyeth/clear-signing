@@ -1,0 +1,59 @@
+{
+  "$schema": "../../specs/erc7730-v2.schema.json",
+  "context": {
+    "$id": "MapMissWrapper",
+    "contract": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0xda9396b82634Ea99243cE51258B6A5Ae512D4893"
+        },
+        {
+          "chainId": 1,
+          "address": "0x0000000000000000000000000000000000000099"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "contractName": "MapMissWrapper",
+    "maps": {
+      "underlying": {
+        "$keyType": "wrapper address",
+        "values": {
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+        }
+      }
+    }
+  },
+  "display": {
+    "formats": {
+      "wrap(address to,uint256 amount)": {
+        "$id": "wrap",
+        "intent": "Shield",
+        "interpolatedIntent": "Shield {amount} to {to}",
+        "fields": [
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "tokenAmount",
+            "params": {
+              "token": {
+                "map": "$.metadata.maps.underlying",
+                "keyPath": "@.to"
+              }
+            }
+          },
+          {
+            "path": "to",
+            "label": "Receiver",
+            "format": "addressName",
+            "params": {
+              "types": ["eoa", "contract"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -50,7 +50,7 @@ import {
   warn,
 } from "./utils.js";
 import type { RenderFieldResult } from "./formatters.js";
-import { renderField } from "./formatters.js";
+import { renderField, resolveParamMapReferences } from "./formatters.js";
 
 /** Callback to get the length of an array at a given container path. */
 export type GetArrayLength = (path: string) => number;
@@ -174,10 +174,9 @@ async function processSingleField(
   fieldSpec: DescriptorFieldFormat,
   ctx: FieldContext,
 ): Promise<{ field: DisplayField | null } | { warnings: Warning[] }> {
-  const { merged, warnings: defWarnings } = mergeDefinitions(
-    fieldSpec,
-    ctx.definitions,
-  );
+  const definitionResult = mergeDefinitions(fieldSpec, ctx.definitions);
+  const defWarnings = definitionResult.warnings;
+  let merged = definitionResult.merged;
   if (defWarnings.length > 0) {
     return {
       warnings: defWarnings.map((msg) =>
@@ -187,6 +186,27 @@ async function processSingleField(
   }
 
   if (merged.visible === "never") return { field: null };
+
+  // Substitute metadata.maps references in the field's params before anything
+  // is rendered. Per ERC-7730 a lookup miss means this descriptor does not
+  // describe the transaction, so the whole format is abandoned rather than
+  // rendered with a missing constant.
+  const mapParams = resolveParamMapReferences(
+    merged.params,
+    ctx.resolvePath,
+    ctx.metadata,
+  );
+  if (!mapParams.ok) {
+    return {
+      warnings: [
+        warn(
+          "DESCRIPTOR_NOT_APPLICABLE",
+          `No metadata.maps entry matches for param '${mapParams.unresolved}' of field '${merged.label ?? merged.path}'`,
+        ),
+      ],
+    };
+  }
+  merged = { ...merged, params: mapParams.params };
 
   const resolvedValue = resolveFieldValue(merged, ctx.resolvePath);
   if (!resolvedValue) {

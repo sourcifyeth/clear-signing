@@ -488,6 +488,14 @@ decides what it can decrypt.
 
 Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value.
 
+### Context-Dependent Constants (`metadata.maps`)
+
+A `params` value that is normally a constant (e.g. `token`, `nativeCurrencyAddress`, `threshold`, the `unit` scale) may instead be a **map reference** — a `{ map, keyPath }` object that resolves a per-context constant from a `metadata.maps` lookup table. This lets one descriptor cover many deployments whose hard-coded constant differs, e.g. a wrapper whose underlying token depends on which address (`@.to`) was called.
+
+- **Shape.** `params.token: { "map": "$.metadata.maps.underlying", "keyPath": "@.to" }`, where `metadata.maps.underlying.values` maps a key to the constant. `keyPath` is resolved like any other path; its value is reduced to a canonical string (`mapKeyFromResolved`) and matched **case-insensitively** against the map keys, so a checksummed address key matches a lowercased `@.to`. Guarded by `isMapReference`; typed as `DescriptorMapReference` / `DescriptorMetadataMap` in `types.ts`.
+- **Where substitution happens.** `resolveParamMapReferences` (in `formatters.ts`) runs once per field in `processSingleField`, **before** rendering, replacing every map reference in the field's params with its resolved constant. Format handlers therefore never see a map reference; the `asConstant` guard in `formatters.ts` keeps them correct if driven directly. Values keep their JSON type, so a map yielding an integer still satisfies a numeric param like `decimals`.
+- **Miss → `DESCRIPTOR_NOT_APPLICABLE`.** If no map key matches, the descriptor does not describe this transaction. `processSingleField` returns this warning and the whole format is abandoned (raw-calldata fallback), rather than degrading the single field — per the ERC-7730 spec, unrelated constants in the same descriptor may be equally out of date. This is distinct from `INVALID_DESCRIPTOR` (a malformed descriptor); the descriptor here is well-formed but out of scope.
+
 ### Chain Info Resolution
 
 Chain metadata (name, native currency) is resolved via `ExternalDataProvider.resolveChainInfo(chainId)`. This is used by the `chainId` format (to display chain names), the `amount` format (to display native currency amounts with correct decimals and ticker), and the `tokenAmount` format when `nativeCurrencyAddress` matches. There is no embedded chain registry. When `resolveChainInfo` is absent or returns `null`, the library emits an `UNKNOWN_CHAIN` warning and falls back to the raw value.
