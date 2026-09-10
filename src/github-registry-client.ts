@@ -78,3 +78,21 @@ export async function fetchRegistryFile(
   const url = `${rawBaseUrl(source)}/${repoRelativePath}`;
   return fetchJson(url);
 }
+
+/**
+ * Fetches a registry file that may not exist: returns null on HTTP 404,
+ * throws on any other failure. Used for attestation files — a missing
+ * `sigs/` file means the attester published no attestation.
+ */
+export async function fetchOptionalRegistryFile(
+  repoRelativePath: string,
+  source: GitHubSource,
+): Promise<unknown | null> {
+  const url = `${rawBaseUrl(source)}/${repoRelativePath}`;
+  const response = await fetch(url);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} fetching ${url}`);
+  }
+  return response.json() as Promise<unknown>;
+}
