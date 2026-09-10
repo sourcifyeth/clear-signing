@@ -17,7 +17,7 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils.js";
-import { buildFilesystemResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts, padAddr, padInt } from "../utils.js";
 
 const CONTRACT_ADDRESS = "0x00112233445566778899AABBCCDDEEFF00112233";
 const CHAIN_ID = 1;
@@ -43,10 +43,6 @@ function buildCalldata(params: {
   legacy: bigint;
   fee: bigint;
 }): string {
-  const pad32 = (hex: string) => hex.padStart(64, "0");
-  const padAddr = (addr: string) => pad32(addr.toLowerCase().slice(2));
-  const padInt = (n: bigint) => pad32(n.toString(16));
-
   return (
     SELECTOR +
     padAddr(params.to) +

@@ -591,6 +591,7 @@ npm run test:watch    # Watch mode
 Tests live in `test/`. Current test files:
 
 - `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
+- `test/utils.spec.ts` — unit tests for the shared utility functions in `utils.ts` (signed integer decoding of sign-extended ABI words)
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
@@ -598,11 +599,19 @@ Tests live in `test/`. Current test files:
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
+- `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
 - `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
 - `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
 
 ### Test guidelines
 
+- **End-to-end tests use real registry descriptors.** Put them in `test/registry-cases/<owner>/`
+  with a verbatim copy of a descriptor from the clear-signing registry, and name the spec after
+  the owner. Search the registry for a descriptor that already has the feature under test
+  (GitHub code search on the registry repo works well). Do not write a custom descriptor or add
+  a new test directory layout for it.
+- **Unit tests live in `test/<module>.spec.ts`**, named after the `src/` module they cover.
+  Do not name a test file after the feature or bug.
 - **Be consistent** with the style and patterns of existing tests in the same file.
 - **Test all properties** of the returned `DisplayModel` and its nested objects:
   `intent`, `interpolatedIntent`, `fields`, `metadata` (including `owner`, `contractName`, `info`),

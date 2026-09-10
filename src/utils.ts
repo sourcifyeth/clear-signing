@@ -236,9 +236,9 @@ export function bytesToUnsignedBigInt(bytes: Uint8Array): bigint {
 /** Interpret bytes as a signed big-endian integer (two's complement). */
 export function bytesToSignedBigInt(bytes: Uint8Array, bits?: number): bigint {
   const unsigned = bytesToUnsignedBigInt(bytes);
-  const bitLen = BigInt(bits ?? bytes.length * 8);
-  const signBit = 1n << (bitLen - 1n);
-  return unsigned & signBit ? unsigned - (1n << bitLen) : unsigned;
+  // ABI words sign-extend narrow signed integers to 32 bytes. Normalize to
+  // their declared width before interpreting the sign (e.g. int24 ticks).
+  return BigInt.asIntN(bits ?? bytes.length * 8, unsigned);
 }
 
 /** Concatenate multiple Uint8Arrays into one. */
