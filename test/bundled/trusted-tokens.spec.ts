@@ -13,7 +13,7 @@ import type {
   TrustedTokens,
 } from "../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../src/utils.js";
-import { buildFilesystemResolverOpts } from "../utils.js";
+import { buildFilesystemResolverOpts, padAddr, padInt } from "../utils.js";
 
 const CHAIN_ID = 1;
 const TOKEN = "0xA0b86991c6218b36c1d19D4a2E9Eb0cE3606eB48";
@@ -25,8 +25,6 @@ const MAX_UINT256 =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 const checksum = (addr: string) => toChecksumAddress(hexToBytes(addr));
-const word = (hex: string) => hex.padStart(64, "0");
-const addrWord = (addr: string) => word(addr.slice(2).toLowerCase());
 
 const externalData: ExternalDataProvider = {
   resolveToken: async (chainId, address) =>
@@ -67,7 +65,7 @@ function opts(
 
 describe("trusted tokens — bundled ERC-20", () => {
   it("formats transfer(address,uint256) as Send", async () => {
-    const data = "0xa9059cbb" + addrWord(ALICE) + word("f4240"); // value = 1_000_000
+    const data = "0xa9059cbb" + padAddr(ALICE) + padInt(1_000_000n);
     const result: DisplayModel = await format(
       { chainId: CHAIN_ID, to: TOKEN, data },
       opts(TRUSTED_ERC20),
@@ -107,7 +105,7 @@ describe("trusted tokens — bundled ERC-20", () => {
   });
 
   it("formats approve(address,uint256) over threshold as Unlimited", async () => {
-    const data = "0x095ea7b3" + addrWord(OPERATOR) + MAX_UINT256;
+    const data = "0x095ea7b3" + padAddr(OPERATOR) + MAX_UINT256;
     const result = await format(
       { chainId: CHAIN_ID, to: TOKEN, data },
       opts(TRUSTED_ERC20),
@@ -146,7 +144,7 @@ describe("trusted tokens — bundled ERC-20", () => {
 describe("trusted tokens — bundled ERC-721", () => {
   it("formats safeTransferFrom(address,address,uint256) as Send NFT", async () => {
     const data =
-      "0x42842e0e" + addrWord(ALICE) + addrWord(OPERATOR) + word("539"); // tokenId 1337
+      "0x42842e0e" + padAddr(ALICE) + padAddr(OPERATOR) + padInt(1337n);
     const result = await format(
       { chainId: CHAIN_ID, to: COLLECTION, data },
       opts(TRUSTED_ERC721),
@@ -187,7 +185,7 @@ describe("trusted tokens — bundled ERC-721", () => {
   });
 
   it("formats setApprovalForAll(address,bool) with the bool rendered as an enum", async () => {
-    const data = "0xa22cb465" + addrWord(OPERATOR) + word("1"); // approved = true
+    const data = "0xa22cb465" + padAddr(OPERATOR) + padInt(1n); // approved = true
     const result = await format(
       { chainId: CHAIN_ID, to: COLLECTION, data },
       opts(TRUSTED_ERC721),
@@ -226,7 +224,7 @@ describe("trusted tokens — bundled ERC-721", () => {
   });
 
   it("formats setApprovalForAll(address,bool) with approved=false as Deny all", async () => {
-    const data = "0xa22cb465" + addrWord(OPERATOR) + word("0"); // approved = false
+    const data = "0xa22cb465" + padAddr(OPERATOR) + padInt(0n); // approved = false
     const result = await format(
       { chainId: CHAIN_ID, to: COLLECTION, data },
       opts(TRUSTED_ERC721),
@@ -245,7 +243,7 @@ describe("trusted tokens — bundled ERC-721", () => {
 
 describe("trusted tokens — selector collision (standard comes from the tag)", () => {
   // approve(address,uint256) shares selector 0x095ea7b3 across both standards.
-  const APPROVE = "0x095ea7b3" + addrWord(OPERATOR) + word("4c4b40"); // 5_000_000
+  const APPROVE = "0x095ea7b3" + padAddr(OPERATOR) + padInt(5_000_000n);
 
   it("renders the third word as a token amount when tagged erc20", async () => {
     const result = await format(
@@ -285,7 +283,7 @@ describe("trusted tokens — selector collision (standard comes from the tag)", 
 });
 
 describe("trusted tokens — precedence and fallbacks", () => {
-  const TRANSFER = "0xa9059cbb" + addrWord(ALICE) + word("f4240"); // transfer 1 TKN
+  const TRANSFER = "0xa9059cbb" + padAddr(ALICE) + padInt(1_000_000n); // transfer 1 TKN
 
   it("registry descriptor takes precedence over a trusted tag", async () => {
     const fsOpts = buildFilesystemResolverOpts(

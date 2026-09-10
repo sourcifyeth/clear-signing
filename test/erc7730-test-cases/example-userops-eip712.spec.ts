@@ -22,6 +22,9 @@ import {
 import {
   buildFilesystemResolverOpts,
   computeEncodeTypeOrThrow,
+  padAddr,
+  padInt,
+  padRight32,
 } from "../utils.js";
 
 // Smart account implementation address — a valid 20-byte hex (the original spec
@@ -50,14 +53,8 @@ const PAYMASTER_AND_DATA =
   "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 const INIT_CODE_NON_EMPTY = "0x1234567890abcdef";
 
-const pad32 = (hex: string): string => hex.padStart(64, "0");
-const padAddr = (addr: string): string => pad32(addr.toLowerCase().slice(2));
-const padUint = (n: bigint): string => pad32(n.toString(16));
-const padRight32 = (hex: string): string =>
-  hex.length % 64 === 0 ? hex : hex + "0".repeat(64 - (hex.length % 64));
-
 function buildTransferCalldata(to: string, amount: bigint): string {
-  return TRANSFER_SELECTOR_HEX + padAddr(to) + padUint(amount);
+  return TRANSFER_SELECTOR_HEX + padAddr(to) + padInt(amount);
 }
 
 function buildExecuteCalldata(
@@ -67,13 +64,13 @@ function buildExecuteCalldata(
 ): string {
   const innerHex = innerData.startsWith("0x") ? innerData.slice(2) : innerData;
   const innerBytes = hexToBytes("0x" + innerHex);
-  const lengthHex = padUint(BigInt(innerBytes.length));
+  const lengthHex = padInt(BigInt(innerBytes.length));
   const contentHex = padRight32(innerHex);
   return (
     EXECUTE_SELECTOR_HEX +
     padAddr(to) +
-    padUint(value) +
-    padUint(0x60n) +
+    padInt(value) +
+    padInt(0x60n) +
     lengthHex +
     contentHex
   );

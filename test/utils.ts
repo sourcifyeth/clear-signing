@@ -6,7 +6,12 @@ import type {
   RegistryIndex,
   TypeMember,
 } from "../src/types.js";
-import { asciiToBytes, bytesToHex, keccak256 } from "../src/utils.js";
+import {
+  asciiToBytes,
+  bigIntToBytes,
+  bytesToHex,
+  keccak256,
+} from "../src/utils.js";
 
 /**
  * Compute the EIP-712 `encodeType` string for a primary type, throwing if
@@ -94,4 +99,24 @@ export function buildFilesystemResolverOpts(
     },
     externalDataProvider,
   };
+}
+
+/** Left-pad a hex string without 0x prefix to one 32-byte ABI word. */
+export function pad32(hex: string): string {
+  return hex.padStart(64, "0");
+}
+
+/** Encode an address as one 32-byte ABI word. */
+export function padAddr(addr: string): string {
+  return pad32(addr.toLowerCase().slice(2));
+}
+
+/** Encode a signed or unsigned integer as one two's-complement ABI word. */
+export function padInt(n: bigint): string {
+  return bytesToHex(bigIntToBytes(n)).slice(2);
+}
+
+/** Right-pad a hex string without 0x prefix to a multiple of 32 bytes. */
+export function padRight32(hex: string): string {
+  return hex.length % 64 === 0 ? hex : hex + "0".repeat(64 - (hex.length % 64));
 }

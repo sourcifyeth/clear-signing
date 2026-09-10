@@ -9,13 +9,12 @@ import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
 import {
-  bigIntToBytes,
   bytesToHex,
   hexToBytes,
   selectorForSignature,
   toChecksumAddress,
 } from "../../../src/utils.js";
-import { buildFilesystemResolverOpts } from "../../utils.js";
+import { buildFilesystemResolverOpts, padAddr, padInt } from "../../utils.js";
 
 describe("Ekubo Positions", () => {
   const CHAIN_ID = 1;
@@ -25,8 +24,6 @@ describe("Ekubo Positions", () => {
   // Pool config: 20-byte extension (none) + 8-byte fee + 4-byte tick spacing
   const CONFIG = "00".repeat(20) + "000010c6f7a0b5ed" + "000003e8";
 
-  const word = (value: bigint) => bytesToHex(bigIntToBytes(value)).slice(2);
-  const addrWord = (addr: string) => addr.slice(2).padStart(64, "0");
   const checksum = (addr: string) => toChecksumAddress(hexToBytes(addr));
 
   const resolveToken: ExternalDataProvider["resolveToken"] = async (
@@ -83,14 +80,14 @@ describe("Ekubo Positions", () => {
     // The tuple holds static members only, so the ABI encodes it in place.
     const MINT_AND_DEPOSIT_CALLDATA =
       SELECTOR +
-      addrWord(USDC) + // poolKey.token0
-      addrWord(WETH) + // poolKey.token1
+      padAddr(USDC) + // poolKey.token0
+      padAddr(WETH) + // poolKey.token1
       CONFIG + // poolKey.config
-      word(TICK_LOWER) + // tickLower — sign-extended to 32 bytes
-      word(TICK_UPPER) + // tickUpper
-      word(1_500_000_000n) + // maxAmount0 = 1500 USDC
-      word(500_000_000_000_000_000n) + // maxAmount1 = 0.5 WETH
-      word(1_000_000n); // minLiquidity
+      padInt(TICK_LOWER) + // tickLower — sign-extended to 32 bytes
+      padInt(TICK_UPPER) + // tickUpper
+      padInt(1_500_000_000n) + // maxAmount0 = 1500 USDC
+      padInt(500_000_000_000_000_000n) + // maxAmount1 = 0.5 WETH
+      padInt(1_000_000n); // minLiquidity
 
     it("formats mintAndDeposit with negative and positive int32 ticks", async () => {
       const opts = buildOpts({ resolveToken });
@@ -200,10 +197,10 @@ describe("Ekubo Positions", () => {
 
     const MAYBE_INITIALIZE_POOL_CALLDATA =
       SELECTOR +
-      addrWord(USDC) + // poolKey.token0
-      addrWord(WETH) + // poolKey.token1
+      padAddr(USDC) + // poolKey.token0
+      padAddr(WETH) + // poolKey.token1
       CONFIG + // poolKey.config
-      word(TICK); // tick — sign-extended to 32 bytes
+      padInt(TICK); // tick — sign-extended to 32 bytes
 
     it("formats maybeInitializePool with a negative int32 tick", async () => {
       const opts = buildOpts({ resolveLocalName });

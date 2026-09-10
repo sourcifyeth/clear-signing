@@ -18,7 +18,12 @@ import {
   selectorForSignature,
   toChecksumAddress,
 } from "../../src/utils.js";
-import { buildFilesystemResolverOpts } from "../utils.js";
+import {
+  buildFilesystemResolverOpts,
+  padAddr,
+  padInt,
+  padRight32,
+} from "../utils.js";
 
 // Smart account implementation address — a valid 20-byte hex (the original spec
 // file used "0xYourImplementationAddress" as a placeholder; swapped here so that
@@ -42,14 +47,8 @@ const TRANSFER_SELECTOR_HEX = bytesToHex(
   selectorForSignature("transfer(address,uint256)"),
 );
 
-const pad32 = (hex: string): string => hex.padStart(64, "0");
-const padAddr = (addr: string): string => pad32(addr.toLowerCase().slice(2));
-const padUint = (n: bigint): string => pad32(n.toString(16));
-const padRight32 = (hex: string): string =>
-  hex.length % 64 === 0 ? hex : hex + "0".repeat(64 - (hex.length % 64));
-
 function buildTransferCalldata(to: string, amount: bigint): string {
-  return TRANSFER_SELECTOR_HEX + padAddr(to) + padUint(amount);
+  return TRANSFER_SELECTOR_HEX + padAddr(to) + padInt(amount);
 }
 
 function buildExecuteCalldata(
@@ -59,14 +58,14 @@ function buildExecuteCalldata(
 ): string {
   const innerHex = innerData.startsWith("0x") ? innerData.slice(2) : innerData;
   const innerBytes = hexToBytes("0x" + innerHex);
-  const lengthHex = padUint(BigInt(innerBytes.length));
+  const lengthHex = padInt(BigInt(innerBytes.length));
   const contentHex = padRight32(innerHex);
   // offset to `data` = 3 words after selector (to, value, offset) = 0x60
   return (
     EXECUTE_SELECTOR_HEX +
     padAddr(to) +
-    padUint(value) +
-    padUint(0x60n) +
+    padInt(value) +
+    padInt(0x60n) +
     lengthHex +
     contentHex
   );
