@@ -17,7 +17,11 @@ import type {
   Warning,
 } from "./types.js";
 import type { ArgumentValue, ResolvePath } from "./descriptor.js";
-import { resolveMetadataValue, resolvedToAddress } from "./descriptor.js";
+import {
+  resolveMetadataEntry,
+  resolveMetadataValue,
+  resolvedToAddress,
+} from "./descriptor.js";
 import {
   bytesToUnsignedBigInt,
   bytesToHex,
@@ -372,7 +376,9 @@ export function resolveMetadataToken(
   | { hasMetadataRef: true; token: TokenResult | undefined } {
   const params = field.params ?? {};
   const tokenSpec = params.token ?? params.tokenPath;
-  if (tokenSpec !== "$.metadata.token") return { hasMetadataRef: false };
+  if (typeof tokenSpec !== "string" || tokenSpec !== "$.metadata.token") {
+    return { hasMetadataRef: false };
+  }
 
   const meta = metadata?.token;
   if (!meta?.ticker || meta.decimals === undefined) {
@@ -401,7 +407,7 @@ export function resolveTokenAddress(
 ): string | undefined {
   const params = field.params ?? {};
   const token = params.token ?? params.tokenPath;
-  if (!token) return undefined;
+  if (typeof token !== "string") return undefined;
 
   // Constant address
   if (isAddressString(token)) {
@@ -529,7 +535,7 @@ export function resolveCollectionAddress(
 ): string | undefined {
   const params = field.params ?? {};
   const collection = params.collection ?? params.collectionPath;
-  if (!collection) return undefined;
+  if (typeof collection !== "string") return undefined;
 
   // Constant address
   if (isAddressString(collection)) {
@@ -763,20 +769,7 @@ export function resolveEnumLabel(
   const reference = params.$ref;
   if (typeof reference !== "string") return undefined;
 
-  const enumMap = resolveMetadataValue(metadata, reference);
-  if (!enumMap || typeof enumMap !== "object") return undefined;
-
-  const map = enumMap as Record<string, unknown>;
-  let label = map[key];
-  if (label === undefined) {
-    const lowerKey = key.toLowerCase();
-    for (const [k, v] of Object.entries(map)) {
-      if (k.toLowerCase() === lowerKey) {
-        label = v;
-        break;
-      }
-    }
-  }
+  const label = resolveMetadataEntry(metadata, reference, key);
   return typeof label === "string" ? label : undefined;
 }
 
@@ -902,7 +895,7 @@ function resolveCallee(
 ): string | undefined {
   const params = field.params ?? {};
   const spec = params.callee ?? params.calleePath;
-  if (!spec) return undefined;
+  if (typeof spec !== "string") return undefined;
 
   if (isAddressString(spec)) {
     return spec.toLowerCase();
@@ -926,7 +919,7 @@ function resolveAmountParam(
 ): bigint | undefined {
   const params = field.params ?? {};
   const spec = params.amount ?? params.amountPath;
-  if (!spec) return undefined;
+  if (typeof spec !== "string") return undefined;
 
   const resolved = resolvePath(spec);
   if (resolved === undefined) {
@@ -955,7 +948,7 @@ function resolveSpenderParam(
 ): string | undefined {
   const params = field.params ?? {};
   const spec = params.spender ?? params.spenderPath;
-  if (!spec) return undefined;
+  if (typeof spec !== "string") return undefined;
 
   if (isAddressString(spec)) {
     return spec.toLowerCase();
@@ -979,9 +972,9 @@ function resolveSelectorParam(
 ): Uint8Array | undefined {
   const params = field.params ?? {};
   const spec = params.selector ?? params.selectorPath;
-  if (!spec) return undefined;
+  if (typeof spec !== "string") return undefined;
 
-  if (typeof spec === "string" && spec.startsWith("0x") && spec.length === 10) {
+  if (spec.startsWith("0x") && spec.length === 10) {
     return hexToBytes(spec);
   }
 

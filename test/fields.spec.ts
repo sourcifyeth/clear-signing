@@ -20,6 +20,8 @@ import type {
   DescriptorFieldFormat,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
+  DescriptorMetadata,
+  ExternalDataProvider,
 } from "../src/types.js";
 import { hexToBytes, isFieldGroup, toChecksumAddress } from "../src/utils.js";
 
@@ -1231,6 +1233,333 @@ describe("applyFieldFormats", () => {
       assert(!isFieldGroup(field));
       expect(field.value).toBe("1000000");
       expect(field.warning).toBeUndefined();
+    });
+  });
+
+  describe("metadata.maps references (end-to-end via applyFieldFormats)", () => {
+    const WRAPPER = "0xda9396b82634Ea99243cE51258B6A5Ae512D4893";
+    const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+    const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
+    const metadata: DescriptorMetadata = {
+      maps: {
+        // Keyed on the called wrapper (checksummed keys)
+        underlying: {
+          $keyType: "wrapper address",
+          values: { [WRAPPER]: WETH },
+        },
+        // Keyed on the chain ID
+        byChain: {
+          $keyType: "Chain ID",
+          values: { "1": WETH, "137": USDC },
+        },
+        // Yields a number, for the numeric chainId param
+        homeChain: {
+          values: { [WRAPPER]: 137 },
+        },
+      },
+    };
+
+    const resolveToken: ExternalDataProvider["resolveToken"] = async (
+      chainId,
+      tokenAddress,
+    ) => {
+      if (tokenAddress === WETH.toLowerCase()) {
+        return { name: "Wrapped Ether", symbol: "WETH", decimals: 18 };
+      }
+      if (tokenAddress === USDC.toLowerCase()) {
+        return { name: "USD Coin", symbol: `USDC${chainId}`, decimals: 6 };
+      }
+      return null;
+    };
+
+    /** A tokenAmount field whose token param is a map reference. */
+    function mappedTokenField(
+      map: string,
+      keyPath: string,
+      extraParams: DescriptorFieldFormat["params"] = {},
+    ): DescriptorFormatSpec {
+      return {
+        fields: [
+          {
+            path: "amount",
+            label: "Amount",
+            format: "tokenAmount",
+            params: { token: { map, keyPath }, ...extraParams },
+          },
+        ],
+      };
+    }
+
+    it("resolves a checksummed address key from the lowercased @.to", async () => {
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.underlying", "@.to"),
+        {},
+        mapResolvePath({
+          amount: UINT(1_000_000_000_000_000_000n),
+          "@.to": ADDR(WRAPPER),
+        }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      assert(!("warnings" in result));
+      expect(result.fields).toHaveLength(1);
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.label).toBe("Amount");
+      expect(field.value).toBe("1 WETH");
+      expect(field.fieldType).toBe("uint");
+      expect(field.format).toBe("tokenAmount");
+      expect(field.tokenAddress).toBe(WETH);
+      expect(field.warning).toBeUndefined();
+      expect(result.renderedValues.get("amount")).toBe("1 WETH");
+    });
+
+    it("resolves an integer key from @.chainId", async () => {
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.byChain", "@.chainId"),
+        {},
+        mapResolvePath({
+          amount: UINT(2_000_000n),
+          "@.chainId": UINT(137n),
+        }),
+        mapArrayLength({}),
+        137,
+        metadata,
+        { resolveToken },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("2 USDC137");
+      expect(field.tokenAddress).toBe(USDC);
+      expect(field.warning).toBeUndefined();
+    });
+
+    it("keeps the JSON type of the mapped value for a numeric param", async () => {
+      const calls: number[] = [];
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.byChain", "@.chainId", {
+          chainId: { map: "$.metadata.maps.homeChain", keyPath: "@.to" },
+        }),
+        {},
+        mapResolvePath({
+          amount: UINT(3_000_000n),
+          "@.to": ADDR(WRAPPER),
+          "@.chainId": UINT(137n),
+        }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        {
+          resolveToken: async (chainId, tokenAddress) => {
+            calls.push(chainId);
+            return resolveToken(chainId, tokenAddress);
+          },
+        },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      // The token is resolved on the mapped chain, not the container's
+      expect(calls).toEqual([137]);
+      expect(field.value).toBe("3 USDC137");
+      expect(field.warning).toBeUndefined();
+    });
+
+    it("substitutes map references coming from a $ref definition", async () => {
+      const definitions: Record<string, DescriptorFieldFormat> = {
+        wrappedAmount: {
+          label: "Amount",
+          format: "tokenAmount",
+          params: {
+            token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+          },
+        },
+      };
+      const result = await applyFieldFormats(
+        {
+          fields: [
+            { path: "amount", $ref: "$.display.definitions.wrappedAmount" },
+          ],
+        },
+        definitions,
+        mapResolvePath({
+          amount: UINT(1_000_000_000_000_000_000n),
+          "@.to": ADDR(WRAPPER),
+        }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      assert(!("warnings" in result));
+      const field = result.fields[0];
+      assert(!isFieldGroup(field));
+      expect(field.value).toBe("1 WETH");
+      expect(field.tokenAddress).toBe(WETH);
+    });
+
+    it("expands a keyPath with .[] for each iterated element", async () => {
+      const TOKEN_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const TOKEN_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            path: "amounts.[]",
+            label: "Amount",
+            format: "tokenAmount",
+            params: {
+              token: {
+                map: "$.metadata.maps.underlying",
+                keyPath: "tokens.[]",
+              },
+            },
+          },
+        ],
+      };
+      const result = await applyFieldFormats(
+        format,
+        {},
+        mapResolvePath({
+          "amounts.[0]": UINT(1_000_000_000_000_000_000n),
+          "amounts.[1]": UINT(2_000_000n),
+          "tokens.[0]": ADDR(TOKEN_A),
+          "tokens.[1]": ADDR(TOKEN_B),
+        }),
+        mapArrayLength({ amounts: 2 }),
+        1,
+        {
+          maps: {
+            underlying: {
+              values: { [TOKEN_A]: WETH, [TOKEN_B]: USDC },
+            },
+          },
+        },
+        { resolveToken },
+      );
+
+      assert(!("warnings" in result));
+      const group = result.fields[0];
+      assert(isFieldGroup(group));
+      expect(group.fields).toHaveLength(2);
+      expect(group.fields[0].value).toBe("1 WETH");
+      expect(group.fields[0].tokenAddress).toBe(WETH);
+      expect(group.fields[1].value).toBe("2 USDC1");
+      expect(group.fields[1].tokenAddress).toBe(USDC);
+    });
+
+    it("abandons the format with INVALID_DESCRIPTOR when no map entry matches", async () => {
+      const OTHER = "0x0000000000000000000000000000000000000009";
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.underlying", "@.to"),
+        {},
+        mapResolvePath({ amount: UINT(1n), "@.to": ADDR(OTHER) }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings).toEqual([
+        {
+          code: "INVALID_DESCRIPTOR",
+          message: `No entry for key '${OTHER}' in map '$.metadata.maps.underlying' (param 'token' of field 'Amount')`,
+        },
+      ]);
+    });
+
+    it("abandons the format with INVALID_DESCRIPTOR for an unknown map", async () => {
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.nope", "@.to"),
+        {},
+        mapResolvePath({ amount: UINT(1n), "@.to": ADDR(WRAPPER) }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings).toEqual([
+        {
+          code: "INVALID_DESCRIPTOR",
+          message: `No entry for key '${WRAPPER.toLowerCase()}' in map '$.metadata.maps.nope' (param 'token' of field 'Amount')`,
+        },
+      ]);
+    });
+
+    it("reports a missing container key path as CONTAINER_MISSING_REQUIRED_PATH", async () => {
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.byChain", "@.chainId"),
+        {},
+        mapResolvePath({ amount: UINT(1n) }),
+        mapArrayLength({}),
+        undefined,
+        metadata,
+        { resolveToken },
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings).toEqual([
+        {
+          code: "CONTAINER_MISSING_REQUIRED_PATH",
+          message:
+            "Descriptor requires container field '@.chainId' for param 'token' of field 'Amount', but it was not provided in the container",
+        },
+      ]);
+    });
+
+    it("reports a missing data key path as INVALID_DESCRIPTOR", async () => {
+      const result = await applyFieldFormats(
+        mappedTokenField("$.metadata.maps.underlying", "pool"),
+        {},
+        mapResolvePath({ amount: UINT(1n) }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings).toEqual([
+        {
+          code: "INVALID_DESCRIPTOR",
+          message:
+            "No value found for key path 'pool' of param 'token' of field 'Amount'",
+        },
+      ]);
+    });
+
+    it("does not mutate the descriptor's params", async () => {
+      const params: DescriptorFieldFormat["params"] = {
+        token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+      };
+      await applyFieldFormats(
+        {
+          fields: [
+            { path: "amount", label: "Amount", format: "tokenAmount", params },
+          ],
+        },
+        {},
+        mapResolvePath({ amount: UINT(1n), "@.to": ADDR(WRAPPER) }),
+        mapArrayLength({}),
+        1,
+        metadata,
+        { resolveToken },
+      );
+
+      expect(params.token).toEqual({
+        map: "$.metadata.maps.underlying",
+        keyPath: "@.to",
+      });
     });
   });
 

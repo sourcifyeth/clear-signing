@@ -35,7 +35,9 @@ src/
   `argumentValueToBytes`, `argumentValueEquals`), format-to-type mapping
   (`fieldTypeForFormat`),
   field/definition merging (`mergeDefinitions`, `resolveFieldValue`),
-  metadata resolution (`resolveMetadataValue`), and template interpolation (`interpolateTemplate`).
+  metadata resolution (`resolveMetadataValue`, `resolveMetadataEntry` — the shared
+  exact-then-case-insensitive key lookup used by the `enum` format and by
+  `metadata.maps` references), and template interpolation (`interpolateTemplate`).
   Defines the `BaseResolvePath` (returns `ArgumentValue`) and `ResolvePath`
   (returns `ArgumentValue | BytesSliceValue`) type aliases.
 
@@ -57,6 +59,11 @@ src/
   `bytesSliceToFieldType`). When decryption fails, `processSingleField` substitutes
   `DEFAULT_ENCRYPTED_PLACEHOLDER` / the descriptor's `fallbackLabel` for the
   `renderField` call, so the fallback flows through the normal DisplayField path.
+  Also contains `metadata.maps` support (`isMapReference`, `resolveMapReference`,
+  `resolveParamMapReferences`, all module-private): `processSingleField` replaces
+  every `{ map, keyPath }` param with its constant before rendering, so format
+  handlers never see a map reference — see
+  [Context-Dependent Constants](#context-dependent-constants-metadatamaps).
 
 - **`formatters.ts`** — Individual format handlers dispatched by `renderField()`.
   Includes `formatRaw`, `formatTimestamp`, `renderTokenAmount`, `formatNftName`,
@@ -488,6 +495,39 @@ decides what it can decrypt.
 
 Token metadata is resolved entirely via `ExternalDataProvider.resolveToken(chainId, address)`. There is no embedded token registry. When `resolveToken` is absent or returns `null`, the library emits a `UNKNOWN_TOKEN` warning and falls back to the raw value.
 
+### Context-Dependent Constants (`metadata.maps`)
+
+A constant param may instead be a **map reference** — a `{ map, keyPath }` object
+(`DescriptorMapReference`) that selects a per-context constant from a
+`metadata.maps` lookup table (`DescriptorMetadataMap`: `{ $keyType?, values }`).
+This lets one descriptor cover many deployments whose hard-coded constant
+differs, e.g. a vault whose underlying token depends on `@.chainId`.
+
+- **Where allowed.** Only on the params the ERC-7730 schema marks map-capable:
+  `token`, `chainId`, `collection`, `callee`, `selector`, `amount`, `spender`.
+  The type union on `DescriptorFieldFormatParams` documents this set. The spec
+  text says "anywhere a parameter with constant value would be used"; the
+  registry schema is narrower and we follow the schema.
+- **Where substitution happens.** `resolveParamMapReferences` (module-private in
+  `fields.ts`) runs once per field in `processSingleField`, after
+  `mergeDefinitions` and before `resolveFieldValue`. It replaces every map
+  reference in the merged params with its resolved constant, so format handlers
+  in `formatters.ts` never see a reference and contain no map logic. `keyPath` is
+  resolved through the field's `resolvePath` closure, so container paths, group
+  scoping and byte slices apply. Array iteration (`expandParamArrayIndex`) rewrites
+  `.[]` inside a reference's `keyPath` like any string param.
+- **Key matching.** The resolved `keyPath` value is reduced to a string
+  (lowercase hex for addresses/bytes, decimal for integers) and looked up via
+  `resolveMetadataEntry`, exact key first, then case-insensitively — the same
+  helper the `enum` format uses — so checksummed address keys match a lowercased
+  `@.to`. Values keep their JSON type, so a map can feed a numeric `chainId`.
+- **Miss → `INVALID_DESCRIPTOR`.** Per the spec the wallet MUST consider the
+  file invalid for the transaction, so a miss (or an unknown map) aborts the
+  whole format with the raw-calldata fallback, like the other
+  `INVALID_DESCRIPTOR` checks in `processSingleField`. The message names the
+  key, the map, the param and the field. A `keyPath` that names a missing `@.`
+  container field is reported as `CONTAINER_MISSING_REQUIRED_PATH` instead.
+
 ### Chain Info Resolution
 
 Chain metadata (name, native currency) is resolved via `ExternalDataProvider.resolveChainInfo(chainId)`. This is used by the `chainId` format (to display chain names), the `amount` format (to display native currency amounts with correct decimals and ticker), and the `tokenAmount` format when `nativeCurrencyAddress` matches. There is no embedded chain registry. When `resolveChainInfo` is absent or returns `null`, the library emits an `UNKNOWN_CHAIN` warning and falls back to the raw value.
@@ -592,10 +632,11 @@ Tests live in `test/`. Current test files:
 
 - `test/formatters.spec.ts` — unit tests for all field format handlers in `formatters.ts`
 - `test/utils.spec.ts` — unit tests for the shared utility functions in `utils.ts` (signed integer decoding of sign-extended ABI words)
-- `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators)
+- `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators, encryption, `metadata.maps` references)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
+- `test/erc7730-test-cases/example-maps.spec.ts` / `example-maps-pools.spec.ts` — `metadata.maps` references keyed on `@.chainId`; the spec files' `underlyingToken` addresses are 21 bytes, so that field asserts `FORMAT_PARAM_RESOLUTION_ERROR` as is (spec files are never edited)
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines

@@ -465,6 +465,29 @@ export function resolveMetadataValue(
   return current;
 }
 
+/**
+ * Look up `key` in the object that `pointer` resolves to, e.g. an enum or a
+ * map's `values`. The exact key is tried first, then a case-insensitive
+ * match, so capitalized enum keys and checksummed address keys still match.
+ */
+export function resolveMetadataEntry(
+  metadata: DescriptorMetadata | undefined,
+  pointer: string,
+  key: string,
+): unknown {
+  const entries = resolveMetadataValue(metadata, pointer);
+  if (!entries || typeof entries !== "object") return undefined;
+
+  const map = entries as Record<string, unknown>;
+  if (map[key] !== undefined) return map[key];
+
+  const lowerKey = key.toLowerCase();
+  for (const [k, v] of Object.entries(map)) {
+    if (k.toLowerCase() === lowerKey) return v;
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Interpolation
 // ---------------------------------------------------------------------------

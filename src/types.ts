@@ -735,29 +735,41 @@ export interface DescriptorFieldEncryption {
   fallbackLabel?: string;
 }
 
+/**
+ * A reference to a `metadata.maps` entry, accepted on the constant params the
+ * ERC-7730 schema marks map-capable (`token`, `chainId`, `collection`,
+ * `callee`, `selector`, `amount`, `spender`). `map` is a
+ * `$.metadata.maps.NAME` pointer; `keyPath` points at the transaction/message
+ * value used to select the entry.
+ */
+export interface DescriptorMapReference {
+  map: string;
+  keyPath: string;
+}
+
 export interface DescriptorFieldFormatParams {
   tokenPath?: string;
-  token?: string;
+  token?: string | DescriptorMapReference;
   nativeCurrencyAddress?: string | string[];
   threshold?: string | number;
   message?: string;
   chainIdPath?: string;
-  chainId?: number;
+  chainId?: number | DescriptorMapReference;
   encoding?: "timestamp" | "blockheight";
   base?: string;
   decimals?: number;
   prefix?: boolean;
   $ref?: string;
   collectionPath?: string;
-  collection?: string;
+  collection?: string | DescriptorMapReference;
   calleePath?: string;
-  callee?: string;
+  callee?: string | DescriptorMapReference;
   selectorPath?: string;
-  selector?: string;
+  selector?: string | DescriptorMapReference;
   amountPath?: string;
-  amount?: string;
+  amount?: string | DescriptorMapReference;
   spenderPath?: string;
-  spender?: string;
+  spender?: string | DescriptorMapReference;
   types?: DescriptorAddressType[];
   sources?: DescriptorAddressSource[];
   senderAddress?: string | string[];
@@ -839,13 +851,18 @@ export interface DescriptorMetadataToken {
   decimals?: number;
 }
 
+export interface DescriptorMetadataMap {
+  $keyType?: string;
+  values?: Record<string, string | number | boolean>;
+}
+
 export interface DescriptorMetadata {
   owner?: string;
   contractName?: string;
   info?: DescriptorMetadataInfo;
   token?: DescriptorMetadataToken;
   constants?: Record<string, string | number | boolean>;
-  maps?: Record<string, unknown>;
+  maps?: Record<string, DescriptorMetadataMap>;
   enums?: Record<string, Record<string, string>>;
 }
 
