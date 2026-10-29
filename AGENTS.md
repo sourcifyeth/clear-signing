@@ -406,7 +406,7 @@ format: the value is decrypted first, then rendered by the format above.
 - `tokenAmount` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios (same as `tokenTicker`).
 - `tokenAmount` message defaults to `"Unlimited"` when `params.threshold` is set but `params.message` is omitted.
 - `nftName` resolves collection name via `ExternalDataProvider.resolveNftCollectionName(chainId, address)`.
-- `tokenTicker` accepts only `address` type; supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios.
+- `tokenTicker` and `addressName` accept `address` and `bytes32`. A `bytes32` with zero top 12 bytes is read as an address from its low 20 bytes (cross-chain contracts such as Across store addresses so). A `bytes32` with non-zero top bytes (e.g. a Solana key) renders as hex with an `UNKNOWN_TOKEN` / `UNKNOWN_ADDRESS` warning. `tokenTicker` supports optional `chainId`/`chainIdPath` params to override the container chain ID for cross-chain scenarios.
 - `chainId` converts an integer chain ID to a human-readable chain name via `ExternalDataProvider.resolveChainInfo`. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
 - `amount` displays a value as native currency using `ExternalDataProvider.resolveChainInfo` for decimals and ticker. Falls back to raw with `UNKNOWN_CHAIN` warning when resolution fails.
 - `tokenAmount` with `nativeCurrencyAddress` also resolves native currency metadata via `resolveChainInfo`.
@@ -641,6 +641,7 @@ Tests live in `test/`. Current test files:
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
+- `test/registry-cases/across/across.spec.ts` — Across Ethereum SpokePool: deposit + depositNow (`addressName` / `tokenTicker` on `bytes32`, zero-padded EVM addresses and a Solana key)
 - `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
 - `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
 

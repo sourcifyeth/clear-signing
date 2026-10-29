@@ -995,9 +995,9 @@ export async function formatAddressName(
   resolvePath: ResolvePath,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
-  if (value.type !== "address")
-    return typeMismatch(value, "address", "addressName");
-  const checksumAddress = toChecksumAddress(value.bytes);
+  const address = toAddressValue(value, "addressName");
+  if ("fallback" in address) return address.fallback;
+  const checksumAddress = toChecksumAddress(address.value.bytes);
   const normalized = checksumAddress.toLowerCase();
 
   // Per ERC-7730: if the address matches senderAddress, display "Sender"
@@ -1120,14 +1120,15 @@ export async function formatTokenTicker(
   containerChainId: number | undefined,
   externalDataProvider?: ExternalDataProvider,
 ): Promise<RenderFieldResult> {
-  if (value.type !== "address")
-    return typeMismatch(value, "address", "tokenTicker");
+  const address = toAddressValue(value, "tokenTicker");
+  if ("fallback" in address) return address.fallback;
+  const tokenValue = address.value;
 
-  const tokenAddress = bytesToHex(value.bytes).toLowerCase();
+  const tokenAddress = bytesToHex(tokenValue.bytes).toLowerCase();
   const chainIdResult = resolveChainId(fieldOptions, resolvePath);
   if (chainIdResult.hasChainIdParam && chainIdResult.value === undefined) {
     return {
-      rendered: renderRaw(value),
+      rendered: renderRaw(tokenValue),
       warning: warn(
         "FORMAT_PARAM_RESOLUTION_ERROR",
         "chainId or chainIdPath param could not be resolved",
@@ -1140,7 +1141,7 @@ export async function formatTokenTicker(
 
   if (chainId === undefined) {
     return {
-      rendered: renderRaw(value),
+      rendered: renderRaw(tokenValue),
       warning: warn(
         "CONTAINER_MISSING_CHAIN_ID",
         "Cannot format tokenTicker without a chainId",
@@ -1158,7 +1159,7 @@ export async function formatTokenTicker(
   }
   if (!token) {
     return {
-      rendered: renderRaw(value),
+      rendered: renderRaw(tokenValue),
       warning: warn("UNKNOWN_TOKEN", "Token could not be resolved"),
     };
   }
@@ -1212,6 +1213,42 @@ function resolveChainId(
   }
 
   return { hasChainIdParam: true, value: undefined };
+}
+
+/**
+ * Read the address of an addressName or tokenTicker value. Accepts an
+ * address, or a bytes32 that holds an EVM address in its low 20 bytes (as
+ * cross-chain contracts store it). A bytes32 with non-zero top 12 bytes is
+ * not an EVM address (e.g. a Solana key): render it as hex, without a name.
+ */
+function toAddressValue(
+  value: ArgumentValue,
+  format: "addressName" | "tokenTicker",
+):
+  | { value: Extract<ArgumentValue, { type: "address" }> }
+  | { fallback: RenderFieldResult } {
+  if (value.type === "address") return { value };
+  if (value.type !== "bytes" || value.bytes.length !== 32) {
+    return { fallback: typeMismatch(value, "address or bytes32", format) };
+  }
+  if (value.bytes.subarray(0, 12).some((b) => b !== 0)) {
+    return {
+      fallback: {
+        rendered: renderRaw(value),
+        warning:
+          format === "addressName"
+            ? warn(
+                "UNKNOWN_ADDRESS",
+                "Address name could not be resolved: value is not an EVM address",
+              )
+            : warn(
+                "UNKNOWN_TOKEN",
+                "Token could not be resolved: value is not an EVM address",
+              ),
+      },
+    };
+  }
+  return { value: { type: "address", bytes: value.bytes.slice(12) } };
 }
 
 export function typeMismatch(
