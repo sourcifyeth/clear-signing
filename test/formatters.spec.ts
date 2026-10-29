@@ -1815,6 +1815,77 @@ describe("formatAddressName", () => {
     expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
     expect(provider.resolveEnsName).not.toHaveBeenCalled();
   });
+
+  it("reads a zero-padded address from bytes32", async () => {
+    const provider: ExternalDataProvider = {
+      resolveLocalName: vi.fn(async () => ({
+        name: "My Wallet",
+        typeMatch: true,
+      })),
+    };
+    const result = await formatAddressName(
+      bytes(
+        "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+      ),
+      {},
+      noopResolvePath,
+      provider,
+    );
+    expect(result.rendered).toBe("My Wallet");
+    expect(result.rawAddress).toBe(
+      "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    );
+    expect(result.warning).toBeUndefined();
+    expect(provider.resolveLocalName).toHaveBeenCalledWith(
+      "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      undefined,
+    );
+  });
+
+  it("falls back to checksum address for an unresolved bytes32 address", async () => {
+    const result = await formatAddressName(
+      bytes(
+        "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+      ),
+      {},
+      noopResolvePath,
+    );
+    expect(result.rendered).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+    expect(result.rawAddress).toBe(
+      "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    );
+    expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
+  });
+
+  it("renders a non-EVM bytes32 as hex without name resolution", async () => {
+    const solanaKey =
+      "0xc6fa7af3bedbad3a3d65f36aabc97431b1bbe4c2d2f6e0e47ca60203452f5d61";
+    const provider: ExternalDataProvider = {
+      resolveLocalName: vi.fn(async () => null),
+      resolveEnsName: vi.fn(async () => null),
+    };
+    const result = await formatAddressName(
+      bytes(solanaKey),
+      {},
+      noopResolvePath,
+      provider,
+    );
+    expect(result.rendered).toBe(solanaKey);
+    expect(result.rawAddress).toBeUndefined();
+    expect(result.warning?.code).toBe("UNKNOWN_ADDRESS");
+    expect(provider.resolveLocalName).not.toHaveBeenCalled();
+    expect(provider.resolveEnsName).not.toHaveBeenCalled();
+  });
+
+  it("returns type mismatch for bytes that are not 32 bytes long", async () => {
+    const result = await formatAddressName(
+      bytes("0xd8da6bf26964af9d7eed9e03e53415d37aa96045"),
+      {},
+      noopResolvePath,
+    );
+    expect(result.rendered).toBe("0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
+    expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1998,6 +2069,64 @@ describe("formatTokenTicker", () => {
   it("returns type mismatch for non-address types", async () => {
     const result = await formatTokenTicker(uint(42n), {}, noopResolvePath, 1);
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");
+  });
+
+  it("reads a zero-padded token address from bytes32", async () => {
+    const resolve: ResolvePath = (path) =>
+      path === "destChain" ? { type: "uint", value: 42n } : undefined;
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      bytes(
+        "0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      ),
+      { params: { chainIdPath: "destChain" } },
+      resolve,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe("USDC");
+    expect(result.warning).toBeUndefined();
+    expect(provider.resolveToken).toHaveBeenCalledWith(
+      42,
+      tokenAddr.toLowerCase(),
+    );
+  });
+
+  it("falls back to checksum address for an unresolved bytes32 token", async () => {
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(null),
+    };
+    const result = await formatTokenTicker(
+      bytes(
+        "0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      ),
+      {},
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe(tokenAddr);
+    expect(result.warning?.code).toBe("UNKNOWN_TOKEN");
+  });
+
+  it("renders a non-EVM bytes32 as hex without token resolution", async () => {
+    const solanaKey =
+      "0xc6fa7af3bedbad3a3d65f36aabc97431b1bbe4c2d2f6e0e47ca60203452f5d61";
+    const provider: ExternalDataProvider = {
+      resolveToken: vi.fn().mockResolvedValue(usdc),
+    };
+    const result = await formatTokenTicker(
+      bytes(solanaKey),
+      {},
+      noopResolvePath,
+      1,
+      provider,
+    );
+    expect(result.rendered).toBe(solanaKey);
+    expect(result.warning?.code).toBe("UNKNOWN_TOKEN");
+    expect(provider.resolveToken).not.toHaveBeenCalled();
   });
 });
 
