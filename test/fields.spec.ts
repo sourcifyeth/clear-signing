@@ -211,7 +211,7 @@ describe("applyFieldFormats", () => {
   });
 
   describe("field group with group-level array path (pattern 1)", () => {
-    it("iterates group over array elements", async () => {
+    it("iterates group over array elements (no iteration key)", async () => {
       const format: DescriptorFormatSpec = {
         fields: [
           {
@@ -407,6 +407,159 @@ describe("applyFieldFormats", () => {
 
       assert("warnings" in result);
       expect(result.warnings[0].code).toBe("BUNDLED_ARRAY_SIZE_MISMATCH");
+    });
+
+    it("no iteration key, two arrays: defaults to bundled and interleaves array elements", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Group",
+            fields: [
+              { path: "recipients.[]", label: "To", format: "raw" },
+              { path: "amounts.[]", label: "Amount", format: "raw" },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        "recipients.[0]": { type: "string", value: "Alice" },
+        "recipients.[1]": { type: "string", value: "Bob" },
+        "amounts.[0]": UINT(100n),
+        "amounts.[1]": UINT(50n),
+      });
+      const getArrayLength = mapArrayLength({ recipients: 2, amounts: 2 });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        getArrayLength,
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      const group = result.fields[0];
+      assert(isFieldGroup(group));
+      // Bundled by default: Alice, 100, Bob, 50
+      expect(group.fields.map((f) => [f.label, f.value])).toEqual([
+        ["To", "Alice"],
+        ["Amount", "100"],
+        ["To", "Bob"],
+        ["Amount", "50"],
+      ]);
+    });
+
+    it("no iteration key, two arrays: returns error for mismatched array lengths", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Group",
+            fields: [
+              { path: "recipients.[]", label: "To", format: "raw" },
+              { path: "amounts.[]", label: "Amount", format: "raw" },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({});
+      const getArrayLength = mapArrayLength({ recipients: 2, amounts: 3 });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        getArrayLength,
+        1,
+        undefined,
+      );
+
+      assert("warnings" in result);
+      expect(result.warnings[0].code).toBe("BUNDLED_ARRAY_SIZE_MISMATCH");
+    });
+
+    it("explicit sequential mode, two arrays: keeps each array together and accepts different lengths", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Group",
+            iteration: "sequential",
+            fields: [
+              { path: "recipients.[]", label: "To", format: "raw" },
+              { path: "amounts.[]", label: "Amount", format: "raw" },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        "recipients.[0]": { type: "string", value: "Alice" },
+        "recipients.[1]": { type: "string", value: "Bob" },
+        "amounts.[0]": UINT(100n),
+        "amounts.[1]": UINT(50n),
+        "amounts.[2]": UINT(25n),
+      });
+      const getArrayLength = mapArrayLength({ recipients: 2, amounts: 3 });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        getArrayLength,
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      const group = result.fields[0];
+      assert(isFieldGroup(group));
+      // Sequential: Alice, Bob, 100, 50, 25
+      expect(group.fields.map((f) => [f.label, f.value])).toEqual([
+        ["To", "Alice"],
+        ["To", "Bob"],
+        ["Amount", "100"],
+        ["Amount", "50"],
+        ["Amount", "25"],
+      ]);
+    });
+
+    it("no iteration key, one array and one non-array field: keeps the non-array field single", async () => {
+      const format: DescriptorFormatSpec = {
+        fields: [
+          {
+            label: "Group",
+            fields: [
+              { path: "token", label: "Token", format: "raw" },
+              { path: "recipients.[]", label: "To", format: "raw" },
+            ],
+          } as DescriptorFieldGroup,
+        ],
+      };
+      const resolvePath = mapResolvePath({
+        token: { type: "string", value: "USDC" },
+        "recipients.[0]": { type: "string", value: "Alice" },
+        "recipients.[1]": { type: "string", value: "Bob" },
+      });
+      const getArrayLength = mapArrayLength({ recipients: 2 });
+
+      const result = await applyFieldFormats(
+        format,
+        {},
+        resolvePath,
+        getArrayLength,
+        1,
+        undefined,
+      );
+
+      assert(!("warnings" in result));
+      const group = result.fields[0];
+      assert(isFieldGroup(group));
+      // Fewer than two arrays: the default does not apply. The non-array
+      // field is shown once, not once for each array element.
+      expect(group.fields.map((f) => [f.label, f.value])).toEqual([
+        ["Token", "USDC"],
+        ["To", "Alice"],
+        ["To", "Bob"],
+      ]);
     });
 
     it("returns warning when a parameter array has different length than the field array", async () => {

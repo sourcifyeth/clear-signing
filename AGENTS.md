@@ -44,7 +44,8 @@ src/
 - **`fields.ts`** — The field processing pipeline. Primary entry point is `applyFieldFormats()`,
   which iterates format fields, merges definitions, resolves values, and renders each field.
   Handles field groups with array iteration (group-level and child-level patterns, sequential
-  and bundled modes) as well as struct groups (group path points to a static tuple, children
+  and bundled modes; in the child-level pattern an absent `iteration` key means bundled when
+  the group has two or more array fields, and the sequential path otherwise) as well as struct groups (group path points to a static tuple, children
   resolved relative to it; always emitted as a DisplayFieldGroup, with the group's `label`
   passed through as-is — may be undefined).
   Delegates individual field rendering to `formatters.ts`.

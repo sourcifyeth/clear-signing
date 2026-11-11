@@ -369,8 +369,18 @@ async function processGroupArrayPath(
 
 /**
  * Pattern 2: Children have their own .[] paths.
- * - Sequential (default): each child array is iterated fully before the next.
+ * - Sequential: each child array is iterated fully before the next.
  * - Bundled: children are paired by index across parallel arrays.
+ *
+ * Default when `iteration` is absent:
+ * - Two or more child array paths: bundled. A group of parallel arrays with no
+ *   key pairs its elements, so that each line stays next to the lines of the
+ *   same index. This follows the draft ERC-7730 change "require `iteration`
+ *   for two or more array fields, default to `bundled`" (ethereum/ERCs pull
+ *   request 2165).
+ * - Fewer than two child array paths: the sequential path. The two modes can
+ *   only differ here for non-array siblings, which the bundled path repeats for
+ *   each element, so the existing output is kept.
  */
 async function processChildArrayPaths(
   group: DescriptorFieldGroup,
@@ -399,7 +409,9 @@ async function processChildArrayPaths(
     };
   }
 
-  const isBundled = group.iteration === "bundled";
+  const isBundled =
+    group.iteration === "bundled" ||
+    (group.iteration === undefined && arrayPaths.length >= 2);
 
   if (isBundled) {
     const lengths = arrayPaths.map((a) => a.length);
@@ -433,7 +445,7 @@ async function processChildArrayPaths(
     return { group: { label: group.label, fields: allFields } };
   }
 
-  // Sequential (default): iterate each child array fully — a0[0] a0[1] ... a1[0] a1[1] ...
+  // Sequential: iterate each child array fully — a0[0] a0[1] ... a1[0] a1[1] ...
   const allFields: DisplayField[] = [];
   for (const child of childFields) {
     if (isFieldGroup(child)) {
