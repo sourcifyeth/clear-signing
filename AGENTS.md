@@ -116,14 +116,16 @@ docs/
 
 - **`resolver.ts`** — Descriptor lookup (`resolveCalldataDescriptor`,
   `resolveTypedDataDescriptor`), includes resolution and merging, and the attestation
-  policy. `resolveTypedDataDescriptors(chainId, verifyingContract, options?, chainClient?)`
-  resolves every descriptor indexed for an address (all primary types) for `builder.ts`.
-  It is not exported from `index.ts`.
+  policy. For `builder.ts` it also exports the internals `createResolver`,
+  `resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning` and the
+  `ResolveDescriptorResult` type; these are not exported from `index.ts`.
 
 - **`builder.ts`** — Separate entry point `@ethereum-sourcify/clear-signing/builder`.
   `getCalldataInputModels` / `getTypedDataInputModels` resolve the descriptor(s) and
   return one `InputModel` per format; `buildCalldata` / `buildTypedData` validate the
-  user input and build the calldata / typed data. Contains `buildInputFields` (the
+  user input and build the calldata / typed data. Contains
+  `resolveTypedDataDescriptors` (every descriptor indexed for an address, all primary
+  types, one result per unique path), `buildInputFields` (the
   domain-neutral field classification, exported for unit tests only), the `encodeType`
   parser, the scalar validation and the ABI encoder (all module-private). See
   [Builder](#builder).
@@ -406,9 +408,12 @@ input to the calldata / typed data. The integrator walkthrough is
 
 **Pruneability.** `builder.ts` is a separate tsup entry and package export.
 `index.ts` never imports it, so main-entry bundles contain no builder code. Keep
-it that way: builder-only helpers stay in `builder.ts`. Small exports that it needs
-from shared modules (`calldata.ts`, `resolver.ts`) are fine; bundlers drop them
-from the main entry when unused. The builder types (`InputModel`, `InputField`,
+it that way: builder-only logic (including `resolveTypedDataDescriptors`) stays
+in `builder.ts`, so it never lands in a shared chunk of the ESM build. `builder.ts`
+imports only existing internals from shared modules (`calldata.ts`: signature
+parsing, `listFunctionFormats`; `resolver.ts`: `createResolver`,
+`resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning`), which the
+main entry uses anyway. The builder types (`InputModel`, `InputField`,
 `InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
 `types.ts` and `builder.ts` re-exports them.
 
@@ -416,7 +421,11 @@ from the main entry when unused. The builder types (`InputModel`, `InputField`,
 descriptor fields in display order (`buildInputFields`), then the ABI inputs /
 EIP-712 members that no field covers, labeled with their name. For EIP-712 the
 schema is parsed from the `encodeType` key; a legacy bare primary type key gives
-`NO_FORMAT_MATCH` and no model. A format whose fields fail (`$ref` error, nested
+`NO_FORMAT_MATCH` and no model. `resolveTypedDataDescriptors` resolves each unique
+indexed path in parallel with its own try/catch, so one failing descriptor gives a
+`DESCRIPTOR_FETCH_ERROR` and the others keep their models. Every per-descriptor
+warning is prefixed with `Descriptor '<path>': `. Struct lookups use
+`Object.hasOwn`, and the calldata-only `tuple` type is not accepted in EIP-712. A format whose fields fail (`$ref` error, nested
 group) gives its warning and no model.
 
 **Field classification** (in `buildInputFields`, after `mergeDefinitions`):
@@ -430,11 +439,15 @@ group) gives its warning and no model.
 - Else an input path: `#.` stripped, group prefix applied by the `fields.ts`
   rules (struct group and `.[]` array group scope their children; a group whose
   children have `.[]` paths does not; `@.` / `$.` children stay absolute). The
-  path is marked covered and `type` is set when the path names an input (a
-  calldata tuple is spelled `(address token,uint256 amount)[]`, an EIP-712
-  member keeps its type, e.g. `Part[]`).
+  path must name an input; else the field is left out and nothing is covered.
+  The path is marked covered and gets `type` (a calldata tuple is spelled
+  `(address token,uint256 amount)[]`, an EIP-712 member keeps its type, e.g.
+  `Part[]`).
 - `visible: "never"` → `hidden: true`. No label → the last name segment of the
-  path. `params` are passed raw; map references are not resolved.
+  path. Path params are absolute like `path`: every string param whose key ends
+  in `Path` and every map reference `keyPath`, except `@.` / `$.` values, get `#.`
+  stripped and the group prefix applied (on a copy). Map references are not
+  resolved.
 
 Appending: an input with no covered path at, above or under it is appended
 whole; a partly covered tuple / array is recursed. Unnamed calldata inputs are

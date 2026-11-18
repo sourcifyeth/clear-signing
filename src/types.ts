@@ -333,8 +333,8 @@ export interface InputField {
   path?: string;
 
   /**
-   * Solidity type (calldata) or EIP-712 type of the value when `path` names
-   * an input, e.g. `uint256`, `address[]`, `(address token,uint256 amount)`
+   * Solidity type (calldata) or EIP-712 type of the value. Set on every field
+   * with a `path`, e.g. `uint256`, `address[]`, `(address token,uint256 amount)`
    * for a calldata tuple, or `Part[]` for an EIP-712 struct array.
    */
   type?: string;
@@ -343,8 +343,10 @@ export interface InputField {
   format?: DescriptorFieldFormatType;
 
   /**
-   * Raw descriptor format params, after the `$ref` merge. `metadata.maps`
-   * references are not resolved.
+   * Descriptor format params, after the `$ref` merge. Path params (keys that
+   * end in `Path`, and the `keyPath` of a map reference) are absolute like
+   * `path`: `#.` stripped, group prefix applied. `@.` and `$.` paths are
+   * unchanged. `metadata.maps` references are not resolved.
    */
   params?: DescriptorFieldFormatParams;
 

@@ -251,7 +251,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
             format: "tokenAmount",
             params: {
               nativeCurrencyAddress: NATIVE_CURRENCY,
-              tokenPath: "#.data.[292:324]",
+              tokenPath: "data.[292:324]",
             },
           },
           {
@@ -261,7 +261,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
             format: "tokenAmount",
             params: {
               nativeCurrencyAddress: NATIVE_CURRENCY,
-              tokenPath: "#.data.[324:356]",
+              tokenPath: "data.[324:356]",
             },
           },
           {
@@ -454,7 +454,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
             format: "tokenAmount",
             params: {
               nativeCurrencyAddress: NATIVE_CURRENCY,
-              tokenPath: "#.orders.[0].order.takerAsset",
+              tokenPath: "orders.[0].order.takerAsset",
             },
           },
           {
@@ -464,7 +464,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
             format: "tokenAmount",
             params: {
               nativeCurrencyAddress: NATIVE_CURRENCY,
-              tokenPath: "#.orders.[0].order.makerAsset",
+              tokenPath: "orders.[0].order.makerAsset",
             },
           },
           {
@@ -837,7 +837,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
                 format: "tokenAmount",
                 params: {
                   nativeCurrencyAddress: NATIVE_CURRENCY,
-                  tokenPath: "srcToken",
+                  tokenPath: "curveV1Data.srcToken",
                 },
               },
               {
@@ -847,7 +847,7 @@ describe("Paraswap AugustusSwapper v6.2", () => {
                 format: "tokenAmount",
                 params: {
                   nativeCurrencyAddress: NATIVE_CURRENCY,
-                  tokenPath: "destToken",
+                  tokenPath: "curveV1Data.destToken",
                 },
               },
               {

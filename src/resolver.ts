@@ -38,7 +38,7 @@ import {
   warn,
 } from "./utils.js";
 
-type ResolveDescriptorResult =
+export type ResolveDescriptorResult =
   | { descriptor: Descriptor }
   | { warning: Warning };
 
@@ -49,7 +49,7 @@ type ResolveDescriptorResult =
  * triggers another fetch). For `{ type: "custom" }`, returns the user-built
  * resolver unchanged.
  */
-async function createResolver(
+export async function createResolver(
   options: GitHubResolverOptions | CustomResolverOptions = {
     type: "github",
   },
@@ -203,48 +203,6 @@ export async function resolveTypedDataDescriptor(
 }
 
 /**
- * Resolves every typed-data descriptor indexed for `(chainId,
- * verifyingContract)`, for all primary types. Returns one result per unique
- * descriptor path, with the same warnings as
- * {@link resolveTypedDataDescriptor}. Returns a single `NO_DESCRIPTOR`
- * warning when nothing is indexed for the address.
- */
-export async function resolveTypedDataDescriptors(
-  chainId: number,
-  verifyingContract: string,
-  options?: GitHubResolverOptions | CustomResolverOptions,
-  chainClient?: ChainClient,
-): Promise<ResolveDescriptorResult[]> {
-  const resolver = await createResolver(options);
-  const byPrimaryType =
-    resolver.index.typedDataIndex[
-      `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
-    ];
-  const paths = new Set<string>();
-  for (const entries of Object.values(byPrimaryType ?? {})) {
-    for (const entry of entries) paths.add(entry.path);
-  }
-  if (paths.size === 0) {
-    return [noDescriptorWarning(chainId, verifyingContract)];
-  }
-
-  const results: ResolveDescriptorResult[] = [];
-  for (const path of paths) {
-    const resolved = await resolveWithIncludes(resolver, path);
-    results.push(
-      await applyAttestationPolicy(
-        resolver,
-        path,
-        resolved,
-        options?.attestations,
-        chainClient,
-      ),
-    );
-  }
-  return results;
-}
-
-/**
  * Enforces an ERC-8176 attestation policy on a resolved descriptor: the
  * descriptor is accepted only when at least one of the policy's
  * `trustedAttesters` has a valid attestation over its resolved
@@ -255,7 +213,7 @@ export async function resolveTypedDataDescriptors(
  * and becomes a per-attester failure reason. Attestation fetch and
  * `chainClient` I/O errors still throw, consistent with descriptor fetching.
  */
-async function applyAttestationPolicy(
+export async function applyAttestationPolicy(
   resolver: DescriptorResolver,
   path: string,
   resolved: ResolveDescriptorResult,
@@ -329,7 +287,7 @@ async function applyAttestationPolicy(
   };
 }
 
-function noDescriptorWarning(
+export function noDescriptorWarning(
   chainId: number | undefined,
   address: string | undefined,
 ): ResolveDescriptorResult {
@@ -341,7 +299,7 @@ function noDescriptorWarning(
   };
 }
 
-async function resolveWithIncludes(
+export async function resolveWithIncludes(
   resolver: DescriptorResolver,
   path: string,
   visited: Set<string> = new Set(),

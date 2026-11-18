@@ -123,11 +123,13 @@ function renderInput(field: InputField) {
   parameter name.
 - `type` is the Solidity type of the input. A tuple is spelled out with its
   component names, e.g. `(address token,uint256 amount)[]`.
-- `format` and `params` are the raw descriptor values. They are hints for a
-  better input control. `metadata.maps` references in `params` are not
-  resolved.
+- `format` and `params` are the descriptor values. They are hints for a
+  better input control. Path params (e.g. `tokenPath`) are absolute like
+  `path`, so they name another input of the same `values` object.
+  `metadata.maps` references in `params` are not resolved.
 - A **constant** field (`constant` set, no `path`) shows a fixed value from the
-  descriptor. It takes no input.
+  descriptor. It takes no input. A constant without a label and without a
+  `$.metadata` path has the label `""`.
 - `@.value` is the native value of the transaction, not a function argument.
 - `hidden: true` marks a field the descriptor hides in the wallet
   (`visible: "never"`). The function still needs the value.
@@ -213,6 +215,10 @@ if ("errors" in result) {
 
 - All descriptors indexed for the address are resolved, so the models can
   come from several descriptors. Each model has its own `metadata`.
+- Each descriptor is resolved on its own. When one descriptor fails (e.g. its
+  fetch throws), the models of the other descriptors are still returned. The
+  warning of a failed descriptor names its path, e.g.
+  `Descriptor 'eip712-mail.json': ...`.
 - `model.domain` holds `chainId` and `verifyingContract`, plus `name`,
   `version` and `salt` when the descriptor's `context.eip712.domain` declares
   them. The `domain` argument of `buildTypedData` is merged over it.
@@ -261,7 +267,7 @@ interface InputModel {
 interface InputField {
   label: string;
   path?: string; // absent for constants
-  type?: string; // when path names an input
+  type?: string; // set on every field with a path
   format?: DescriptorFieldFormatType;
   params?: DescriptorFieldFormatParams;
   constant?: string | number | boolean;
@@ -290,6 +296,8 @@ interface BuildInputError {
 | `path: "@.value"`                                                    | input field with `path: "@.value"` and `type: "uint256"`                    |
 | other `@.` paths (`@.from`, `@.to`, `@.chainId`)                     | left out: the container sets them                                           |
 | `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered       |
+| `path` that names no argument / member (e.g. a typo)                 | left out. The inputs are appended as uncovered                              |
+| path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                   |
 | `visible: "never"`                                                   | input field with `hidden: true`                                             |
 | no `label`                                                           | the ABI parameter / member name (the last name in `path`) is the label      |
 | `$ref`                                                               | merged with its definition first                                            |
@@ -335,16 +343,16 @@ the descriptor or the formatting.
 
 `InputModels.warnings` uses the `WarningCode`s of `format()`:
 
-| Code                                      | When                                                              |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| `NO_DESCRIPTOR`                           | Nothing is indexed for the address (and no trusted token matches) |
-| `NO_TRUSTED_ATTESTATION`                  | The attestation policy rejects the descriptor                     |
-| `ATTESTATION_OPTIONS_INCOMPLETE`          | A policy is set without `chainClient` or `fetchAttestation`       |
-| `CYCLIC_INCLUDES`                         | The `includes` chain of the descriptor is cyclic                  |
-| `DESCRIPTOR_FETCH_ERROR`                  | Fetching the descriptor (or the revocation read) failed           |
-| `DEPLOYMENT_MISMATCH` / `DOMAIN_MISMATCH` | The descriptor is not bound to the chain and address              |
-| `UNSUPPORTED_DOMAIN`                      | EIP-712: no valid chain ID or verifying contract                  |
-| `NO_FORMAT_MATCH`                         | EIP-712: a legacy format key that is only a primary type name     |
-| `DEFINITIONS_RESOLUTION_ERROR`            | A `$ref` cannot be resolved; that function gets no model          |
-| `UNSUPPORTED_NESTED_FIELD_GROUP`          | A nested field group; that function gets no model                 |
-| `UNEXPECTED_LIB_ERROR`                    | A bug in the library                                              |
+| Code                                      | When                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `NO_DESCRIPTOR`                           | Nothing is indexed for the address (and no trusted token matches)                                       |
+| `NO_TRUSTED_ATTESTATION`                  | The attestation policy rejects the descriptor                                                           |
+| `ATTESTATION_OPTIONS_INCOMPLETE`          | A policy is set without `chainClient` or `fetchAttestation`                                             |
+| `CYCLIC_INCLUDES`                         | The `includes` chain of the descriptor is cyclic                                                        |
+| `DESCRIPTOR_FETCH_ERROR`                  | Fetching the descriptor (or the revocation read) failed. EIP-712: per descriptor; the other models stay |
+| `DEPLOYMENT_MISMATCH` / `DOMAIN_MISMATCH` | The descriptor is not bound to the chain and address                                                    |
+| `UNSUPPORTED_DOMAIN`                      | EIP-712: no valid chain ID or verifying contract                                                        |
+| `NO_FORMAT_MATCH`                         | EIP-712: a legacy format key that is only a primary type name                                           |
+| `DEFINITIONS_RESOLUTION_ERROR`            | A `$ref` cannot be resolved; that function gets no model                                                |
+| `UNSUPPORTED_NESTED_FIELD_GROUP`          | A nested field group; that function gets no model                                                       |
+| `UNEXPECTED_LIB_ERROR`                    | A bug in the library                                                                                    |

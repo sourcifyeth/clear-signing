@@ -335,16 +335,123 @@ describe("buildInputFields", () => {
     });
   });
 
-  it("omits the type when the path names no input", () => {
+  it("skips a field whose path names no input and covers nothing", () => {
     const result = fieldsOf(
-      { fields: [{ path: "unknown", label: "Unknown", format: "raw" }] },
-      "f(uint256 a)",
+      {
+        fields: [
+          { path: "amuont", label: "Typo", format: "raw" },
+          { path: "b.[]", label: "Bytes element", format: "raw" },
+        ],
+      },
+      "f(uint256 amount,bytes b)",
     );
 
     expect(result).toEqual({
       fields: [
-        { label: "Unknown", path: "unknown", format: "raw" },
-        { label: "a", path: "a", type: "uint256" },
+        { label: "amount", path: "amount", type: "uint256" },
+        { label: "b", path: "b", type: "bytes" },
+      ],
+    });
+  });
+
+  it("makes path params absolute like the path, inside and outside groups", () => {
+    const fieldSpec = {
+      path: "amount",
+      format: "tokenAmount" as const,
+      params: {
+        tokenPath: "#.token",
+        chainIdPath: "@.chainId",
+        token: { map: "$.metadata.maps.tokens", keyPath: "token" },
+        collection: { map: "$.metadata.maps.tokens", keyPath: "@.to" },
+        message: "token",
+      },
+    };
+    const spec: DescriptorFormatSpec = {
+      fields: [
+        { path: "orders.[]", fields: [fieldSpec] },
+        {
+          path: "#.fee",
+          format: "tokenAmount",
+          params: { tokenPath: "#.feeToken" },
+        },
+      ],
+    };
+    const result = fieldsOf(
+      spec,
+      "fill((address token,uint256 amount)[] orders,uint256 fee,address feeToken)",
+    );
+
+    expect(result).toEqual({
+      fields: [
+        {
+          path: "orders.[]",
+          fields: [
+            {
+              label: "amount",
+              path: "orders.[].amount",
+              type: "uint256",
+              format: "tokenAmount",
+              params: {
+                tokenPath: "orders.[].token",
+                chainIdPath: "@.chainId",
+                token: {
+                  map: "$.metadata.maps.tokens",
+                  keyPath: "orders.[].token",
+                },
+                collection: { map: "$.metadata.maps.tokens", keyPath: "@.to" },
+                message: "token",
+              },
+            },
+          ],
+        },
+        {
+          label: "fee",
+          path: "fee",
+          type: "uint256",
+          format: "tokenAmount",
+          params: { tokenPath: "feeToken" },
+        },
+        { label: "token", path: "orders.[].token", type: "address" },
+        { label: "feeToken", path: "feeToken", type: "address" },
+      ],
+    });
+    // The descriptor is not changed.
+    expect(fieldSpec.params.tokenPath).toBe("#.token");
+    expect(fieldSpec.params.token.keyPath).toBe("token");
+  });
+
+  it("uses the ABI name as label for unlabeled fields in a group, hidden ones included", () => {
+    const result = fieldsOf(
+      {
+        fields: [
+          {
+            path: "#.order",
+            label: "Order",
+            fields: [
+              { path: "fee", format: "raw" },
+              { path: "maker", visible: "never" },
+            ],
+          },
+        ],
+      },
+      "f((address maker,uint256 fee) order)",
+    );
+
+    expect(result).toEqual({
+      fields: [
+        {
+          label: "Order",
+          path: "order",
+          fields: [
+            { label: "fee", path: "order.fee", type: "uint256", format: "raw" },
+            {
+              label: "maker",
+              path: "order.maker",
+              type: "address",
+              hidden: true,
+            },
+          ],
+        },
       ],
     });
   });
@@ -658,7 +765,7 @@ describe("getTypedDataInputModels", () => {
         {
           code: "NO_FORMAT_MATCH",
           message:
-            "Format key 'Mail' is not a full EIP-712 encodeType string, so it has no schema",
+            "Descriptor 'mail.json': Format key 'Mail' is not a full EIP-712 encodeType string, so it has no schema",
         },
       ],
     });
@@ -686,7 +793,138 @@ describe("getTypedDataInputModels", () => {
       warnings: [
         {
           code: "DOMAIN_MISMATCH",
-          message: "Descriptor context does not match the typed data domain",
+          message:
+            "Descriptor 'order.json': Descriptor context does not match the typed data domain",
+        },
+      ],
+    });
+  });
+
+  it("resolves a descriptor path once when several primary types index it", async () => {
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: {
+              Order: [{ path: "order.json", encodeTypeHashes: [] }],
+              Cancel: [{ path: "order.json", encodeTypeHashes: [] }],
+            },
+          },
+        },
+        { "order.json": orderDescriptor },
+      ),
+    );
+    expect(result.warnings).toBeUndefined();
+    expect(result.models?.map((m) => m.signature)).toEqual([ORDER]);
+  });
+
+  it("keeps the models of healthy descriptors when one descriptor fetch fails", async () => {
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: {
+              Mail: [{ path: "missing.json", encodeTypeHashes: [] }],
+              Order: [{ path: "order.json", encodeTypeHashes: [] }],
+            },
+          },
+        },
+        { "order.json": orderDescriptor },
+      ),
+    );
+    expect(result.models?.map((m) => m.signature)).toEqual([ORDER]);
+    expect(result.warnings).toEqual([
+      {
+        code: "DESCRIPTOR_FETCH_ERROR",
+        message: `Descriptor 'missing.json': Failed to resolve descriptor for chain ${CHAIN_ID} and address ${CONTRACT}: Error: no file missing.json`,
+      },
+    ]);
+  });
+
+  it("returns DESCRIPTOR_FETCH_ERROR when the only descriptor fetch fails", async () => {
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: { Mail: [{ path: "missing.json", encodeTypeHashes: [] }] },
+          },
+        },
+        {},
+      ),
+    );
+    expect(result).toEqual({
+      warnings: [
+        {
+          code: "DESCRIPTOR_FETCH_ERROR",
+          message: `Descriptor 'missing.json': Failed to resolve descriptor for chain ${CHAIN_ID} and address ${CONTRACT}: Error: no file missing.json`,
+        },
+      ],
+    });
+  });
+
+  it("accepts a non-string declared domain value, as formatTypedData does", async () => {
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: { Order: [{ path: "order.json", encodeTypeHashes: [] }] },
+          },
+        },
+        {
+          "order.json": {
+            ...orderDescriptor,
+            context: {
+              eip712: { deployments, domain: { name: "N", version: 1 } },
+            },
+          },
+        },
+      ),
+    );
+    expect(result.warnings).toBeUndefined();
+    expect(result.models?.[0].domain).toEqual({
+      name: "N",
+      version: "1",
+      chainId: CHAIN_ID,
+      verifyingContract: CONTRACT,
+    });
+  });
+
+  it("treats struct names like constructor as own types only", async () => {
+    const signature = "Call(constructor c,uint256 n)constructor(address to)";
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: { Call: [{ path: "call.json", encodeTypeHashes: [] }] },
+          },
+        },
+        {
+          "call.json": {
+            context: { eip712: { deployments } },
+            display: { formats: { [signature]: {} } },
+          },
+        },
+      ),
+    );
+    expect(result).toEqual({
+      models: [
+        {
+          signature,
+          domain: { chainId: CHAIN_ID, verifyingContract: CONTRACT },
+          fields: [
+            { label: "c", path: "c", type: "constructor" },
+            { label: "n", path: "n", type: "uint256" },
+          ],
         },
       ],
     });
@@ -828,6 +1066,106 @@ describe("buildCalldata", () => {
         pad32("20") +
         pad32("1") +
         padRight32("61"),
+    });
+  });
+
+  it("encodes a fixed array of a dynamic type as a dynamic value", () => {
+    const result = buildCalldata(calldataModel("f(string[2] s)"), {
+      s: ["a", "bc"],
+    });
+    expect(result).toEqual({
+      data:
+        selectorHex("f(string[2])") +
+        pad32("20") +
+        pad32("40") +
+        pad32("80") +
+        pad32("1") +
+        padRight32("61") +
+        pad32("2") +
+        padRight32("6263"),
+    });
+  });
+
+  it("encodes a dynamic tuple argument in the tail", () => {
+    const result = buildCalldata(
+      calldataModel("f((uint256 a,string s) t,uint256 b)"),
+      { t: { a: 1, s: "x" }, b: 2 },
+    );
+    expect(result).toEqual({
+      data:
+        selectorHex("f((uint256,string),uint256)") +
+        pad32("40") +
+        pad32("2") +
+        pad32("1") +
+        pad32("40") +
+        pad32("1") +
+        padRight32("78"),
+    });
+  });
+
+  it("encodes dynamic tuples inside a fixed array", () => {
+    const result = buildCalldata(calldataModel("f((string s)[2] ts)"), {
+      ts: [{ s: "a" }, { s: "b" }],
+    });
+    expect(result).toEqual({
+      data:
+        selectorHex("f((string)[2])") +
+        pad32("20") +
+        pad32("40") +
+        pad32("a0") +
+        pad32("20") +
+        pad32("1") +
+        padRight32("61") +
+        pad32("20") +
+        pad32("1") +
+        padRight32("62"),
+    });
+  });
+
+  it("encodes empty arrays and an array of an empty array", () => {
+    const result = buildCalldata(
+      calldataModel("f(uint256[] a,uint256[][] b)"),
+      { a: [], b: [[]] },
+    );
+    expect(result).toEqual({
+      data:
+        selectorHex("f(uint256[],uint256[][])") +
+        pad32("40") +
+        pad32("60") +
+        pad32("0") +
+        pad32("1") +
+        pad32("20") +
+        pad32("0"),
+    });
+  });
+
+  it("encodes empty bytes and an empty string", () => {
+    const result = buildCalldata(calldataModel("f(bytes b,string s)"), {
+      b: "0x",
+      s: "",
+    });
+    expect(result).toEqual({
+      data:
+        selectorHex("f(bytes,string)") +
+        pad32("40") +
+        pad32("60") +
+        pad32("0") +
+        pad32("0"),
+    });
+  });
+
+  it("accepts the integer range boundaries", () => {
+    const result = buildCalldata(
+      calldataModel("f(int8 a,int8 b,int256 c,uint256 d)"),
+      { a: -128, b: 127, c: -(1n << 255n), d: (1n << 256n) - 1n },
+    );
+    expect(result).toEqual({
+      data:
+        selectorHex("f(int8,int8,int256,uint256)") +
+        padInt(-128n) +
+        padInt(127n) +
+        padInt(-(1n << 255n)) +
+        "f".repeat(64),
     });
   });
 
@@ -1168,6 +1506,77 @@ describe("buildTypedData", () => {
           path: "note",
           code: "INVALID_SIGNATURE",
           message: "Unsupported type 'Note'",
+        },
+      ],
+    });
+  });
+
+  it("rejects the calldata-only tuple type as an EIP-712 member type", () => {
+    expect(
+      buildTypedData({ signature: "A(tuple a)", fields: [] }, ALICE, { a: {} }),
+    ).toEqual({
+      errors: [
+        {
+          path: "a",
+          code: "INVALID_SIGNATURE",
+          message: "Unsupported type 'tuple'",
+        },
+      ],
+    });
+  });
+
+  it("rejects integer strings with whitespace, since the message is not changed", () => {
+    expect(
+      buildTypedData({ signature: "A(uint256 n)", fields: [] }, ALICE, {
+        n: " 12 ",
+      }),
+    ).toEqual({
+      errors: [
+        { path: "n", code: "INVALID_TYPE", message: "Value is not an integer" },
+      ],
+    });
+  });
+
+  it("looks up struct types as own properties only", () => {
+    const built = buildTypedData(
+      {
+        signature: "Call(constructor c)constructor(address to)",
+        fields: [],
+      },
+      ALICE,
+      { c: { to: BOB } },
+    );
+    assert("typedData" in built);
+    expect(built.typedData.types.constructor).toEqual([
+      { name: "to", type: "address" },
+    ]);
+
+    expect(
+      buildTypedData({ signature: "Call(toString x)", fields: [] }, ALICE, {
+        x: "hi",
+      }),
+    ).toEqual({
+      errors: [
+        {
+          path: "x",
+          code: "INVALID_SIGNATURE",
+          message: "Unsupported type 'toString'",
+        },
+      ],
+    });
+    // A message key that only exists on the prototype is missing.
+    expect(
+      buildTypedData(
+        { signature: "Call(uint256 constructor)", fields: [] },
+        ALICE,
+        {},
+      ),
+    ).toEqual({
+      errors: [
+        {
+          path: "constructor",
+          code: "MISSING_VALUE",
+          message: "Value is required",
         },
       ],
     });

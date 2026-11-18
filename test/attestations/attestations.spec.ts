@@ -988,7 +988,7 @@ describe("attestation policy — resolveTypedDataDescriptor", () => {
         {
           code: "NO_TRUSTED_ATTESTATION",
           message:
-            "No valid attestation from a trusted attester found for descriptor 'eip712-mail.json'",
+            "Descriptor 'eip712-mail.json': No valid attestation from a trusted attester found for descriptor 'eip712-mail.json'",
         },
       ],
     });

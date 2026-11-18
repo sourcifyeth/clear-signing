@@ -25,9 +25,13 @@
  * none of this code. `index.ts` never imports this module.
  */
 
+import type { ResolveDescriptorResult } from "./resolver.js";
 import {
+  applyAttestationPolicy,
+  createResolver,
+  noDescriptorWarning,
   resolveCalldataDescriptor,
-  resolveTypedDataDescriptors,
+  resolveWithIncludes,
 } from "./resolver.js";
 import type { FunctionInput } from "./calldata.js";
 import {
@@ -50,18 +54,23 @@ import {
   bytesToHex,
   concatBytes,
   hexToBytes,
+  normalizeAddress,
   utf8ToBytes,
   warn,
 } from "./utils.js";
 import type {
   BuildInputError,
   BuildInputErrorCode,
+  ChainClient,
+  CustomResolverOptions,
   Descriptor,
   DescriptorFieldFormat,
+  DescriptorFieldFormatParams,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
   DescriptorMetadata,
   FormatOptions,
+  GitHubResolverOptions,
   InputField,
   InputFieldGroup,
   InputModel,
@@ -75,6 +84,9 @@ import type {
 export type {
   BuildInputError,
   BuildInputErrorCode,
+  DescriptorFieldFormatParams,
+  DescriptorFieldFormatType,
+  DescriptorMapReference,
   FormatOptions,
   InputField,
   InputFieldGroup,
@@ -82,6 +94,8 @@ export type {
   InputModels,
   TypedData,
   TypedDataDomain,
+  Warning,
+  WarningCode,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -181,7 +195,7 @@ export async function getTypedDataInputModels(
       };
     }
 
-    let results: Awaited<ReturnType<typeof resolveTypedDataDescriptors>>;
+    let results: { path?: string; result: ResolveDescriptorResult }[];
     try {
       results = await resolveTypedDataDescriptors(
         chainId,
@@ -197,9 +211,9 @@ export async function getTypedDataInputModels(
 
     const models: InputModel[] = [];
     const warnings: Warning[] = [];
-    for (const result of results) {
+    for (const { path, result } of results) {
       if ("warning" in result) {
-        warnings.push(result.warning);
+        warnings.push(descriptorWarning(path, result.warning));
         continue;
       }
       const { descriptor } = result;
@@ -213,9 +227,12 @@ export async function getTypedDataInputModels(
       };
       if (!isEip712DescriptorBoundTo(descriptor, bindingCheck)) {
         warnings.push(
-          warn(
-            "DOMAIN_MISMATCH",
-            "Descriptor context does not match the typed data domain",
+          descriptorWarning(
+            path,
+            warn(
+              "DOMAIN_MISMATCH",
+              "Descriptor context does not match the typed data domain",
+            ),
           ),
         );
         continue;
@@ -227,9 +244,12 @@ export async function getTypedDataInputModels(
         const parsed = parseEncodeType(key);
         if (!parsed) {
           warnings.push(
-            warn(
-              "NO_FORMAT_MATCH",
-              `Format key '${key}' is not a full EIP-712 encodeType string, so it has no schema`,
+            descriptorWarning(
+              path,
+              warn(
+                "NO_FORMAT_MATCH",
+                `Format key '${key}' is not a full EIP-712 encodeType string, so it has no schema`,
+              ),
             ),
           );
           continue;
@@ -241,7 +261,11 @@ export async function getTypedDataInputModels(
           structInputs(parsed.primaryType, parsed.types, new Set()),
         );
         if ("warnings" in fields) {
-          warnings.push(...formatWarnings(key, fields.warnings));
+          warnings.push(
+            ...formatWarnings(key, fields.warnings).map((w) =>
+              descriptorWarning(path, w),
+            ),
+          );
           continue;
         }
         models.push({
@@ -256,6 +280,68 @@ export async function getTypedDataInputModels(
   } catch (error) {
     return { warnings: [unexpectedErrorWarning(error)] };
   }
+}
+
+/**
+ * Resolves every typed-data descriptor indexed for `(chainId,
+ * verifyingContract)`, for all primary types, once per unique path. A fetch
+ * error of one path becomes a `DESCRIPTOR_FETCH_ERROR` result for that path,
+ * so the other descriptors still resolve. Returns a single `NO_DESCRIPTOR`
+ * result without a path when nothing is indexed for the address.
+ */
+async function resolveTypedDataDescriptors(
+  chainId: number,
+  verifyingContract: string,
+  options?: GitHubResolverOptions | CustomResolverOptions,
+  chainClient?: ChainClient,
+): Promise<{ path?: string; result: ResolveDescriptorResult }[]> {
+  const resolver = await createResolver(options);
+  const byPrimaryType =
+    resolver.index.typedDataIndex[
+      `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
+    ];
+  const paths = new Set<string>();
+  for (const entries of Object.values(byPrimaryType ?? {})) {
+    for (const entry of entries) paths.add(entry.path);
+  }
+  if (paths.size === 0) {
+    return [{ result: noDescriptorWarning(chainId, verifyingContract) }];
+  }
+
+  return Promise.all(
+    [...paths].map(async (path) => {
+      try {
+        const resolved = await resolveWithIncludes(resolver, path);
+        const result = await applyAttestationPolicy(
+          resolver,
+          path,
+          resolved,
+          options?.attestations,
+          chainClient,
+        );
+        return { path, result };
+      } catch (error) {
+        return {
+          path,
+          result: {
+            warning: warn(
+              "DESCRIPTOR_FETCH_ERROR",
+              `Failed to resolve descriptor for chain ${chainId} and address ${verifyingContract}: ${String(error)}`,
+            ),
+          },
+        };
+      }
+    }),
+  );
+}
+
+/** Name the descriptor path in a per-descriptor warning. */
+function descriptorWarning(
+  path: string | undefined,
+  warning: Warning,
+): Warning {
+  if (path === undefined) return warning;
+  return warn(warning.code, `Descriptor '${path}': ${warning.message}`);
 }
 
 /**
@@ -365,7 +451,9 @@ function buildField(
 
   const display = {
     ...(merged.format !== undefined && { format: merged.format }),
-    ...(merged.params !== undefined && { params: merged.params }),
+    ...(merged.params !== undefined && {
+      params: absoluteParams(merged.params, prefix),
+    }),
     ...(merged.visible === "never" && { hidden: true }),
   };
 
@@ -407,23 +495,65 @@ function buildField(
     };
   }
 
-  const relative = stripStructuredRootPrefix(merged.path);
-  const path = prefix ? `${prefix}.${relative}` : relative;
+  const path = absolutePath(merged.path, prefix);
 
   // A byte slice or a fixed index does not name a whole input. The input
   // stays uncovered and is appended.
   if (parseByteSlice(path) || hasFixedIndex(path)) return { field: null };
 
-  ctx.covered.add(path);
+  // A path that names no input gets no field. Nothing is covered, so the
+  // inputs it would reach are appended.
   const node = findInput(ctx.inputs, path);
+  if (!node) return { field: null };
+
+  ctx.covered.add(path);
   return {
     field: {
       label: merged.label ?? lastName(path),
       path,
-      ...(node && { type: inputType(node) }),
+      type: inputType(node),
       ...display,
     },
   };
+}
+
+/** Strip `#.` and apply the group prefix to a structured data path. */
+function absolutePath(path: string, prefix: string | undefined): string {
+  const relative = stripStructuredRootPrefix(path);
+  return prefix ? `${prefix}.${relative}` : relative;
+}
+
+/**
+ * Make the path params absolute like the field path: every string param
+ * whose key ends in `Path`, and the `keyPath` of every map reference.
+ * Container (`@.`) and metadata (`$.`) paths stay as they are. Returns a copy.
+ */
+function absoluteParams(
+  params: DescriptorFieldFormatParams,
+  prefix: string | undefined,
+): DescriptorFieldFormatParams {
+  const isStructuredPath = (value: string) =>
+    !value.startsWith("@.") && !value.startsWith("$.");
+  const result: Record<string, unknown> = { ...params };
+  for (const [key, value] of Object.entries(params)) {
+    if (
+      typeof value === "string" &&
+      key.endsWith("Path") &&
+      isStructuredPath(value)
+    ) {
+      result[key] = absolutePath(value, prefix);
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as { keyPath?: unknown }).keyPath === "string"
+    ) {
+      const keyPath = (value as { keyPath: string }).keyPath;
+      if (isStructuredPath(keyPath)) {
+        result[key] = { ...value, keyPath: absolutePath(keyPath, prefix) };
+      }
+    }
+  }
+  return result as DescriptorFieldFormatParams;
 }
 
 function hasFixedIndex(path: string): boolean {
@@ -540,9 +670,10 @@ function structInputs(
   visiting: Set<string>,
 ): FunctionInput[] {
   visiting.add(typeName);
-  const inputs = (types[typeName] ?? []).map((member): FunctionInput => {
+  const members = Object.hasOwn(types, typeName) ? types[typeName] : [];
+  const inputs = members.map((member): FunctionInput => {
     const base = member.type.replace(/(\[\d*\])+$/, "");
-    if (base in types && !visiting.has(base)) {
+    if (Object.hasOwn(types, base) && !visiting.has(base)) {
       return {
         name: member.name,
         type: member.type,
@@ -569,7 +700,7 @@ function parseEncodeType(
 
   while (rest.length > 0) {
     const match = struct.exec(rest);
-    if (!match || match[1] in types) return undefined;
+    if (!match || Object.hasOwn(types, match[1])) return undefined;
     const members: TypeMember[] = [];
     for (const member of match[2].trim() === "" ? [] : match[2].split(",")) {
       const parts = member.trim().split(/\s+/);
@@ -591,8 +722,11 @@ function modelDomain(
   verifyingContract: string,
 ): TypedDataDomain {
   const declared = descriptor.context?.eip712?.domain ?? {};
+  // The binding check compares with String(), so a declared number matches.
   const text = (key: string) =>
-    typeof declared[key] === "string" ? (declared[key] as string) : undefined;
+    declared[key] === undefined || declared[key] === null
+      ? undefined
+      : String(declared[key]);
   const name = text("name");
   const version = text("version");
   const salt = text("salt");
@@ -739,7 +873,9 @@ export function buildTypedData(
     }
 
     const resolveStruct = (type: string): FunctionInput[] | undefined =>
-      parsed.types[type]?.map((m) => ({ name: m.name, type: m.type }));
+      Object.hasOwn(parsed.types, type)
+        ? parsed.types[type].map((m) => ({ name: m.name, type: m.type }))
+        : undefined;
     normalizeMembers(
       resolveStruct(parsed.primaryType) ?? [],
       values,
@@ -832,7 +968,7 @@ function normalizeMembers(
   for (const member of members) {
     const normalized = normalizeEntry(
       member,
-      record[member.name],
+      Object.hasOwn(record, member.name) ? record[member.name] : undefined,
       joinPath(path, member.name),
       errors,
       resolveStruct,
@@ -899,10 +1035,12 @@ function normalizeEntry(
     return valid ? result : undefined;
   }
 
-  const members =
-    input.type === "tuple"
+  // EIP-712 resolves struct names. Only calldata has the "tuple" type.
+  const members = resolveStruct
+    ? resolveStruct(input.type)
+    : input.type === "tuple"
       ? (input.components ?? [])
-      : resolveStruct?.(input.type);
+      : undefined;
   if (members) {
     return normalizeMembers(members, value, path, errors, resolveStruct);
   }
@@ -1003,9 +1141,8 @@ function toBigInt(value: unknown): bigint | undefined {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") return BigInt(value);
   if (typeof value !== "string") return undefined;
-  const text = value.trim();
-  if (/^-?\d+$/.test(text) || /^0x[0-9a-fA-F]+$/.test(text)) {
-    return BigInt(text);
+  if (/^-?\d+$/.test(value) || /^0x[0-9a-fA-F]+$/.test(value)) {
+    return BigInt(value);
   }
   return undefined;
 }

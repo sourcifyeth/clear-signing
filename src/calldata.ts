@@ -251,21 +251,16 @@ interface FunctionFormat {
 
 /** List the `display.formats` entries whose keys parse as function signatures. */
 export function listFunctionFormats(descriptor: Descriptor): FunctionFormat[] {
-  const formats = descriptor.display?.formats;
-  if (!formats) return [];
+  return [...functionFormats(descriptor)];
+}
 
-  const result: FunctionFormat[] = [];
-  for (const [key, spec] of Object.entries(formats)) {
+/** Parse the `display.formats` keys one at a time, so a lookup can stop early. */
+function* functionFormats(descriptor: Descriptor): Generator<FunctionFormat> {
+  for (const [key, spec] of Object.entries(descriptor.display?.formats ?? {})) {
     const parsed = parseFunctionSignatureKey(key);
     if (!parsed) continue;
-    result.push({
-      key,
-      selector: parsed.selector,
-      inputs: parsed.inputs,
-      spec,
-    });
+    yield { key, selector: parsed.selector, inputs: parsed.inputs, spec };
   }
-  return result;
 }
 
 /** Find the format spec whose parsed function selector matches the given hex. */
@@ -273,9 +268,10 @@ function findFormatBySelector(
   descriptor: Descriptor,
   selectorHex: string,
 ): FunctionFormat | undefined {
-  return listFunctionFormats(descriptor).find(
-    (f) => bytesToHex(f.selector) === selectorHex,
-  );
+  for (const format of functionFormats(descriptor)) {
+    if (bytesToHex(format.selector) === selectorHex) return format;
+  }
+  return undefined;
 }
 
 /** ABI function input parameter. */
