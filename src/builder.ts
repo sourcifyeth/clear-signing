@@ -36,7 +36,7 @@ import {
 import type { FunctionInput } from "./calldata.js";
 import {
   isDynamicInput,
-  listFunctionFormats,
+  functionFormats,
   parseArrayType,
   parseFunctionSignatureKey,
 } from "./calldata.js";
@@ -145,7 +145,7 @@ export async function getCalldataInputModels(
 
     const models: InputModel[] = [];
     const warnings: Warning[] = [];
-    for (const fn of listFunctionFormats(descriptor)) {
+    for (const fn of functionFormats(descriptor)) {
       const result = buildInputFields(
         fn.spec,
         descriptor.display?.definitions ?? {},

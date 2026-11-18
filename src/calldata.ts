@@ -249,13 +249,10 @@ interface FunctionFormat {
   spec: DescriptorFormatSpec;
 }
 
-/** List the `display.formats` entries whose keys parse as function signatures. */
-export function listFunctionFormats(descriptor: Descriptor): FunctionFormat[] {
-  return [...functionFormats(descriptor)];
-}
-
 /** Parse the `display.formats` keys one at a time, so a lookup can stop early. */
-function* functionFormats(descriptor: Descriptor): Generator<FunctionFormat> {
+export function* functionFormats(
+  descriptor: Descriptor,
+): Generator<FunctionFormat> {
   for (const [key, spec] of Object.entries(descriptor.display?.formats ?? {})) {
     const parsed = parseFunctionSignatureKey(key);
     if (!parsed) continue;

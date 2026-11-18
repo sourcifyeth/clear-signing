@@ -88,8 +88,8 @@ docs/
   and dynamic tuples, dynamic arrays (`T[]`), fixed-size arrays (`T[k]`), nested arrays,
   `bytes`/`string`, and `bytesN`. For `builder.ts` it exports `FunctionInput`,
   `parseFunctionSignatureKey`, `parseArrayType`, `isDynamicInput` and
-  `listFunctionFormats(descriptor)` (every `display.formats` entry whose key parses, as
-  `{ key, selector, inputs, spec }`; `findFormatBySelector` is built on it). The other
+  the generator `functionFormats(descriptor)` (every `display.formats` entry whose key
+  parses, as `{ key, selector, inputs, spec }`; `findFormatBySelector` is built on it). The other
   parsing/decoding internals are module-private.
 
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
@@ -185,7 +185,7 @@ docs/
    getCalldataInputModels(chainId, to, opts?)
    → resolveCalldataDescriptor(...) — same resolution as format()
    → isCalldataDescriptorBoundTo() or DEPLOYMENT_MISMATCH
-   → for each listFunctionFormats() entry: buildInputFields() → InputModel
+   → for each functionFormats() entry: buildInputFields() → InputModel
    → returns InputModels
 
    getTypedDataInputModels(chainId, verifyingContract, opts?)
@@ -411,7 +411,7 @@ input to the calldata / typed data. The integrator walkthrough is
 it that way: builder-only logic (including `resolveTypedDataDescriptors`) stays
 in `builder.ts`, so it never lands in a shared chunk of the ESM build. `builder.ts`
 imports only existing internals from shared modules (`calldata.ts`: signature
-parsing, `listFunctionFormats`; `resolver.ts`: `createResolver`,
+parsing, `functionFormats`; `resolver.ts`: `createResolver`,
 `resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning`), which the
 main entry uses anyway. The builder types (`InputModel`, `InputField`,
 `InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
