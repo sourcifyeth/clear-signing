@@ -16,7 +16,7 @@ this page is the scheme-agnostic contract; the second is what `fhevm`
 specifically requires.
 
 This page assumes you already have an `ExternalDataProvider` — see
-[GUIDE.md §4](GUIDE.md#4-build-the-externaldataprovider).
+[GUIDE.md §5](../GUIDE.md#5-build-the-externaldataprovider).
 
 ## What the descriptor declares
 

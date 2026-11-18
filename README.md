@@ -15,6 +15,15 @@ Designed to drop into wallet codebases:
 
 Integrating into a wallet? See the [Wallet Integration Guide](GUIDE.md).
 
+## Building Calls from Descriptors
+
+The library also works in the other direction. The separate
+`@ethereum-sourcify/clear-signing/builder` entry point gives a builder UI (for
+example a block explorer) the inputs of each function or EIP-712 message of a
+contract, with the clear signing labels and formats of its descriptor. It then
+builds and validates the calldata or typed data from the user input. See the
+[Builder Guide](docs/BUILDER.md).
+
 ## Installation
 
 ```bash
@@ -216,7 +225,7 @@ interface ExternalDataProvider {
   /**
    * Decryption for fields carrying an `encryption` annotation. Optional and
    * scheme-specific. Return `null` when the value cannot be decrypted — the
-   * field then renders the descriptor's `fallbackLabel`. See DECRYPTION.md.
+   * field then renders the descriptor's `fallbackLabel`. See docs/DECRYPTION.md.
    */
   resolveDecryptedValue?: (
     chainId: number,

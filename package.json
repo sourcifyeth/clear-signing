@@ -29,6 +29,20 @@
         "default": "./dist/filesystem.cjs"
       }
     },
+    "./builder": {
+      "react-native": {
+        "types": "./dist/builder.d.cts",
+        "default": "./dist/builder.cjs"
+      },
+      "import": {
+        "types": "./dist/builder.d.ts",
+        "default": "./dist/builder.js"
+      },
+      "require": {
+        "types": "./dist/builder.d.cts",
+        "default": "./dist/builder.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "repository": {

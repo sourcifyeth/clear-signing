@@ -23,7 +23,13 @@ src/
 ├── bundled-descriptors.ts      # Bundled ERC-20/721 templates → buildBundledTokenDescriptor()
 ├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
-└── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
+├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
+├── filesystem.ts               # Separate entry point (/filesystem): Node-only filesystem resolver
+└── builder.ts                  # Separate entry point (/builder): input models, buildCalldata(), buildTypedData()
+
+docs/
+├── BUILDER.md                  # Builder integrator walkthrough and reference
+└── DECRYPTION.md               # Wallet-side decryption (fhevm) integration
 ```
 
 ### Module responsibilities
@@ -80,7 +86,11 @@ src/
   selector-to-format lookup (`findFormatBySelector`), and a unified recursive ABI decoder
   (`decodeArguments` → `decodeComponents`/`decodeValue`) supporting all ABI types: static
   and dynamic tuples, dynamic arrays (`T[]`), fixed-size arrays (`T[k]`), nested arrays,
-  `bytes`/`string`, and `bytesN`. All parsing/decoding internals are module-private.
+  `bytes`/`string`, and `bytesN`. For `builder.ts` it exports `FunctionInput`,
+  `parseFunctionSignatureKey`, `parseArrayType`, `isDynamicInput` and
+  `listFunctionFormats(descriptor)` (every `display.formats` entry whose key parses, as
+  `{ key, selector, inputs, spec }`; `findFormatBySelector` is built on it). The other
+  parsing/decoding internals are module-private.
 
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
@@ -103,6 +113,20 @@ src/
   canonicalizer is module-private — for `JSON.parse` output it is exactly
   `JSON.stringify` with recursively sorted keys. The trusted-attester policy
   loop itself lives in `resolver.ts` (`applyAttestationPolicy`).
+
+- **`resolver.ts`** — Descriptor lookup (`resolveCalldataDescriptor`,
+  `resolveTypedDataDescriptor`), includes resolution and merging, and the attestation
+  policy. `resolveTypedDataDescriptors(chainId, verifyingContract, options?, chainClient?)`
+  resolves every descriptor indexed for an address (all primary types) for `builder.ts`.
+  It is not exported from `index.ts`.
+
+- **`builder.ts`** — Separate entry point `@ethereum-sourcify/clear-signing/builder`.
+  `getCalldataInputModels` / `getTypedDataInputModels` resolve the descriptor(s) and
+  return one `InputModel` per format; `buildCalldata` / `buildTypedData` validate the
+  user input and build the calldata / typed data. Contains `buildInputFields` (the
+  domain-neutral field classification, exported for unit tests only), the `encodeType`
+  parser, the scalar validation and the ABI encoder (all module-private). See
+  [Builder](#builder).
 
 - **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 template descriptors (the
   registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` files, transcribed as TS
@@ -153,7 +177,26 @@ src/
    → returns DisplayModel
    ```
 
-3. **EIP-5792 batch formatting:**
+3. **Input models and building (`builder.ts`):**
+
+   ```
+   getCalldataInputModels(chainId, to, opts?)
+   → resolveCalldataDescriptor(...) — same resolution as format()
+   → isCalldataDescriptorBoundTo() or DEPLOYMENT_MISMATCH
+   → for each listFunctionFormats() entry: buildInputFields() → InputModel
+   → returns InputModels
+
+   getTypedDataInputModels(chainId, verifyingContract, opts?)
+   → resolveTypedDataDescriptors(...) — every descriptor indexed for the address
+   → per descriptor: isEip712DescriptorBoundTo() or DOMAIN_MISMATCH
+   → per encodeType key: parse the schema, buildInputFields() → InputModel
+   → returns InputModels
+
+   buildCalldata(model, values) → validate + ABI-encode → { data } | { errors }
+   buildTypedData(model, account, values, domain?) → validate → { typedData } | { errors }
+   ```
+
+4. **EIP-5792 batch formatting:**
    ```
    formatEip5792Batch(batch, opts?)
    → for each call in batch.calls:
@@ -323,6 +366,10 @@ Any other source (in-memory map, custom HTTP endpoint, ...) is implemented
 by satisfying the `DescriptorResolver` shape directly and wrapping it in
 `{ type: "custom", resolver }`.
 
+The builder (`src/builder.ts`) is the second subpath entry,
+`@ethereum-sourcify/clear-signing/builder`. It takes the same `FormatOptions`, so
+all descriptor sources above work with it. See [Builder](#builder).
+
 ### GitHub client module (`github-registry-client.ts`)
 
 Pure I/O layer with no caching. Exports:
@@ -349,6 +396,61 @@ The merge is implemented in `mergeDescriptors(including, included)` (internal to
 - **`includes` key:** dropped from the merged result.
 
 Include path resolution uses `new URL(relative, base)` in the resolver.
+
+## Builder
+
+`src/builder.ts` is the opposite direction of `format()`: from a chain ID and an
+address to the inputs of each function / EIP-712 primary type, and from the user
+input to the calldata / typed data. The integrator walkthrough is
+[`docs/BUILDER.md`](docs/BUILDER.md).
+
+**Pruneability.** `builder.ts` is a separate tsup entry and package export.
+`index.ts` never imports it, so main-entry bundles contain no builder code. Keep
+it that way: builder-only helpers stay in `builder.ts`. Small exports that it needs
+from shared modules (`calldata.ts`, `resolver.ts`) are fine; bundlers drop them
+from the main entry when unused. The builder types (`InputModel`, `InputField`,
+`InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
+`types.ts` and `builder.ts` re-exports them.
+
+**Input model.** One `InputModel` per `display.formats` key. Its `fields` are the
+descriptor fields in display order (`buildInputFields`), then the ABI inputs /
+EIP-712 members that no field covers, labeled with their name. For EIP-712 the
+schema is parsed from the `encodeType` key; a legacy bare primary type key gives
+`NO_FORMAT_MATCH` and no model. A format whose fields fail (`$ref` error, nested
+group) gives its warning and no model.
+
+**Field classification** (in `buildInputFields`, after `mergeDefinitions`):
+
+- `value` set, or `path` starts with `$.` → constant. `$.metadata.*` is resolved
+  with `resolveMetadataValue`; the field gets `constant` and no `path`. A
+  constant that resolves to no string / number / boolean is left out.
+- `path` is `@.value` → input with `type: "uint256"`. Other `@.` paths → left out.
+- `path` with a byte slice (`parseByteSlice`) or a fixed index (`.[N]`, `.[-N]`)
+  → left out; the input stays uncovered and is appended.
+- Else an input path: `#.` stripped, group prefix applied by the `fields.ts`
+  rules (struct group and `.[]` array group scope their children; a group whose
+  children have `.[]` paths does not; `@.` / `$.` children stay absolute). The
+  path is marked covered and `type` is set when the path names an input (a
+  calldata tuple is spelled `(address token,uint256 amount)[]`, an EIP-712
+  member keeps its type, e.g. `Part[]`).
+- `visible: "never"` → `hidden: true`. No label → the last name segment of the
+  path. `params` are passed raw; map references are not resolved.
+
+Appending: an input with no covered path at, above or under it is appended
+whole; a partly covered tuple / array is recursed. Unnamed calldata inputs are
+named `param<i>` at every level, in the model and in `values`.
+
+**`values` shape.** It mirrors the arguments (the EIP-712 `message` shape): a
+tuple is an object keyed by component name, an array is a JS array. Values are
+raw (integers as `bigint` / safe number / decimal or `0x` string; hex for
+`address` / `bytes` / `bytesN`). Constants and `@.value` are not part of it.
+
+**`BuildInputError`.** The build functions validate every value, collect all
+errors, and return `{ errors }` with a concrete `path` (`orders.[1].amount`), a
+`BuildInputErrorCode` and a short user-facing `message`. This is deliberately
+outside the `Warning` scheme: warnings describe the descriptor or the formatting
+and go to wallet users, build errors describe bad user input and go next to the
+form input. Do not add a `WarningCode` for builder input errors.
 
 ## Important Concepts
 
@@ -432,7 +534,7 @@ A field may carry an `encryption` annotation (`DescriptorFieldEncryption`:
 Decryption is delegated entirely to the wallet and is optional — schemes
 generally need a live connection, a user signature, and an access-control check.
 `fhevm` is the only scheme ERC-7730 currently defines; the wallet-side
-integration is documented in [`DECRYPTION.md`](DECRYPTION.md) and kept out of the
+integration is documented in [`docs/DECRYPTION.md`](docs/DECRYPTION.md) and kept out of the
 library.
 
 The raw encrypted value is always reported on `DisplayField.rawEncryptedValue`,
@@ -610,10 +712,12 @@ When changing the public API, input/output types, descriptor resolver options, w
 codes, or the `ExternalDataProvider` interface, check whether [`GUIDE.md`](GUIDE.md)
 (the wallet integration guide) and [`README.md`](README.md) need updating too — they
 contain example code and type signatures that can drift out of sync with the source.
-If the change touches encryption, check [`DECRYPTION.md`](DECRYPTION.md) as well.
+If the change touches encryption, check [`docs/DECRYPTION.md`](docs/DECRYPTION.md) as well.
+If the change touches the builder, field classification, or the descriptor resolution it
+uses, check [`docs/BUILDER.md`](docs/BUILDER.md) as well.
 
 Keep scheme-specific integration detail (SDK calls, protocol internals) in
-[`DECRYPTION.md`](DECRYPTION.md) — `src/`, `README.md`, and `GUIDE.md` stay
+[`docs/DECRYPTION.md`](docs/DECRYPTION.md) — `src/`, `README.md`, and `GUIDE.md` stay
 scheme-agnostic and describe only the `resolveDecryptedValue` contract.
 
 ## Pull Requests
@@ -634,16 +738,19 @@ Tests live in `test/`. Current test files:
 - `test/utils.spec.ts` — unit tests for the shared utility functions in `utils.ts` (signed integer decoding of sign-extended ABI words)
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators, encryption, `metadata.maps` references)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
+- `test/builder.spec.ts` — unit tests for `builder.ts`: `buildInputFields` field classification (`$ref`, constants, `@.value`, slices, fixed indices, `hidden`, group prefixes, partial tuple coverage, appended inputs, definition errors, nested groups), `get*InputModels` warnings with an in-memory resolver, `buildCalldata` known-answer vectors and every `BuildInputErrorCode`, `buildTypedData` (domain merge, `EIP712Domain`, errors) and `encodeType` parsing
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/erc7730-test-cases/example-maps.spec.ts` / `example-maps-pools.spec.ts` — `metadata.maps` references keyed on `@.chainId`; the spec files' `underlyingToken` addresses are 21 bytes, so that field asserts `FORMAT_PARAM_RESOLUTION_ERROR` as is (spec files are never edited)
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
-- `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
+- `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices) + CurveV1 (struct group); input models of all three and `buildCalldata` round trips to the same calldata
+- `test/registry-cases/lifi/lifi.spec.ts` — LI.FI LIFIDiamond: two-hop swap with array-indexed token paths; input model (`.[]` and fixed-index paths) and `buildCalldata` round trip
+- `test/registry-cases/rarible/rarible.spec.ts` — Rarible ERC-721 lazy mint (EIP-712, mid-path `.[]` iteration); `getTypedDataInputModels` and `buildTypedData` round trip
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
 - `test/registry-cases/across/across.spec.ts` — Across Ethereum SpokePool: deposit + depositNow (`addressName` / `tokenTicker` on `bytes32`, zero-padded EVM addresses and a Solana key)
-- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
-- `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
+- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence; input models of the bundled ERC-20 and a `transfer` round trip
+- `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing), and the policy through `getCalldataInputModels` / `getTypedDataInputModels` (`NO_TRUSTED_ATTESTATION`, `ATTESTATION_OPTIONS_INCOMPLETE`)
 
 ### Test guidelines
 

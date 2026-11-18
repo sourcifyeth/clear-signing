@@ -25,6 +25,10 @@ import {
   isAttestationRevoked,
   verifyAttestation,
 } from "../../src/attestations.js";
+import {
+  getCalldataInputModels,
+  getTypedDataInputModels,
+} from "../../src/builder.js";
 import type {
   AttestationOptions,
   ChainClient,
@@ -671,6 +675,55 @@ describe("attestation policy — format() with the filesystem resolver", () => {
 // Attestation policy — includes are resolved before hashing
 // ---------------------------------------------------------------------------
 
+describe("attestation policy — getCalldataInputModels", () => {
+  it("lists input models when a trusted attester has a valid attestation", async () => {
+    const result = await getCalldataInputModels(
+      CHAIN_ID,
+      USDT,
+      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER] }),
+    );
+    expect(result.warnings).toBeUndefined();
+    expect(result.models?.map((m) => m.signature)).toEqual([
+      "transfer(address _to, uint256 _value)",
+      "approve(address _spender, uint256 _value)",
+    ]);
+  });
+
+  it("returns NO_TRUSTED_ATTESTATION when no trusted attester has an attestation", async () => {
+    const result = await getCalldataInputModels(
+      CHAIN_ID,
+      USDT,
+      tetherOpts({ trustedAttesters: [ALICE] }),
+    );
+    expect(result).toEqual({
+      warnings: [
+        {
+          code: "NO_TRUSTED_ATTESTATION",
+          message:
+            "No valid attestation from a trusted attester found for descriptor 'calldata-usdt.json'",
+        },
+      ],
+    });
+  });
+
+  it("returns ATTESTATION_OPTIONS_INCOMPLETE when the provider has no chainClient", async () => {
+    const result = await getCalldataInputModels(
+      CHAIN_ID,
+      USDT,
+      tetherOpts({ trustedAttesters: [CYFRIN_ATTESTER] }, null),
+    );
+    expect(result).toEqual({
+      warnings: [
+        {
+          code: "ATTESTATION_OPTIONS_INCOMPLETE",
+          message:
+            "An attestation policy is set but no chainClient is available for the revocation check",
+        },
+      ],
+    });
+  });
+});
+
 describe("attestation policy — includes resolution", () => {
   const CONTRACT = "0x9876543210987654321098765432109876543210";
   const including: Descriptor = {
@@ -893,6 +946,52 @@ describe("attestation policy — resolveTypedDataDescriptor", () => {
       "does not match the computed hash",
     );
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("lists typed-data input models when a trusted attester attested the descriptor", async () => {
+    const attestation = signAttestation(
+      attestMessage(computeDescriptorHash(eip712Descriptor)),
+    );
+    const result = await getTypedDataInputModels(CHAIN_ID, VERIFYING_CONTRACT, {
+      descriptorResolverOptions: {
+        type: "custom",
+        resolver: buildResolver({
+          [`sigs/eip712-mail.eip155-1-${TEST_ATTESTER}.json`]: attestation,
+        }),
+        attestations: { trustedAttesters: [TEST_ATTESTER] },
+      },
+      externalDataProvider: { chainClient: notRevoked },
+    });
+    expect(result).toEqual({
+      models: [
+        {
+          signature: ENCODE_TYPE,
+          domain: { chainId: CHAIN_ID, verifyingContract: VERIFYING_CONTRACT },
+          intent: "Send mail",
+          fields: [{ label: "To", path: "to", type: "address", format: "raw" }],
+        },
+      ],
+    });
+  });
+
+  it("returns NO_TRUSTED_ATTESTATION from getTypedDataInputModels without an attestation", async () => {
+    const result = await getTypedDataInputModels(CHAIN_ID, VERIFYING_CONTRACT, {
+      descriptorResolverOptions: {
+        type: "custom",
+        resolver: buildResolver({}),
+        attestations: { trustedAttesters: [TEST_ATTESTER] },
+      },
+      externalDataProvider: { chainClient: notRevoked },
+    });
+    expect(result).toEqual({
+      warnings: [
+        {
+          code: "NO_TRUSTED_ATTESTATION",
+          message:
+            "No valid attestation from a trusted attester found for descriptor 'eip712-mail.json'",
+        },
+      ],
+    });
   });
 
   it("fails with NO_TRUSTED_ATTESTATION when no attestation exists", async () => {
