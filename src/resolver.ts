@@ -38,7 +38,7 @@ import {
   warn,
 } from "./utils.js";
 
-export type ResolveDescriptorResult =
+type ResolveDescriptorResult =
   | { descriptor: Descriptor }
   | { warning: Warning };
 
@@ -49,7 +49,7 @@ export type ResolveDescriptorResult =
  * triggers another fetch). For `{ type: "custom" }`, returns the user-built
  * resolver unchanged.
  */
-export async function createResolver(
+async function createResolver(
   options: GitHubResolverOptions | CustomResolverOptions = {
     type: "github",
   },
@@ -213,7 +213,7 @@ export async function resolveTypedDataDescriptor(
  * and becomes a per-attester failure reason. Attestation fetch and
  * `chainClient` I/O errors still throw, consistent with descriptor fetching.
  */
-export async function applyAttestationPolicy(
+async function applyAttestationPolicy(
   resolver: DescriptorResolver,
   path: string,
   resolved: ResolveDescriptorResult,
@@ -287,7 +287,7 @@ export async function applyAttestationPolicy(
   };
 }
 
-export function noDescriptorWarning(
+function noDescriptorWarning(
   chainId: number | undefined,
   address: string | undefined,
 ): ResolveDescriptorResult {
@@ -299,7 +299,7 @@ export function noDescriptorWarning(
   };
 }
 
-export async function resolveWithIncludes(
+async function resolveWithIncludes(
   resolver: DescriptorResolver,
   path: string,
   visited: Set<string> = new Set(),

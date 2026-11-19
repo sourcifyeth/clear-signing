@@ -1,15 +1,11 @@
 /**
  * Builder input models under an ERC-8176 attestation policy. The fixtures are
  * the registry's Tether USD descriptor and its real attestation in
- * `../attestations/`, and the Rarible EIP-712 descriptor in
- * `../registry-cases/rarible/`, which has no attestation.
+ * `../attestations/`.
  */
 
 import { describe, it, expect, assert } from "vitest";
-import {
-  getCalldataInputModels,
-  getTypedDataInputModels,
-} from "../../src/builder.js";
+import { getCalldataInputModels } from "../../src/builder.js";
 import type { BuilderOptions } from "../../src/builder.types.js";
 import type {
   AttestationOptions,
@@ -22,9 +18,6 @@ const CHAIN_ID = 1;
 const USDT = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const CYFRIN_ATTESTER = "0x3846c3A30E62075Fa916216b35EF04B8F53931f6";
 const ALICE = "0x1234567890abcdef1234567890abcdef12345678";
-const RARIBLE_COLLECTION = "0xc9154424b823b10579895ccbe442d41b9abd96ed";
-const MINT_ENCODE_TYPE =
-  "Mint721(uint256 tokenId,string tokenURI,Part[] creators,Part[] royalties)Part(address account,uint96 value)";
 
 /** Chain client whose EAS reads report every attestation as not revoked. */
 const notRevoked: ChainClient = { call: async () => "0x" + "00".repeat(32) };
@@ -102,40 +95,6 @@ describe("builder — attestation policy on getCalldataInputModels", () => {
           code: "ATTESTATION_OPTIONS_INCOMPLETE",
           message:
             "An attestation policy is set but no chainClient is available for the revocation check",
-        },
-      ],
-    });
-  });
-});
-
-describe("builder — attestation policy on getTypedDataInputModels", () => {
-  it("returns NO_TRUSTED_ATTESTATION when the descriptor has no attestation", async () => {
-    const opts = withPolicy(
-      buildFilesystemResolverOpts(`${__dirname}/../registry-cases/rarible`, {
-        eip712DescriptorFiles: [
-          {
-            chainId: CHAIN_ID,
-            address: RARIBLE_COLLECTION,
-            file: "eip712-rarible-erc-721.json",
-            encodeTypes: [MINT_ENCODE_TYPE],
-          },
-        ],
-      }),
-      { trustedAttesters: [CYFRIN_ATTESTER] },
-      notRevoked,
-    );
-
-    const result = await getTypedDataInputModels(
-      CHAIN_ID,
-      RARIBLE_COLLECTION,
-      opts,
-    );
-    expect(result).toEqual({
-      warnings: [
-        {
-          code: "NO_TRUSTED_ATTESTATION",
-          message:
-            "No valid attestation from a trusted attester found for descriptor 'eip712-rarible-erc-721.json'",
         },
       ],
     });

@@ -8,10 +8,7 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { buildCalldata, getCalldataInputModels } from "../../src/builder.js";
-import type {
-  BuilderOptions,
-  CalldataInputModel,
-} from "../../src/builder.types.js";
+import type { BuilderOptions, InputModel } from "../../src/builder.types.js";
 import { buildFilesystemResolverOpts, padAddr } from "../utils.js";
 
 describe("builder — Paraswap AugustusSwapper v6.2", () => {
@@ -36,7 +33,7 @@ describe("builder — Paraswap AugustusSwapper v6.2", () => {
   };
 
   /** Get the input model of one function from the descriptor. */
-  async function inputModel(selector: string): Promise<CalldataInputModel> {
+  async function inputModel(selector: string): Promise<InputModel> {
     const result = await getCalldataInputModels(
       CHAIN_ID,
       CONTRACT,

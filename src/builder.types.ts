@@ -9,12 +9,11 @@ import type {
   DescriptorFieldFormatType,
   DisplayModel,
   FormatOptions,
-  TypedDataDomain,
   Warning,
 } from "./types.js";
 
 /**
- * Options of `getCalldataInputModels` / `getTypedDataInputModels`. The
+ * Options of `getCalldataInputModels`. The
  * builder only resolves descriptors, so it takes the descriptor source of
  * {@link FormatOptions} and no external data provider.
  */
@@ -32,13 +31,12 @@ export interface BuilderOptions {
 /**
  * One input of an {@link InputModel}, from the `builder` entry point
  * (`@ethereum-sourcify/clear-signing/builder`). It mirrors a descriptor field,
- * or an ABI input / EIP-712 member that no descriptor field covers.
+ * or an ABI input that no descriptor field covers.
  */
 export interface InputField {
   /**
    * Descriptor label. For a field without a label (an appended input, or a
-   * descriptor field that declares none), the ABI parameter or EIP-712 member
-   * name.
+   * descriptor field that declares none), the ABI parameter name.
    */
   label: string;
 
@@ -52,9 +50,8 @@ export interface InputField {
   path?: string;
 
   /**
-   * Solidity type (calldata) or EIP-712 type of the value. Set on every field
-   * with a `path`, e.g. `uint256`, `address[]`, `(address token,uint256 amount)`
-   * for a calldata tuple, or `Part[]` for an EIP-712 struct array.
+   * Solidity type of the value. Set on every field with a `path`, e.g.
+   * `uint256`, `address[]`, or `(address token,uint256 amount)` for a tuple.
    */
   type?: string;
 
@@ -91,13 +88,15 @@ export interface InputFieldGroup {
   fields: InputField[];
 }
 
-/** The properties that every {@link InputModel} has. */
-export interface BaseInputModel {
-  /**
-   * The `display.formats` key: the function signature (calldata) or the
-   * EIP-712 `encodeType` string.
-   */
+/**
+ * The inputs of one function, in descriptor display order. Pass it with the
+ * user input to `buildCalldata`.
+ */
+export interface InputModel {
+  /** The `display.formats` key: the function signature. */
   signature: string;
+  /** 4-byte function selector as hex. */
+  selector: string;
   metadata?: DisplayModel["metadata"];
   intent?: string | Record<string, string>;
   /**
@@ -107,42 +106,19 @@ export interface BaseInputModel {
   fields: (InputField | InputFieldGroup)[];
 }
 
-/**
- * The inputs of one function, in descriptor display order. Pass it with the
- * user input to `buildCalldata`.
- */
-export interface CalldataInputModel extends BaseInputModel {
-  /** 4-byte function selector as hex. */
-  selector: string;
-}
-
-/**
- * The inputs of one EIP-712 primary type, in descriptor display order. Pass
- * it with the user input to `buildTypedData`.
- */
-export interface TypedDataInputModel extends BaseInputModel {
-  /**
-   * `chainId` and `verifyingContract` of the request, plus `name`, `version`
-   * and `salt` when the descriptor declares them.
-   */
-  domain: TypedDataDomain;
-}
-
-export type InputModel = CalldataInputModel | TypedDataInputModel;
-
-/** Result of `getCalldataInputModels` / `getTypedDataInputModels`. */
-export interface InputModels<M extends InputModel = InputModel> {
-  models?: M[];
+/** Result of `getCalldataInputModels`. */
+export interface InputModels {
+  models?: InputModel[];
   warnings?: Warning[];
 }
 
 /** Machine-readable code of a {@link BuildInputError}. */
 export type BuildInputErrorCode =
-  | "MISSING_VALUE" // no value for an argument / member
+  | "MISSING_VALUE" // no value for an argument
   | "INVALID_TYPE" // wrong JS shape, bad hex, not an integer, not a boolean
   | "OUT_OF_RANGE" // integer does not fit uintN / intN
   | "INVALID_LENGTH" // address / bytesN byte length, fixed array length
-  | "UNKNOWN_FIELD" // values has a key the function / type does not declare
+  | "UNKNOWN_FIELD" // values has a key the function does not declare
   | "INVALID_SIGNATURE"; // model.signature cannot be parsed
 
 /**

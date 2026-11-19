@@ -5,10 +5,10 @@ builder UI (for example a block explorer) has a chain ID and a contract
 address and lets the user call the contract. The builder:
 
 1. resolves the ERC-7730 descriptor of the contract and returns an **input
-   model** for each function (or EIP-712 message type): the inputs to render,
-   with the clear signing labels and format hints of the descriptor;
-2. **builds** the calldata (or the EIP-712 typed data) from the user input,
-   and returns errors that the UI can show next to each bad input.
+   model** for each function: the inputs to render, with the clear signing
+   labels and format hints of the descriptor;
+2. **builds** the calldata from the user input, and returns errors that the
+   UI can show next to each bad input.
 
 No formatting runs, and no `ExternalDataProvider` resolver is called.
 
@@ -16,8 +16,6 @@ No formatting runs, and no `ExternalDataProvider` resolver is called.
 import {
   getCalldataInputModels,
   buildCalldata,
-  getTypedDataInputModels,
-  buildTypedData,
 } from "@ethereum-sourcify/clear-signing/builder";
 ```
 
@@ -187,57 +185,13 @@ await wallet.sendTransaction({
 All errors are returned at once, so the form can mark every bad input. The
 wallet can then clear sign the transaction with `format()` as usual.
 
-## Walkthrough: build an EIP-712 message
-
-The steps are the same. The schema of the message comes from the descriptor:
-each `display.formats` key is the full EIP-712 `encodeType` string.
-
-```typescript
-const { models, warnings } = await getTypedDataInputModels(
-  chainId,
-  verifyingContract,
-  opts,
-);
-
-// Render model.fields and collect values as above. values is the message.
-const result = buildTypedData(model, account, values, {
-  // Only needed when the descriptor does not declare them:
-  name: "MyProtocol",
-  version: "1",
-});
-
-if ("errors" in result) {
-  // Show the errors as above. "@.from" names a bad account.
-} else {
-  await wallet.signTypedData(result.typedData);
-}
-```
-
-- All descriptors indexed for the address are resolved, so the models can
-  come from several descriptors. Each model has its own `metadata`.
-- Each descriptor is resolved on its own. When one descriptor fails (e.g. its
-  fetch throws), the models of the other descriptors are still returned. The
-  warning of a failed descriptor names its path, e.g.
-  `Descriptor 'eip712-mail.json': ...`.
-- `model.domain` holds `chainId` and `verifyingContract`, plus `name`,
-  `version` and `salt` when the descriptor's `context.eip712.domain` declares
-  them. The `domain` argument of `buildTypedData` is merged over it.
-- The result has `account`, `primaryType`, `types` (with an `EIP712Domain`
-  entry for the domain fields that are set), `domain` and `message`.
-  `message` is `values`, unchanged.
-- A struct member has the EIP-712 type as `type`, e.g. `Part[]`. Look up its
-  members in the `encodeType` string of `model.signature` if you need them.
-
 ## Reference
 
 ### Functions
 
 ```typescript
-getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels<CalldataInputModel>>
-buildCalldata(model: CalldataInputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
-
-getTypedDataInputModels(chainId: number, verifyingContract: string, opts?: BuilderOptions): Promise<InputModels<TypedDataInputModel>>
-buildTypedData(model: TypedDataInputModel, account: string, values: Record<string, unknown>, domain?: TypedDataDomain): { typedData: TypedData } | { errors: BuildInputError[] }
+getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels>
+buildCalldata(model: InputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
 
 interface BuilderOptions {
   // Descriptor source, the same value as FormatOptions.descriptorResolverOptions.
@@ -247,29 +201,20 @@ interface BuilderOptions {
 }
 ```
 
-The `get*InputModels` functions never throw. The build functions are
-synchronous, need no descriptor and never throw.
+`getCalldataInputModels` never throws. `buildCalldata` is synchronous, needs
+no descriptor and never throws.
 
 ### Types
 
 ```typescript
-interface InputModels<M extends InputModel = InputModel> {
-  models?: M[];
+interface InputModels {
+  models?: InputModel[];
   warnings?: Warning[];
 }
 
-type InputModel = CalldataInputModel | TypedDataInputModel;
-
-interface CalldataInputModel extends BaseInputModel {
+interface InputModel {
+  signature: string; // display.formats key: the function signature
   selector: string; // 4-byte function selector as hex
-}
-
-interface TypedDataInputModel extends BaseInputModel {
-  domain: TypedDataDomain; // chainId, verifyingContract, and name / version / salt if declared
-}
-
-interface BaseInputModel {
-  signature: string; // display.formats key: function signature or encodeType
   metadata?: {
     owner?: string;
     contractName?: string;
@@ -306,15 +251,15 @@ interface BuildInputError {
 
 | Descriptor field                                                     | Input model                                                                 |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `path` names an argument / member (`#.` prefix optional)             | input field with `path` and `type`                                          |
+| `path` names an argument (`#.` prefix optional)                      | input field with `path` and `type`                                          |
 | `value` set, or `path` starts with `$.`                              | constant field, `constant` resolved from the descriptor metadata, no `path` |
 | `path: "@.value"`                                                    | input field with `path: "@.value"` and `type: "uint256"`                    |
 | other `@.` paths (`@.from`, `@.to`, `@.chainId`)                     | left out: the container sets them                                           |
 | `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered       |
-| `path` that names no argument / member (e.g. a typo)                 | left out. The inputs are appended as uncovered                              |
+| `path` that names no argument (e.g. a typo)                          | left out. The inputs are appended as uncovered                              |
 | path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                   |
 | `visible: "never"`                                                   | input field with `hidden: true`                                             |
-| no `label`                                                           | the ABI parameter / member name (the last name in `path`) is the label      |
+| no `label`                                                           | the ABI parameter name (the last name in `path`) is the label               |
 | `$ref`                                                               | merged with its definition first                                            |
 | field group                                                          | `InputFieldGroup`; child paths get the group prefix, as in `format()`       |
 | nested field group                                                   | the function gets no model: `UNSUPPORTED_NESTED_FIELD_GROUP` warning        |
@@ -327,8 +272,7 @@ argument uses the name `param<i>` (also its key in `values`).
 
 ### The `values` shape and raw value types
 
-- Keys are argument names. A tuple / struct is an object keyed by component
-  name. An array is a JS array.
+- Keys are argument names. A tuple is an object keyed by component name. An array is a JS array.
 - Integers (`uintN`, `intN`): `bigint`, a safe-integer number, or a decimal or
   `0x` hex string.
 - `address`, `bytes`, `bytesN`: `0x` hex string.
@@ -339,17 +283,16 @@ argument uses the name `param<i>` (also its key in `values`).
 
 | Code                | Meaning                                                                |
 | ------------------- | ---------------------------------------------------------------------- |
-| `MISSING_VALUE`     | No value for an argument, member or array element                      |
+| `MISSING_VALUE`     | No value for an argument, tuple component or array element             |
 | `INVALID_TYPE`      | Wrong JS shape, bad hex, not an integer, not a boolean                 |
 | `OUT_OF_RANGE`      | The integer does not fit `uintN` / `intN`                              |
 | `INVALID_LENGTH`    | Wrong byte length of an `address` / `bytesN`, wrong fixed array length |
-| `UNKNOWN_FIELD`     | `values` has a key that the function or type does not declare          |
+| `UNKNOWN_FIELD`     | `values` has a key that the function or tuple does not declare         |
 | `INVALID_SIGNATURE` | `model.signature` cannot be parsed, or it uses an unsupported type     |
 
 `path` is in the `InputField.path` syntax with the concrete array index in
-place of `[]`, e.g. `orders.[1].amount`. The root object is `""`, and
-`buildTypedData` reports a bad `account` at `@.from`. `message` is short and
-can be shown to the user.
+place of `[]`, e.g. `orders.[1].amount`. The root object is `""`. `message`
+is short and can be shown to the user.
 
 These errors describe bad user input. They are not `Warning`s, which describe
 the descriptor or the formatting.
@@ -358,16 +301,14 @@ the descriptor or the formatting.
 
 `InputModels.warnings` uses the `WarningCode`s of `format()`:
 
-| Code                                      | When                                                                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `NO_DESCRIPTOR`                           | Nothing is indexed for the address (and no trusted token matches)                                       |
-| `NO_TRUSTED_ATTESTATION`                  | The attestation policy rejects the descriptor                                                           |
-| `ATTESTATION_OPTIONS_INCOMPLETE`          | A policy is set without `chainClient` or `fetchAttestation`                                             |
-| `CYCLIC_INCLUDES`                         | The `includes` chain of the descriptor is cyclic                                                        |
-| `DESCRIPTOR_FETCH_ERROR`                  | Fetching the descriptor (or the revocation read) failed. EIP-712: per descriptor; the other models stay |
-| `DEPLOYMENT_MISMATCH` / `DOMAIN_MISMATCH` | The descriptor is not bound to the chain and address                                                    |
-| `UNSUPPORTED_DOMAIN`                      | EIP-712: no valid chain ID or verifying contract                                                        |
-| `NO_FORMAT_MATCH`                         | EIP-712: a legacy format key that is only a primary type name                                           |
-| `DEFINITIONS_RESOLUTION_ERROR`            | A `$ref` cannot be resolved; that function gets no model                                                |
-| `UNSUPPORTED_NESTED_FIELD_GROUP`          | A nested field group; that function gets no model                                                       |
-| `UNEXPECTED_LIB_ERROR`                    | A bug in the library                                                                                    |
+| Code                             | When                                                              |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `NO_DESCRIPTOR`                  | Nothing is indexed for the address (and no trusted token matches) |
+| `NO_TRUSTED_ATTESTATION`         | The attestation policy rejects the descriptor                     |
+| `ATTESTATION_OPTIONS_INCOMPLETE` | A policy is set without `chainClient` or `fetchAttestation`       |
+| `CYCLIC_INCLUDES`                | The `includes` chain of the descriptor is cyclic                  |
+| `DESCRIPTOR_FETCH_ERROR`         | Fetching the descriptor (or the revocation read) failed           |
+| `DEPLOYMENT_MISMATCH`            | The descriptor is not bound to the chain and address              |
+| `DEFINITIONS_RESOLUTION_ERROR`   | A `$ref` cannot be resolved; that function gets no model          |
+| `UNSUPPORTED_NESTED_FIELD_GROUP` | A nested field group; that function gets no model                 |
+| `UNEXPECTED_LIB_ERROR`           | A bug in the library                                              |

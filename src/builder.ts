@@ -4,9 +4,8 @@
  *
  * This is the opposite direction of `format()`. A builder UI (e.g. a block
  * explorer) has a chain ID and a contract address. It gets one input model per
- * function or EIP-712 primary type, renders the inputs with the descriptor
- * labels and formats, and builds the calldata or typed data from the user
- * input.
+ * function, renders the inputs with the descriptor labels and formats, and
+ * builds the calldata from the user input.
  *
  * @example
  * ```typescript
@@ -25,14 +24,7 @@
  * none of this code. `index.ts` never imports this module.
  */
 
-import type { ResolveDescriptorResult } from "./resolver.js";
-import {
-  applyAttestationPolicy,
-  createResolver,
-  noDescriptorWarning,
-  resolveCalldataDescriptor,
-  resolveWithIncludes,
-} from "./resolver.js";
+import { resolveCalldataDescriptor } from "./resolver.js";
 import type { FunctionInput } from "./calldata.js";
 import {
   isDynamicInput,
@@ -42,7 +34,6 @@ import {
 } from "./calldata.js";
 import {
   isCalldataDescriptorBoundTo,
-  isEip712DescriptorBoundTo,
   isFieldGroup,
   mergeDefinitions,
   resolveMetadataValue,
@@ -54,7 +45,6 @@ import {
   bytesToHex,
   concatBytes,
   hexToBytes,
-  normalizeAddress,
   utf8ToBytes,
   warn,
 } from "./utils.js";
@@ -64,25 +54,16 @@ import type {
   BuilderOptions,
   InputField,
   InputFieldGroup,
-  BaseInputModel,
-  CalldataInputModel,
   InputModel,
   InputModels,
-  TypedDataInputModel,
 } from "./builder.types.js";
 import type {
-  ChainClient,
-  CustomResolverOptions,
   Descriptor,
   DescriptorFieldFormat,
   DescriptorFieldFormatParams,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
   DescriptorMetadata,
-  GitHubResolverOptions,
-  TypedData,
-  TypedDataDomain,
-  TypeMember,
   Warning,
 } from "./types.js";
 
@@ -94,8 +75,6 @@ export type {
   DescriptorFieldFormatType,
   DescriptorMapReference,
   GitHubResolverOptions,
-  TypedData,
-  TypedDataDomain,
   Warning,
   WarningCode,
 } from "./types.js";
@@ -118,7 +97,7 @@ export async function getCalldataInputModels(
   chainId: number,
   to: string,
   opts?: BuilderOptions,
-): Promise<InputModels<CalldataInputModel>> {
+): Promise<InputModels> {
   try {
     let descriptor: Descriptor;
     try {
@@ -145,7 +124,7 @@ export async function getCalldataInputModels(
       };
     }
 
-    const models: CalldataInputModel[] = [];
+    const models: InputModel[] = [];
     const warnings: Warning[] = [];
     for (const fn of functionFormats(descriptor)) {
       const result = buildInputFields(
@@ -172,184 +151,6 @@ export async function getCalldataInputModels(
 }
 
 /**
- * Resolves every EIP-712 descriptor indexed for `(chainId,
- * verifyingContract)` and returns one {@link CalldataInputModel} per `encodeType` key
- * of their `display.formats`. The EIP-712 schema comes from that key.
- *
- * A legacy key that is only a primary type name carries no schema. It gets no
- * model and a `NO_FORMAT_MATCH` warning. Descriptor resolution and error
- * handling are as in {@link getCalldataInputModels}.
- */
-export async function getTypedDataInputModels(
-  chainId: number,
-  verifyingContract: string,
-  opts?: BuilderOptions,
-): Promise<InputModels<TypedDataInputModel>> {
-  try {
-    if (!Number.isSafeInteger(chainId) || chainId < 0 || !verifyingContract) {
-      return {
-        warnings: [
-          warn(
-            "UNSUPPORTED_DOMAIN",
-            "Input models need a valid chainId and verifyingContract",
-          ),
-        ],
-      };
-    }
-
-    let results: { path?: string; result: ResolveDescriptorResult }[];
-    try {
-      results = await resolveTypedDataDescriptors(
-        chainId,
-        verifyingContract,
-        opts?.descriptorResolverOptions,
-        opts?.chainClient,
-      );
-    } catch (error) {
-      return {
-        warnings: [fetchErrorWarning(chainId, verifyingContract, error)],
-      };
-    }
-
-    const models: TypedDataInputModel[] = [];
-    const warnings: Warning[] = [];
-    for (const { path, result } of results) {
-      if ("warning" in result) {
-        warnings.push(descriptorWarning(path, result.warning));
-        continue;
-      }
-      const { descriptor } = result;
-      const domain = modelDomain(descriptor, chainId, verifyingContract);
-      const bindingCheck: TypedData = {
-        account: "",
-        types: {},
-        primaryType: "",
-        domain,
-        message: {},
-      };
-      if (!isEip712DescriptorBoundTo(descriptor, bindingCheck)) {
-        warnings.push(
-          descriptorWarning(
-            path,
-            warn(
-              "DOMAIN_MISMATCH",
-              "Descriptor context does not match the typed data domain",
-            ),
-          ),
-        );
-        continue;
-      }
-
-      for (const [key, spec] of Object.entries(
-        descriptor.display?.formats ?? {},
-      )) {
-        const parsed = parseEncodeType(key);
-        if (!parsed) {
-          warnings.push(
-            descriptorWarning(
-              path,
-              warn(
-                "NO_FORMAT_MATCH",
-                `Format key '${key}' is not a full EIP-712 encodeType string, so it has no schema`,
-              ),
-            ),
-          );
-          continue;
-        }
-        const fields = buildInputFields(
-          spec,
-          descriptor.display?.definitions ?? {},
-          descriptor.metadata,
-          structMembers(parsed.primaryType, parsed.types),
-          (node) => structComponents(node, parsed.types),
-        );
-        if ("warnings" in fields) {
-          warnings.push(
-            ...formatWarnings(key, fields.warnings).map((w) =>
-              descriptorWarning(path, w),
-            ),
-          );
-          continue;
-        }
-        models.push({
-          signature: key,
-          domain,
-          ...modelInfo(descriptor, spec),
-          fields: fields.fields,
-        });
-      }
-    }
-    return inputModels(models, warnings);
-  } catch (error) {
-    return { warnings: [unexpectedErrorWarning(error)] };
-  }
-}
-
-/**
- * Resolves every typed-data descriptor indexed for `(chainId,
- * verifyingContract)`, for all primary types, once per unique path. A fetch
- * error of one path becomes a `DESCRIPTOR_FETCH_ERROR` result for that path,
- * so the other descriptors still resolve. Returns a single `NO_DESCRIPTOR`
- * result without a path when nothing is indexed for the address.
- */
-async function resolveTypedDataDescriptors(
-  chainId: number,
-  verifyingContract: string,
-  options?: GitHubResolverOptions | CustomResolverOptions,
-  chainClient?: ChainClient,
-): Promise<{ path?: string; result: ResolveDescriptorResult }[]> {
-  const resolver = await createResolver(options);
-  const byPrimaryType =
-    resolver.index.typedDataIndex[
-      `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
-    ];
-  const paths = new Set<string>();
-  for (const entries of Object.values(byPrimaryType ?? {})) {
-    for (const entry of entries) paths.add(entry.path);
-  }
-  if (paths.size === 0) {
-    return [{ result: noDescriptorWarning(chainId, verifyingContract) }];
-  }
-
-  return Promise.all(
-    [...paths].map(async (path) => {
-      try {
-        const resolved = await resolveWithIncludes(resolver, path);
-        const result = await applyAttestationPolicy(
-          resolver,
-          path,
-          resolved,
-          options?.attestations,
-          chainClient,
-        );
-        return { path, result };
-      } catch (error) {
-        return {
-          path,
-          result: {
-            warning: warn(
-              "DESCRIPTOR_FETCH_ERROR",
-              `Failed to resolve descriptor for chain ${chainId} and address ${verifyingContract}: ${String(error)}`,
-            ),
-          },
-        };
-      }
-    }),
-  );
-}
-
-/** Name the descriptor path in a per-descriptor warning. */
-function descriptorWarning(
-  path: string | undefined,
-  warning: Warning,
-): Warning {
-  if (path === undefined || warning.message.includes(`'${path}'`)) {
-    return warning;
-  }
-  return warn(warning.code, `Descriptor '${path}': ${warning.message}`);
-}
-
-/**
  * Builds the input fields of one format spec: the descriptor fields in
  * display order, then the inputs that no field covers.
  *
@@ -360,13 +161,11 @@ export function buildInputFields(
   definitions: Record<string, DescriptorFieldFormat>,
   metadata: DescriptorMetadata | undefined,
   inputs: FunctionInput[],
-  componentsOf: ComponentsOf = (node) => node.components,
 ): { fields: (InputField | InputFieldGroup)[] } | { warnings: Warning[] } {
   const ctx: FieldsContext = {
     definitions,
     metadata,
     inputs,
-    componentsOf,
     covered: new Set(),
   };
   const fields: (InputField | InputFieldGroup)[] = [];
@@ -387,14 +186,10 @@ export function buildInputFields(
   return { fields };
 }
 
-/** The members of a tuple or struct input, or of its array elements. */
-type ComponentsOf = (node: FunctionInput) => FunctionInput[] | undefined;
-
 interface FieldsContext {
   definitions: Record<string, DescriptorFieldFormat>;
   metadata: DescriptorMetadata | undefined;
   inputs: FunctionInput[];
-  componentsOf: ComponentsOf;
   /** Absolute input paths that a descriptor field covers. */
   covered: Set<string>;
 }
@@ -514,7 +309,7 @@ function buildField(
 
   // A path that names no input gets no field. Nothing is covered, so the
   // inputs it would reach are appended.
-  const node = findInput(ctx.inputs, path, ctx.componentsOf);
+  const node = findInput(ctx.inputs, path);
   if (!node) return { field: null };
 
   ctx.covered.add(path);
@@ -592,7 +387,6 @@ function elementInput(node: FunctionInput): FunctionInput | undefined {
 function findInput(
   inputs: FunctionInput[],
   path: string,
-  componentsOf: ComponentsOf,
 ): FunctionInput | undefined {
   let node: FunctionInput | undefined;
   let members: FunctionInput[] | undefined = inputs;
@@ -604,7 +398,7 @@ function findInput(
       node = members?.find((m) => m.name === segment);
       if (!node) return undefined;
     }
-    members = parseArrayType(node.type) ? undefined : componentsOf(node);
+    members = parseArrayType(node.type) ? undefined : node.components;
   }
   return node;
 }
@@ -660,8 +454,7 @@ function appendUncoveredInput(
     appendUncoveredInput(element, `${path}.[]`, ctx, out);
     return;
   }
-  const components = ctx.componentsOf(input);
-  if (components) appendUncovered(components, path, ctx, out);
+  if (input.components) appendUncovered(input.components, path, ctx, out);
 }
 
 /** Give each unnamed input the name `param<i>`, at every level. */
@@ -673,84 +466,10 @@ function nameInputs(inputs: FunctionInput[]): FunctionInput[] {
   }));
 }
 
-/** The members of an EIP-712 struct as input nodes, one level deep. */
-function structMembers(
-  typeName: string,
-  types: Record<string, TypeMember[]>,
-): FunctionInput[] {
-  const members = Object.hasOwn(types, typeName) ? types[typeName] : [];
-  return members.map((member) => ({ name: member.name, type: member.type }));
-}
-
-/**
- * The members of a struct-typed EIP-712 node. The lookup is on demand, so a
- * recursive type needs no cycle check.
- */
-function structComponents(
-  node: FunctionInput,
-  types: Record<string, TypeMember[]>,
-): FunctionInput[] | undefined {
-  const base = node.type.replace(/(\[\d*\])+$/, "");
-  return Object.hasOwn(types, base) ? structMembers(base, types) : undefined;
-}
-
-/**
- * Parse an EIP-712 `encodeType` string, `Name(type member,...)Other(...)`.
- * The first struct is the primary type.
- */
-function parseEncodeType(
-  encodeType: string,
-): { primaryType: string; types: Record<string, TypeMember[]> } | undefined {
-  const struct = /^([A-Za-z_$][A-Za-z0-9_$]*)\(([^()]*)\)/;
-  const types: Record<string, TypeMember[]> = {};
-  let primaryType: string | undefined;
-  let rest = encodeType.trim();
-
-  while (rest.length > 0) {
-    const match = struct.exec(rest);
-    if (!match || Object.hasOwn(types, match[1])) return undefined;
-    const members: TypeMember[] = [];
-    for (const member of match[2].trim() === "" ? [] : match[2].split(",")) {
-      const parts = member.trim().split(/\s+/);
-      if (parts.length !== 2) return undefined;
-      members.push({ type: parts[0], name: parts[1] });
-    }
-    types[match[1]] = members;
-    primaryType ??= match[1];
-    rest = rest.slice(match[0].length);
-  }
-
-  return primaryType ? { primaryType, types } : undefined;
-}
-
-/** The EIP-712 domain of a model: the request plus the descriptor's domain. */
-function modelDomain(
-  descriptor: Descriptor,
-  chainId: number,
-  verifyingContract: string,
-): TypedDataDomain {
-  const declared = descriptor.context?.eip712?.domain ?? {};
-  // The binding check compares with String(), so a declared number matches.
-  const text = (key: string) =>
-    declared[key] === undefined || declared[key] === null
-      ? undefined
-      : String(declared[key]);
-  const name = text("name");
-  const version = text("version");
-  const salt = text("salt");
-  return {
-    ...(name !== undefined && { name }),
-    ...(version !== undefined && { version }),
-    chainId,
-    verifyingContract,
-    ...(salt !== undefined && { salt }),
-  };
-}
-
 function modelInfo(
   descriptor: Descriptor,
   spec: DescriptorFormatSpec,
-): Pick<BaseInputModel, "metadata" | "intent"> {
+): Pick<InputModel, "metadata" | "intent"> {
   const meta = descriptor.metadata;
   return {
     ...(meta && {
@@ -764,10 +483,7 @@ function modelInfo(
   };
 }
 
-function inputModels<M extends InputModel>(
-  models: M[],
-  warnings: Warning[],
-): InputModels<M> {
+function inputModels(models: InputModel[], warnings: Warning[]): InputModels {
   return {
     ...(models.length > 0 && { models }),
     ...(warnings.length > 0 && { warnings }),
@@ -813,7 +529,7 @@ function unexpectedErrorWarning(error: unknown): Warning {
  * (selector and ABI-encoded arguments). Never throws.
  */
 export function buildCalldata(
-  model: CalldataInputModel,
+  model: InputModel,
   values: Record<string, unknown>,
 ): { data: string } | { errors: BuildInputError[] } {
   try {
@@ -845,92 +561,6 @@ export function buildCalldata(
   }
 }
 
-/**
- * Builds the EIP-712 typed data of `model` for signer `account` from
- * `values` (the message). The `types` and `primaryType` come from
- * `model.signature`. `domain` is merged over `model.domain`; use it for
- * `name` / `version` when the descriptor does not declare them.
- *
- * Validates all values (and `account`, at the path `@.from`) and returns
- * every error, or the typed data with `message: values` unchanged. Never
- * throws.
- */
-export function buildTypedData(
-  model: TypedDataInputModel,
-  account: string,
-  values: Record<string, unknown>,
-  domain?: TypedDataDomain,
-): { typedData: TypedData } | { errors: BuildInputError[] } {
-  try {
-    const parsed = parseEncodeType(model.signature);
-    if (!parsed) {
-      return {
-        errors: [
-          buildError(
-            "",
-            "INVALID_SIGNATURE",
-            `Cannot parse the EIP-712 encodeType '${model.signature}'`,
-          ),
-        ],
-      };
-    }
-
-    const errors: BuildInputError[] = [];
-    const accountCheck = normalizeScalar("address", account);
-    if ("code" in accountCheck) {
-      errors.push(
-        buildError("@.from", accountCheck.code, accountCheck.message),
-      );
-    }
-
-    const resolveStruct = (type: string): FunctionInput[] | undefined =>
-      Object.hasOwn(parsed.types, type)
-        ? parsed.types[type].map((m) => ({ name: m.name, type: m.type }))
-        : undefined;
-    normalizeMembers(
-      resolveStruct(parsed.primaryType) ?? [],
-      values,
-      "",
-      errors,
-      resolveStruct,
-    );
-    if (errors.length > 0) return { errors };
-
-    const mergedDomain: TypedDataDomain = { ...model.domain };
-    for (const [key, value] of Object.entries(domain ?? {})) {
-      if (value !== undefined) {
-        (mergedDomain as Record<string, unknown>)[key] = value;
-      }
-    }
-
-    return {
-      typedData: {
-        account,
-        primaryType: parsed.primaryType,
-        types: { EIP712Domain: domainType(mergedDomain), ...parsed.types },
-        domain: mergedDomain,
-        message: values,
-      },
-    };
-  } catch (error) {
-    return { errors: [unexpectedBuildError(error)] };
-  }
-}
-
-/** The `EIP712Domain` members of the domain fields that are set. */
-function domainType(domain: TypedDataDomain): TypeMember[] {
-  const members: TypeMember[] = [
-    { name: "name", type: "string" },
-    { name: "version", type: "string" },
-    { name: "chainId", type: "uint256" },
-    { name: "verifyingContract", type: "address" },
-    { name: "salt", type: "bytes32" },
-  ];
-  return members.filter(
-    (m) => domain[m.name as keyof TypedDataDomain] !== undefined,
-  );
-}
-
 function buildError(
   path: string,
   code: BuildInputErrorCode,
@@ -950,9 +580,6 @@ function unexpectedBuildError(error: unknown): BuildInputError {
 /** A validated value, ready for ABI encoding. */
 type Normalized = bigint | boolean | Uint8Array | Normalized[];
 
-/** Resolves an EIP-712 struct type name to its members. */
-type ResolveStruct = (type: string) => FunctionInput[] | undefined;
-
 function joinPath(path: string, segment: string): string {
   return path ? `${path}.${segment}` : segment;
 }
@@ -966,7 +593,6 @@ function normalizeMembers(
   value: unknown,
   path: string,
   errors: BuildInputError[],
-  resolveStruct?: ResolveStruct,
 ): Normalized[] | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     errors.push(buildError(path, "INVALID_TYPE", "Value must be an object"));
@@ -982,7 +608,6 @@ function normalizeMembers(
       Object.hasOwn(record, member.name) ? record[member.name] : undefined,
       joinPath(path, member.name),
       errors,
-      resolveStruct,
     );
     if (normalized === undefined) valid = false;
     else result.push(normalized);
@@ -1006,7 +631,6 @@ function normalizeEntry(
   value: unknown,
   path: string,
   errors: BuildInputError[],
-  resolveStruct?: ResolveStruct,
 ): Normalized | undefined {
   if (value === undefined || value === null) {
     errors.push(buildError(path, "MISSING_VALUE", "Value is required"));
@@ -1038,7 +662,6 @@ function normalizeEntry(
         item,
         `${path}.[${i}]`,
         errors,
-        resolveStruct,
       );
       if (normalized === undefined) valid = false;
       else result.push(normalized);
@@ -1046,14 +669,8 @@ function normalizeEntry(
     return valid ? result : undefined;
   }
 
-  // EIP-712 resolves struct names. Only calldata has the "tuple" type.
-  const members = resolveStruct
-    ? resolveStruct(input.type)
-    : input.type === "tuple"
-      ? (input.components ?? [])
-      : undefined;
-  if (members) {
-    return normalizeMembers(members, value, path, errors, resolveStruct);
+  if (input.type === "tuple") {
+    return normalizeMembers(input.components ?? [], value, path, errors);
   }
 
   const scalar = normalizeScalar(input.type, value);

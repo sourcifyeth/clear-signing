@@ -19,9 +19,9 @@ Integrating into a wallet? See the [Wallet Integration Guide](GUIDE.md).
 
 The library also works in the other direction. The separate
 `@ethereum-sourcify/clear-signing/builder` entry point gives a builder UI (for
-example a block explorer) the inputs of each function or EIP-712 message of a
-contract, with the clear signing labels and formats of its descriptor. It then
-builds and validates the calldata or typed data from the user input. See the
+example a block explorer) the inputs of each function of a contract, with the
+clear signing labels and formats of its descriptor. It then builds and
+validates the calldata from the user input. See the
 [Builder Guide](docs/BUILDER.md).
 
 ## Installation
