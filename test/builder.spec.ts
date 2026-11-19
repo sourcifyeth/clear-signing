@@ -15,6 +15,7 @@ import type { BuilderOptions, InputModel } from "../src/builder.types.js";
 import type {
   Descriptor,
   DescriptorFormatSpec,
+  DescriptorMetadata,
   RegistryIndex,
 } from "../src/types.js";
 import { bytesToHex, selectorForSignature } from "../src/utils.js";
@@ -23,6 +24,8 @@ import { pad32, padAddr, padInt, padRight32 } from "./utils.js";
 const CHAIN_ID = 1;
 const CONTRACT = "0x1111111111111111111111111111111111111111";
 const ALICE = "0x2222222222222222222222222222222222222222";
+const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+const ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 const BOB = "0x3333333333333333333333333333333333333333";
 
 function inputsOf(signature: string): FunctionInput[] {
@@ -35,9 +38,16 @@ function fieldsOf(
   spec: DescriptorFormatSpec,
   signature: string,
   definitions = {},
-  metadata = {},
+  metadata: DescriptorMetadata = {},
+  container?: { chainId: number; to: string },
 ) {
-  return buildInputFields(spec, definitions, metadata, inputsOf(signature));
+  return buildInputFields(
+    spec,
+    definitions,
+    metadata,
+    inputsOf(signature),
+    container,
+  );
 }
 
 /** Format options backed by an in-memory descriptor map. */
@@ -389,7 +399,6 @@ describe("buildInputFields", () => {
         tokenPath: "#.token",
         chainIdPath: "@.chainId",
         token: { map: "$.metadata.maps.tokens", keyPath: "token" },
-        collection: { map: "$.metadata.maps.tokens", keyPath: "@.to" },
         message: "token",
       },
     };
@@ -406,6 +415,8 @@ describe("buildInputFields", () => {
     const result = fieldsOf(
       spec,
       "fill((address token,uint256 amount)[] orders,uint256 fee,address feeToken)",
+      {},
+      { maps: { tokens: { values: { [ALICE]: USDC } } } },
     );
 
     expect(result).toEqual({
@@ -421,11 +432,11 @@ describe("buildInputFields", () => {
               params: {
                 tokenPath: "orders.[].token",
                 chainIdPath: "@.chainId",
+                // The key is another input: the entries, with the key path.
                 token: {
-                  map: "$.metadata.maps.tokens",
                   keyPath: "orders.[].token",
+                  values: { [ALICE]: USDC },
                 },
-                collection: { map: "$.metadata.maps.tokens", keyPath: "@.to" },
                 message: "token",
               },
             },
@@ -445,6 +456,237 @@ describe("buildInputFields", () => {
     // The descriptor is not changed.
     expect(fieldSpec.params.tokenPath).toBe("#.token");
     expect(fieldSpec.params.token.keyPath).toBe("token");
+  });
+
+  it("resolves every $.metadata value in the params", () => {
+    const result = fieldsOf(
+      {
+        fields: [
+          {
+            path: "amount",
+            label: "Amount",
+            format: "tokenAmount",
+            params: {
+              tokenPath: "$.metadata.constants.token",
+              nativeCurrencyAddress: ["$.metadata.constants.eth", ALICE],
+              threshold: "$.metadata.constants.max",
+              message: "All",
+            },
+          },
+          {
+            path: "mode",
+            label: "Mode",
+            format: "enum",
+            params: { $ref: "$.metadata.enums.mode" },
+          },
+          {
+            path: "to",
+            label: "To",
+            format: "addressName",
+            params: { senderAddress: "$.metadata.constants.eth" },
+          },
+        ],
+      },
+      "f(uint256 amount,uint256 mode,address to)",
+      {},
+      {
+        constants: { token: USDC, eth: ETH, max: "0xff" },
+        enums: { mode: { "1": "stable", "2": "variable" } },
+      },
+    );
+
+    expect(result).toEqual({
+      fields: [
+        {
+          label: "Amount",
+          path: "amount",
+          type: "uint256",
+          format: "tokenAmount",
+          params: {
+            // A path param with a constant becomes the constant param.
+            token: USDC,
+            nativeCurrencyAddress: [ETH, ALICE],
+            threshold: "0xff",
+            message: "All",
+          },
+        },
+        {
+          label: "Mode",
+          path: "mode",
+          type: "uint256",
+          format: "enum",
+          options: { "1": "stable", "2": "variable" },
+        },
+        {
+          label: "To",
+          path: "to",
+          type: "address",
+          format: "addressName",
+          params: { senderAddress: ETH },
+        },
+      ],
+    });
+  });
+
+  it("resolves a map reference whose key is the chain ID or the contract address", () => {
+    const spec: DescriptorFormatSpec = {
+      fields: [
+        {
+          path: "amount",
+          label: "Amount",
+          format: "tokenAmount",
+          params: {
+            token: { map: "$.metadata.maps.byChain", keyPath: "@.chainId" },
+            chainId: { map: "$.metadata.maps.chainOf", keyPath: "@.to" },
+          },
+        },
+      ],
+    };
+    const metadata: DescriptorMetadata = {
+      maps: {
+        byChain: { values: { "1": USDC, "10": ETH } },
+        // A checksummed key matches the lowercase address.
+        chainOf: { values: { [USDC]: 8453 } },
+      },
+    };
+    const signature = "f(uint256 amount)";
+
+    expect(
+      fieldsOf(spec, signature, {}, metadata, {
+        chainId: 10,
+        to: USDC.toLowerCase(),
+      }),
+    ).toEqual({
+      fields: [
+        {
+          label: "Amount",
+          path: "amount",
+          type: "uint256",
+          format: "tokenAmount",
+          params: { token: ETH, chainId: 8453 },
+        },
+      ],
+    });
+
+    // A chain without an entry makes the descriptor invalid for the function.
+    expect(
+      fieldsOf(spec, signature, {}, metadata, {
+        chainId: 5,
+        to: USDC.toLowerCase(),
+      }),
+    ).toEqual({
+      warnings: [
+        {
+          code: "INVALID_DESCRIPTOR",
+          message:
+            "Cannot resolve '$.metadata.maps.byChain (key '5')' of param 'token' of field 'Amount'",
+        },
+      ],
+    });
+  });
+
+  it("returns INVALID_DESCRIPTOR for a reference that does not resolve", () => {
+    const signature = "f(uint256 amount)";
+    const invalid = (params: object, reference: string, name: string) => {
+      expect(
+        fieldsOf(
+          { fields: [{ path: "amount", format: "raw", params }] },
+          signature,
+          {},
+          { constants: { token: USDC } },
+        ),
+      ).toEqual({
+        warnings: [
+          {
+            code: "INVALID_DESCRIPTOR",
+            message: `Cannot resolve '${reference}' of param '${name}' of field 'amount'`,
+          },
+        ],
+      });
+    };
+
+    invalid(
+      { token: "$.metadata.constants.missing" },
+      "$.metadata.constants.missing",
+      "token",
+    );
+    invalid(
+      { nativeCurrencyAddress: [USDC, "$.metadata.constants.missing"] },
+      "$.metadata.constants.missing",
+      "nativeCurrencyAddress",
+    );
+    invalid(
+      { $ref: "$.metadata.enums.missing" },
+      "$.metadata.enums.missing",
+      "$ref",
+    );
+    invalid(
+      { token: { map: "$.metadata.maps.missing", keyPath: "amount" } },
+      "$.metadata.maps.missing",
+      "token",
+    );
+  });
+
+  it("drops a field that has another field inside it, in any order", () => {
+    const signature =
+      "f(((address token0,address token1) key,uint96 limit)[] route,(uint256 fee,address to) order,uint256 a,uint256 ab)";
+    const result = fieldsOf(
+      {
+        fields: [
+          // The parent after its components (the registry pattern).
+          { path: "route.[].key.token0", label: "Token 0", format: "raw" },
+          { path: "route.[]", label: "Route", visible: "never" },
+          // The parent before its component.
+          { path: "order", label: "Order", format: "raw" },
+          { path: "order.fee", label: "Fee", format: "raw" },
+          // Not inside each other: only the name starts the same.
+          { path: "a", label: "A", format: "raw" },
+          { path: "ab", label: "AB", format: "raw" },
+        ],
+      },
+      signature,
+    );
+
+    expect(result).toEqual({
+      fields: [
+        {
+          label: "Token 0",
+          path: "route.[].key.token0",
+          type: "address",
+          format: "raw",
+        },
+        { label: "Fee", path: "order.fee", type: "uint256", format: "raw" },
+        { label: "A", path: "a", type: "uint256", format: "raw" },
+        { label: "AB", path: "ab", type: "uint256", format: "raw" },
+        // The parts of the dropped fields that no field covers.
+        { label: "token1", path: "route.[].key.token1", type: "address" },
+        { label: "limit", path: "route.[].limit", type: "uint96" },
+        { label: "to", path: "order.to", type: "address" },
+      ],
+    });
+  });
+
+  it("drops the containing fields of a chain and a group that loses all its fields", () => {
+    const result = fieldsOf(
+      {
+        fields: [
+          { path: "#.s", label: "S", fields: [{ path: "order" }] },
+          { path: "s", label: "Whole" },
+          { path: "s.order.fee", label: "Fee" },
+          { path: "s.orders", label: "Orders" },
+          { path: "s.orders.[]", label: "Order" },
+        ],
+      },
+      "f(((uint256 fee,address to) order,uint256[] orders) s)",
+    );
+
+    expect(result).toEqual({
+      fields: [
+        { label: "Fee", path: "s.order.fee", type: "uint256" },
+        { label: "Order", path: "s.orders.[]", type: "uint256" },
+        { label: "to", path: "s.order.to", type: "address" },
+      ],
+    });
   });
 
   it("uses the ABI name as label for unlabeled fields in a group, hidden ones included", () => {

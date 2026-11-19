@@ -7,6 +7,7 @@ import type {
   ChainClient,
   DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
+  DescriptorMapReference,
   DisplayModel,
   FormatOptions,
   Warning,
@@ -27,6 +28,33 @@ export interface BuilderOptions {
    */
   chainClient?: ChainClient;
 }
+
+/**
+ * A `metadata.maps` lookup that depends on a value the builder does not know:
+ * another input, or `@.from` / `@.value`. The param value is
+ * `values[<value at keyPath>]`. Compare keys case-insensitively: address keys
+ * can be checksummed.
+ */
+export interface InputMapReference {
+  /** Path of the key value. Absolute like {@link InputField.path}. */
+  keyPath: string;
+  /** The entries of the map. */
+  values: Record<string, string | number | boolean>;
+}
+
+/**
+ * The format params of an {@link InputField}: the descriptor params with every
+ * `$.metadata` value resolved. It has no `$ref`; the entries of an enum are in
+ * {@link InputField.options}. A map reference is the constant it selects, or
+ * an {@link InputMapReference} when its key is not known yet.
+ */
+export type InputFieldParams = {
+  [K in Exclude<keyof DescriptorFieldFormatParams, "$ref">]?:
+    | Exclude<DescriptorFieldFormatParams[K], DescriptorMapReference>
+    | (DescriptorMapReference extends DescriptorFieldFormatParams[K]
+        ? InputMapReference
+        : never);
+};
 
 /**
  * One input of an {@link InputModel}, from the `builder` entry point
@@ -59,12 +87,18 @@ export interface InputField {
   format?: DescriptorFieldFormatType;
 
   /**
-   * Descriptor format params, after the `$ref` merge. Path params (keys that
-   * end in `Path`, and the `keyPath` of a map reference) are absolute like
-   * `path`: `#.` stripped, group prefix applied. `@.` and `$.` paths are
-   * unchanged. `metadata.maps` references are not resolved.
+   * Descriptor format params, with all descriptor references resolved: no
+   * value starts with `$.`. Path params (keys that end in `Path`, and the
+   * `keyPath` of an {@link InputMapReference}) are absolute like `path`: `#.`
+   * stripped, group prefix applied. `@.` paths are unchanged.
    */
-  params?: DescriptorFieldFormatParams;
+  params?: InputFieldParams;
+
+  /**
+   * The entries of an `enum` format, from the descriptor metadata: raw value
+   * to label. Use them as the options of the input.
+   */
+  options?: Record<string, string>;
 
   /**
    * Value of a constant field (descriptor `value`, or a `$.metadata` path),

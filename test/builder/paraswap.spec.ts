@@ -25,11 +25,11 @@ describe("builder — Paraswap AugustusSwapper v6.2", () => {
     info: { url: "https://www.velora.xyz/" },
   };
   const NATIVE_CURRENCY = [
-    "$.metadata.constants.addressAsEth",
-    "$.metadata.constants.addressAsNull",
+    "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    "0x0000000000000000000000000000000000000000",
   ];
   const BENEFICIARY_PARAMS = {
-    senderAddress: "$.metadata.constants.addressAsNull",
+    senderAddress: "0x0000000000000000000000000000000000000000",
   };
 
   /** Get the input model of one function from the descriptor. */

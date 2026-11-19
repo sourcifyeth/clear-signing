@@ -36,6 +36,7 @@ import {
   isCalldataDescriptorBoundTo,
   isFieldGroup,
   mergeDefinitions,
+  resolveMetadataEntry,
   resolveMetadataValue,
   stripStructuredRootPrefix,
 } from "./descriptor.js";
@@ -54,6 +55,7 @@ import type {
   BuilderOptions,
   InputField,
   InputFieldGroup,
+  InputFieldParams,
   InputModel,
   InputModels,
 } from "./builder.types.js";
@@ -63,6 +65,7 @@ import type {
   DescriptorFieldFormatParams,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
+  DescriptorMapReference,
   DescriptorMetadata,
   Warning,
 } from "./types.js";
@@ -131,6 +134,7 @@ export async function getCalldataInputModels(
         descriptor.display?.definitions ?? {},
         descriptor.metadata,
         nameInputs(fn.inputs),
+        { chainId, to },
       );
       if ("warnings" in result) {
         warnings.push(...formatWarnings(fn.key, result.warnings));
@@ -168,11 +172,13 @@ export function buildInputFields(
   definitions: Record<string, DescriptorFieldFormat>,
   metadata: DescriptorMetadata | undefined,
   inputs: FunctionInput[],
+  container?: Container,
 ): { fields: (InputField | InputFieldGroup)[] } | { warnings: Warning[] } {
   const ctx: FieldsContext = {
     definitions,
     metadata,
     inputs,
+    container,
     covered: new Set(),
   };
   const fields: (InputField | InputFieldGroup)[] = [];
@@ -189,14 +195,55 @@ export function buildInputFields(
     }
   }
 
-  appendUncovered(inputs, "", ctx, fields);
-  return { fields };
+  const specific = dropContainingFields(fields, ctx.covered);
+  appendUncovered(inputs, "", ctx, specific);
+  return { fields: specific };
+}
+
+/**
+ * Drop each field that has another field inside it, e.g. `order` when
+ * `order.fee` is a field too. The inner fields have the better labels and
+ * formats, and the parts that no field covers are appended later. A group
+ * that loses all its fields is dropped too.
+ */
+function dropContainingFields(
+  fields: (InputField | InputFieldGroup)[],
+  covered: Set<string>,
+): (InputField | InputFieldGroup)[] {
+  const paths = [...covered];
+  const containing = new Set(
+    paths.filter((path) => paths.some((p) => p.startsWith(`${path}.`))),
+  );
+  if (containing.size === 0) return fields;
+
+  for (const path of containing) covered.delete(path);
+  const keep = (field: InputField) =>
+    field.path === undefined || !containing.has(field.path);
+
+  const result: (InputField | InputFieldGroup)[] = [];
+  for (const item of fields) {
+    if (!("fields" in item)) {
+      if (keep(item)) result.push(item);
+      continue;
+    }
+    const kept = item.fields.filter(keep);
+    if (kept.length === item.fields.length) result.push(item);
+    else if (kept.length > 0) result.push({ ...item, fields: kept });
+  }
+  return result;
+}
+
+/** The container values that are known before the user gives any input. */
+interface Container {
+  chainId: number;
+  to: string;
 }
 
 interface FieldsContext {
   definitions: Record<string, DescriptorFieldFormat>;
   metadata: DescriptorMetadata | undefined;
   inputs: FunctionInput[];
+  container: Container | undefined;
   /** Absolute input paths that a descriptor field covers. */
   covered: Set<string>;
 }
@@ -262,11 +309,18 @@ function buildField(
     };
   }
 
+  const resolved = resolveParams(
+    merged.params,
+    prefix,
+    ctx,
+    merged.label ?? merged.path ?? "",
+  );
+  if ("warning" in resolved) return { warnings: [resolved.warning] };
+
   const display = {
     ...(merged.format !== undefined && { format: merged.format }),
-    ...(merged.params !== undefined && {
-      params: absoluteParams(merged.params, prefix),
-    }),
+    ...(resolved.params !== undefined && { params: resolved.params }),
+    ...(resolved.options !== undefined && { options: resolved.options }),
     ...(merged.visible === "never" && { hidden: true }),
   };
 
@@ -341,36 +395,133 @@ function absolutePath(path: string, prefix: string | undefined): string {
 }
 
 /**
- * Make the path params absolute like the field path: every string param
- * whose key ends in `Path`, and the `keyPath` of every map reference.
- * Container (`@.`) and metadata (`$.`) paths stay as they are. Returns a copy.
+ * Resolve the params of a field, so that no descriptor reference is left:
+ * - a `$.metadata` value becomes its constant (also inside an array, and
+ *   under a `...Path` key, which then becomes the plain key);
+ * - `$ref` becomes `options`, the entries of the enum;
+ * - a map reference becomes the constant it selects when its key is the
+ *   chain ID or the contract address, else its entries with the key path;
+ * - other path params become absolute like the field path.
+ *
+ * A reference that does not resolve makes the descriptor invalid for this
+ * function.
  */
-function absoluteParams(
-  params: DescriptorFieldFormatParams,
+function resolveParams(
+  params: DescriptorFieldFormatParams | undefined,
   prefix: string | undefined,
-): DescriptorFieldFormatParams {
-  const isStructuredPath = (value: string) =>
-    !value.startsWith("@.") && !value.startsWith("$.");
-  const result: Record<string, unknown> = { ...params };
-  for (const [key, value] of Object.entries(params)) {
-    if (
-      typeof value === "string" &&
-      key.endsWith("Path") &&
-      isStructuredPath(value)
-    ) {
-      result[key] = absolutePath(value, prefix);
-    } else if (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as { keyPath?: unknown }).keyPath === "string"
-    ) {
-      const keyPath = (value as { keyPath: string }).keyPath;
-      if (isStructuredPath(keyPath)) {
-        result[key] = { ...value, keyPath: absolutePath(keyPath, prefix) };
-      }
+  ctx: FieldsContext,
+  fieldName: string,
+):
+  | { params?: InputFieldParams; options?: Record<string, string> }
+  | { warning: Warning } {
+  if (params === undefined) return {};
+
+  const invalid = (reference: string, name: string) => ({
+    warning: warn(
+      "INVALID_DESCRIPTOR",
+      `Cannot resolve '${reference}' of param '${name}' of field '${fieldName}'`,
+    ),
+  });
+  const resolveConstant = (value: unknown): unknown =>
+    typeof value === "string" && value.startsWith("$.")
+      ? resolveMetadataValue(ctx.metadata, value)
+      : value;
+
+  const result: Record<string, unknown> = {};
+  let options: Record<string, string> | undefined;
+
+  for (const [name, value] of Object.entries(params)) {
+    if (name === "$ref") {
+      const entries = resolveConstant(value);
+      if (!isRecord(entries)) return invalid(String(value), name);
+      options = Object.fromEntries(
+        Object.entries(entries).map(([key, label]) => [key, String(label)]),
+      );
+      continue;
     }
+
+    if (isMapReference(value)) {
+      const entries = resolveMetadataValue(ctx.metadata, `${value.map}.values`);
+      if (!isRecord(entries)) return invalid(value.map, name);
+      const key = containerKey(value.keyPath, ctx.container);
+      if (key === undefined) {
+        result[name] = {
+          keyPath: absoluteParamPath(value.keyPath, prefix),
+          values: entries,
+        };
+        continue;
+      }
+      const constant = resolveMetadataEntry(
+        ctx.metadata,
+        `${value.map}.values`,
+        key,
+      );
+      if (constant === undefined) {
+        return invalid(`${value.map} (key '${key}')`, name);
+      }
+      result[name] = constant;
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      const items = value.map(resolveConstant);
+      const missing = items.indexOf(undefined);
+      if (missing !== -1) return invalid(String(value[missing]), name);
+      result[name] = items;
+      continue;
+    }
+
+    if (typeof value === "string" && value.startsWith("$.")) {
+      const constant = resolveConstant(value);
+      if (constant === undefined) return invalid(value, name);
+      // A path param with a constant is the constant param.
+      result[name.endsWith("Path") ? name.slice(0, -4) : name] = constant;
+      continue;
+    }
+
+    result[name] =
+      typeof value === "string" && name.endsWith("Path")
+        ? absoluteParamPath(value, prefix)
+        : value;
   }
-  return result as DescriptorFieldFormatParams;
+
+  return {
+    ...(Object.keys(result).length > 0 && {
+      params: result as InputFieldParams,
+    }),
+    ...(options !== undefined && { options }),
+  };
+}
+
+/** Make a path param absolute. A container (`@.`) path stays as it is. */
+function absoluteParamPath(path: string, prefix: string | undefined): string {
+  return path.startsWith("@.") ? path : absolutePath(path, prefix);
+}
+
+/**
+ * The map key of a container key path that is known now: the chain ID or
+ * the contract address. Undefined for a key that needs user input.
+ */
+function containerKey(
+  keyPath: string,
+  container: Container | undefined,
+): string | undefined {
+  if (!container) return undefined;
+  if (keyPath === "@.chainId") return String(container.chainId);
+  if (keyPath === "@.to") return container.to.toLowerCase();
+  return undefined;
+}
+
+function isMapReference(value: unknown): value is DescriptorMapReference {
+  return (
+    isRecord(value) &&
+    typeof value.map === "string" &&
+    typeof value.keyPath === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasFixedIndex(path: string): boolean {

@@ -124,7 +124,15 @@ function renderInput(field: InputField) {
 - `format` and `params` are the descriptor values. They are hints for a
   better input control. Path params (e.g. `tokenPath`) are absolute like
   `path`, so they name another input of the same `values` object.
-  `metadata.maps` references in `params` are not resolved.
+- The model has no descriptor references. Every `$.metadata` value in
+  `params` is resolved to its constant: a `token` param that names
+  `$.metadata.constants.usdc` holds the token address.
+- `options` holds the entries of an `enum` format (raw value → label). Use
+  them for a select input, and put the chosen raw value into `values`.
+- A `metadata.maps` reference in `params` is resolved to its constant when the
+  key is the chain ID or the contract address. When the key is another input
+  (or `@.from` / `@.value`), the param is `{ keyPath, values }`: look up the
+  value at `keyPath` in `values`. Compare the keys case-insensitively.
 - A **constant** field (`constant` set, no `path`) shows a fixed value from the
   descriptor. It takes no input. A constant without a label and without a
   `$.metadata` path has the label `""`.
@@ -263,9 +271,19 @@ interface InputField {
   path?: string; // absent for constants
   type?: string; // set on every field with a path
   format?: DescriptorFieldFormatType;
-  params?: DescriptorFieldFormatParams;
+  params?: InputFieldParams;
+  options?: Record<string, string>; // entries of an enum: raw value → label
   constant?: string | number | boolean;
   hidden?: boolean;
+}
+
+// The descriptor params, without `$ref`, with every `$.metadata` value
+// resolved. A map reference is its constant, or an InputMapReference.
+type InputFieldParams = { ... };
+
+interface InputMapReference {
+  keyPath: string; // absolute path of the key value
+  values: Record<string, string | number | boolean>; // the entries of the map
 }
 
 interface InputFieldGroup {
@@ -284,22 +302,25 @@ interface BuildInputError {
 
 ### How fields are treated
 
-| Descriptor field                                                     | Input model                                                                 |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `path` names an argument (`#.` prefix optional)                      | input field with `path` and `type`                                          |
-| `value` set, or `path` starts with `$.`                              | constant field, `constant` resolved from the descriptor metadata, no `path` |
-| `path: "@.value"`                                                    | input field with `path: "@.value"` and `type: "uint256"`                    |
-| other `@.` paths (`@.from`, `@.to`, `@.chainId`)                     | left out: the container sets them                                           |
-| `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered       |
-| `path` that names no argument (e.g. a typo)                          | left out. The inputs are appended as uncovered                              |
-| path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                   |
-| a second field with the same `path`                                  | left out: one input for each path. The first field is the input             |
-| `visible: "never"`                                                   | input field with `hidden: true`                                             |
-| other `visible` rules (`ifNotIn`, `mustMatch`, ...)                  | ignored: they depend on the value                                           |
-| no `label`                                                           | the ABI parameter name (the last name in `path`) is the label               |
-| `$ref`                                                               | merged with its definition first                                            |
-| field group                                                          | `InputFieldGroup`; child paths get the group prefix, as in `format()`       |
-| nested field group                                                   | the function gets no model: `UNSUPPORTED_NESTED_FIELD_GROUP` warning        |
+| Descriptor field                                                     | Input model                                                                           |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `path` names an argument (`#.` prefix optional)                      | input field with `path` and `type`                                                    |
+| `value` set, or `path` starts with `$.`                              | constant field, `constant` resolved from the descriptor metadata, no `path`           |
+| `path: "@.value"`                                                    | input field with `path: "@.value"` and `type: "uint256"`                              |
+| other `@.` paths (`@.from`, `@.to`, `@.chainId`)                     | left out: the container sets them                                                     |
+| `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered                 |
+| `path` that names no argument (e.g. a typo)                          | left out. The inputs are appended as uncovered                                        |
+| path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                             |
+| a second field with the same `path`                                  | left out: one input for each path. The first field is the input                       |
+| a field with another field inside it (`order` and `order.fee`)       | left out, in any order. The inner fields are the inputs; uncovered parts are appended |
+| `$.metadata` value in `params`                                       | resolved to its constant. `$ref` of an enum becomes `options`                         |
+| map reference in `params`                                            | its constant for the keys `@.chainId` / `@.to`; else `{ keyPath, values }`            |
+| `visible: "never"`                                                   | input field with `hidden: true`                                                       |
+| other `visible` rules (`ifNotIn`, `mustMatch`, ...)                  | ignored: they depend on the value                                                     |
+| no `label`                                                           | the ABI parameter name (the last name in `path`) is the label                         |
+| `$ref`                                                               | merged with its definition first                                                      |
+| field group                                                          | `InputFieldGroup`; child paths get the group prefix, as in `format()`                 |
+| nested field group                                                   | the function gets no model: `UNSUPPORTED_NESTED_FIELD_GROUP` warning                  |
 
 After the descriptor fields, every input that no field covers is appended,
 with its name as label. An input with no covered path at, above or under it is
@@ -349,15 +370,16 @@ the descriptor or the formatting.
 
 `InputModels.warnings` uses the `WarningCode`s of `format()`:
 
-| Code                             | When                                                              |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `NO_DESCRIPTOR`                  | Nothing is indexed for the address (and no trusted token matches) |
-| `NO_TRUSTED_ATTESTATION`         | The attestation policy rejects the descriptor                     |
-| `ATTESTATION_OPTIONS_INCOMPLETE` | A policy is set without `chainClient` or `fetchAttestation`       |
-| `CYCLIC_INCLUDES`                | The `includes` chain of the descriptor is cyclic                  |
-| `DESCRIPTOR_FETCH_ERROR`         | Fetching the descriptor (or the revocation read) failed           |
-| `DEPLOYMENT_MISMATCH`            | The descriptor is not bound to the chain and address              |
-| `NO_FORMAT_MATCH`                | The descriptor has no function format                             |
-| `DEFINITIONS_RESOLUTION_ERROR`   | A `$ref` cannot be resolved; that function gets no model          |
-| `UNSUPPORTED_NESTED_FIELD_GROUP` | A nested field group; that function gets no model                 |
-| `UNEXPECTED_LIB_ERROR`           | A bug in the library                                              |
+| Code                             | When                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `NO_DESCRIPTOR`                  | Nothing is indexed for the address (and no trusted token matches)                         |
+| `NO_TRUSTED_ATTESTATION`         | The attestation policy rejects the descriptor                                             |
+| `ATTESTATION_OPTIONS_INCOMPLETE` | A policy is set without `chainClient` or `fetchAttestation`                               |
+| `CYCLIC_INCLUDES`                | The `includes` chain of the descriptor is cyclic                                          |
+| `DESCRIPTOR_FETCH_ERROR`         | Fetching the descriptor (or the revocation read) failed                                   |
+| `DEPLOYMENT_MISMATCH`            | The descriptor is not bound to the chain and address                                      |
+| `NO_FORMAT_MATCH`                | The descriptor has no function format                                                     |
+| `DEFINITIONS_RESOLUTION_ERROR`   | A `$ref` cannot be resolved; that function gets no model                                  |
+| `UNSUPPORTED_NESTED_FIELD_GROUP` | A nested field group; that function gets no model                                         |
+| `INVALID_DESCRIPTOR`             | A `$.metadata` or map reference in `params` does not resolve; that function gets no model |
+| `UNEXPECTED_LIB_ERROR`           | A bug in the library                                                                      |

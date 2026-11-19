@@ -398,7 +398,8 @@ it that way: builder-only logic stays in `builder.ts`, so it never lands in a
 shared chunk of the ESM build. From shared modules `builder.ts` imports only what
 the main entry uses anyway (`calldata.ts`: signature parsing, `functionFormats`;
 `resolver.ts`: `resolveCalldataDescriptor`). The builder types (`BuilderOptions`,
-`InputModel`, `InputField`, `InputFieldGroup`, `InputModels`, `BuildInputError`,
+`InputModel`, `InputField`, `InputFieldGroup`, `InputFieldParams`, `InputMapReference`,
+`InputModels`, `BuildInputError`,
 `BuildInputErrorCode`) live in `builder.types.ts`, not in `types.ts`, so the main
 entry does not expose them. `builder.ts` re-exports them.
 
@@ -430,11 +431,24 @@ the result always has `models` or `warnings`.
   `(address token,uint256 amount)[]`). A later field with the same path is left
   out: a descriptor can show one input in more than one way (alternative
   `visible` rules), but the model has one input for each path.
+- After all fields: `dropContainingFields` leaves out each field that has
+  another field inside it (`order` when `order.fee` is a field), in any order.
+  Descriptors often list the components of a tuple and then the parent with
+  `visible: "never"`. The inner fields are the inputs; the uncovered parts are
+  appended. A group that loses all its fields is dropped.
 - `visible: "never"` → `hidden: true`. No label → the last name segment of the
-  path. Path params are absolute like `path`: every string param whose key ends
-  in `Path` and every map reference `keyPath`, except `@.` / `$.` values, get `#.`
-  stripped and the group prefix applied (on a copy). Map references are not
-  resolved.
+  path.
+- Params (`resolveParams`, on a copy): the model has **no `$` reference**.
+  - A `$.metadata` string (also inside an array) becomes its constant. Under a
+    `...Path` key it moves to the plain key (`tokenPath` → `token`).
+  - `$ref` (enum) becomes `InputField.options`, the entries of the enum.
+  - A map reference becomes its constant when the key path is `@.chainId` or
+    `@.to` (known from the arguments of `getCalldataInputModels`; the lookup is
+    `resolveMetadataEntry`, case-insensitive). Else it becomes an
+    `InputMapReference` `{ keyPath, values }`.
+  - Other path params are absolute like `path`; `@.` paths stay.
+  - A reference that does not resolve gives `INVALID_DESCRIPTOR` and no model
+    for that function. `InputFieldParams` is the type of the result.
 
 Appending: an input with no covered path at, above or under it is appended
 whole; a partly covered tuple / array is recursed. Unnamed inputs are
@@ -742,7 +756,7 @@ Tests live in `test/`. Current test files:
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators, encryption, `metadata.maps` references)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
 - `test/builder.spec.ts` — unit tests for `builder.ts` (unit tests only): `buildInputFields` field classification (`$ref`, constants, `@.value`, slices, fixed indices, `hidden`, group prefixes, partial tuple coverage, appended inputs, definition errors, nested groups), `getCalldataInputModels` warnings with an in-memory resolver, `buildCalldata` known-answer vectors and every `BuildInputErrorCode`
-- `test/builder/*.spec.ts` — builder end-to-end tests, one file per descriptor owner or topic. They read the descriptors in `test/registry-cases/<owner>/` (and `test/attestations/`) and assert the input models and the built calldata: `paraswap.spec.ts` (byte slices, tuple array, struct group), `lifi.spec.ts` (`.[]` and fixed-index paths), `trusted-tokens.spec.ts` (bundled ERC-20), `attestations.spec.ts` (attestation policy)
+- `test/builder/*.spec.ts` — builder end-to-end tests, one file per descriptor owner or topic. They read the descriptors in `test/registry-cases/<owner>/` (and `test/attestations/`) and assert the input models and the built calldata: `paraswap.spec.ts` (byte slices, tuple array, struct group), `lifi.spec.ts` (`.[]` and fixed-index paths), `ekubo.spec.ts` (components and the hidden parent of a tuple array), `aave-lpv2.spec.ts` (enum entries and a metadata constant in params), `trusted-tokens.spec.ts` (bundled ERC-20), `attestations.spec.ts` (attestation policy)
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/erc7730-test-cases/example-maps.spec.ts` / `example-maps-pools.spec.ts` — `metadata.maps` references keyed on `@.chainId`; the spec files' `underlyingToken` addresses are 21 bytes, so that field asserts `FORMAT_PARAM_RESOLUTION_ERROR` as is (spec files are never edited)
