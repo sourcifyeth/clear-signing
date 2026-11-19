@@ -415,7 +415,8 @@ in `builder.ts`, so it never lands in a shared chunk of the ESM build. `builder.
 imports only existing internals from shared modules (`calldata.ts`: signature
 parsing, `functionFormats`; `resolver.ts`: `createResolver`,
 `resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning`), which the
-main entry uses anyway. The builder types (`BuilderOptions`, `InputModel`, `InputField`,
+main entry uses anyway. The builder types (`BuilderOptions`, `InputModel`, `CalldataInputModel`,
+`TypedDataInputModel`, `BaseInputModel`, `InputField`,
 `InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
 `builder.types.ts`, not in `types.ts`, so the main entry does not expose them.
 `builder.ts` re-exports them.
@@ -425,7 +426,9 @@ builder formats nothing, so it has no `externalDataProvider`. The options hold
 `descriptorResolverOptions` (typed from `FormatOptions`) and `chainClient`, which
 only the attestation revocation read uses.
 
-**Input model.** One `InputModel` per `display.formats` key. Its `fields` are the
+**Input model.** `InputModel = CalldataInputModel | TypedDataInputModel`. Both extend
+`BaseInputModel` (`signature`, `metadata`, `intent`, `fields`); the calldata model adds
+`selector`, the typed-data model adds `domain`. One model per `display.formats` key. Its `fields` are the
 descriptor fields in display order (`buildInputFields`), then the ABI inputs /
 EIP-712 members that no field covers, labeled with their name. For EIP-712 the
 schema is parsed from the `encodeType` key; a legacy bare primary type key gives

@@ -64,8 +64,11 @@ import type {
   BuilderOptions,
   InputField,
   InputFieldGroup,
+  BaseInputModel,
+  CalldataInputModel,
   InputModel,
   InputModels,
+  TypedDataInputModel,
 } from "./builder.types.js";
 import type {
   ChainClient,
@@ -115,7 +118,7 @@ export async function getCalldataInputModels(
   chainId: number,
   to: string,
   opts?: BuilderOptions,
-): Promise<InputModels> {
+): Promise<InputModels<CalldataInputModel>> {
   try {
     let descriptor: Descriptor;
     try {
@@ -142,7 +145,7 @@ export async function getCalldataInputModels(
       };
     }
 
-    const models: InputModel[] = [];
+    const models: CalldataInputModel[] = [];
     const warnings: Warning[] = [];
     for (const fn of functionFormats(descriptor)) {
       const result = buildInputFields(
@@ -170,7 +173,7 @@ export async function getCalldataInputModels(
 
 /**
  * Resolves every EIP-712 descriptor indexed for `(chainId,
- * verifyingContract)` and returns one {@link InputModel} per `encodeType` key
+ * verifyingContract)` and returns one {@link CalldataInputModel} per `encodeType` key
  * of their `display.formats`. The EIP-712 schema comes from that key.
  *
  * A legacy key that is only a primary type name carries no schema. It gets no
@@ -181,7 +184,7 @@ export async function getTypedDataInputModels(
   chainId: number,
   verifyingContract: string,
   opts?: BuilderOptions,
-): Promise<InputModels> {
+): Promise<InputModels<TypedDataInputModel>> {
   try {
     if (!Number.isSafeInteger(chainId) || chainId < 0 || !verifyingContract) {
       return {
@@ -208,7 +211,7 @@ export async function getTypedDataInputModels(
       };
     }
 
-    const models: InputModel[] = [];
+    const models: TypedDataInputModel[] = [];
     const warnings: Warning[] = [];
     for (const { path, result } of results) {
       if ("warning" in result) {
@@ -747,7 +750,7 @@ function modelDomain(
 function modelInfo(
   descriptor: Descriptor,
   spec: DescriptorFormatSpec,
-): Pick<InputModel, "metadata" | "intent"> {
+): Pick<BaseInputModel, "metadata" | "intent"> {
   const meta = descriptor.metadata;
   return {
     ...(meta && {
@@ -761,7 +764,10 @@ function modelInfo(
   };
 }
 
-function inputModels(models: InputModel[], warnings: Warning[]): InputModels {
+function inputModels<M extends InputModel>(
+  models: M[],
+  warnings: Warning[],
+): InputModels<M> {
   return {
     ...(models.length > 0 && { models }),
     ...(warnings.length > 0 && { warnings }),
@@ -807,7 +813,7 @@ function unexpectedErrorWarning(error: unknown): Warning {
  * (selector and ABI-encoded arguments). Never throws.
  */
 export function buildCalldata(
-  model: InputModel,
+  model: CalldataInputModel,
   values: Record<string, unknown>,
 ): { data: string } | { errors: BuildInputError[] } {
   try {
@@ -850,7 +856,7 @@ export function buildCalldata(
  * throws.
  */
 export function buildTypedData(
-  model: InputModel,
+  model: TypedDataInputModel,
   account: string,
   values: Record<string, unknown>,
   domain?: TypedDataDomain,

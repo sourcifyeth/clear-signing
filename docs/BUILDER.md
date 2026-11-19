@@ -233,11 +233,11 @@ if ("errors" in result) {
 ### Functions
 
 ```typescript
-getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels>
-buildCalldata(model: InputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
+getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels<CalldataInputModel>>
+buildCalldata(model: CalldataInputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
 
-getTypedDataInputModels(chainId: number, verifyingContract: string, opts?: BuilderOptions): Promise<InputModels>
-buildTypedData(model: InputModel, account: string, values: Record<string, unknown>, domain?: TypedDataDomain): { typedData: TypedData } | { errors: BuildInputError[] }
+getTypedDataInputModels(chainId: number, verifyingContract: string, opts?: BuilderOptions): Promise<InputModels<TypedDataInputModel>>
+buildTypedData(model: TypedDataInputModel, account: string, values: Record<string, unknown>, domain?: TypedDataDomain): { typedData: TypedData } | { errors: BuildInputError[] }
 
 interface BuilderOptions {
   // Descriptor source, the same value as FormatOptions.descriptorResolverOptions.
@@ -253,15 +253,23 @@ synchronous, need no descriptor and never throw.
 ### Types
 
 ```typescript
-interface InputModels {
-  models?: InputModel[];
+interface InputModels<M extends InputModel = InputModel> {
+  models?: M[];
   warnings?: Warning[];
 }
 
-interface InputModel {
+type InputModel = CalldataInputModel | TypedDataInputModel;
+
+interface CalldataInputModel extends BaseInputModel {
+  selector: string; // 4-byte function selector as hex
+}
+
+interface TypedDataInputModel extends BaseInputModel {
+  domain: TypedDataDomain; // chainId, verifyingContract, and name / version / salt if declared
+}
+
+interface BaseInputModel {
   signature: string; // display.formats key: function signature or encodeType
-  selector?: string; // calldata only
-  domain?: TypedDataDomain; // EIP-712 only
   metadata?: {
     owner?: string;
     contractName?: string;

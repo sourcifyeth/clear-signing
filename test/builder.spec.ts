@@ -13,7 +13,11 @@ import {
 } from "../src/builder.js";
 import { parseFunctionSignatureKey } from "../src/calldata.js";
 import type { FunctionInput } from "../src/calldata.js";
-import type { BuilderOptions, InputModel } from "../src/builder.types.js";
+import type {
+  BuilderOptions,
+  CalldataInputModel,
+  TypedDataInputModel,
+} from "../src/builder.types.js";
 import type {
   Descriptor,
   DescriptorFormatSpec,
@@ -62,8 +66,17 @@ function memoryOpts(
   };
 }
 
-function calldataModel(signature: string): InputModel {
-  return { signature, fields: [] };
+function calldataModel(signature: string): CalldataInputModel {
+  const selector = parseFunctionSignatureKey(signature)?.selector;
+  return {
+    signature,
+    selector: selector ? bytesToHex(selector) : "",
+    fields: [],
+  };
+}
+
+function typedDataModel(signature: string): TypedDataInputModel {
+  return { signature, domain: {}, fields: [] };
 }
 
 function selectorHex(canonical: string): string {
@@ -1431,7 +1444,7 @@ describe("buildCalldata", () => {
 describe("buildTypedData", () => {
   const MAIL =
     "Mail(Person from,Person[] to,uint8 priority,string contents)Person(string name,address wallet)";
-  const model: InputModel = {
+  const model: TypedDataInputModel = {
     signature: MAIL,
     domain: { name: "Mailer", chainId: CHAIN_ID, verifyingContract: CONTRACT },
     fields: [],
@@ -1540,9 +1553,7 @@ describe("buildTypedData", () => {
   });
 
   it("returns INVALID_SIGNATURE for a key without a schema or an unknown member type", () => {
-    expect(
-      buildTypedData({ signature: "Mail", fields: [] }, ALICE, {}),
-    ).toEqual({
+    expect(buildTypedData(typedDataModel("Mail"), ALICE, {})).toEqual({
       errors: [
         {
           path: "",
@@ -1552,7 +1563,7 @@ describe("buildTypedData", () => {
       ],
     });
     expect(
-      buildTypedData({ signature: "Mail(Note note)", fields: [] }, ALICE, {
+      buildTypedData(typedDataModel("Mail(Note note)"), ALICE, {
         note: "hi",
       }),
     ).toEqual({
@@ -1568,7 +1579,7 @@ describe("buildTypedData", () => {
 
   it("rejects the calldata-only tuple type as an EIP-712 member type", () => {
     expect(
-      buildTypedData({ signature: "A(tuple a)", fields: [] }, ALICE, { a: {} }),
+      buildTypedData(typedDataModel("A(tuple a)"), ALICE, { a: {} }),
     ).toEqual({
       errors: [
         {
@@ -1582,7 +1593,7 @@ describe("buildTypedData", () => {
 
   it("rejects integer strings with whitespace, since the message is not changed", () => {
     expect(
-      buildTypedData({ signature: "A(uint256 n)", fields: [] }, ALICE, {
+      buildTypedData(typedDataModel("A(uint256 n)"), ALICE, {
         n: " 12 ",
       }),
     ).toEqual({
@@ -1594,10 +1605,7 @@ describe("buildTypedData", () => {
 
   it("looks up struct types as own properties only", () => {
     const built = buildTypedData(
-      {
-        signature: "Call(constructor c)constructor(address to)",
-        fields: [],
-      },
+      typedDataModel("Call(constructor c)constructor(address to)"),
       ALICE,
       { c: { to: BOB } },
     );
@@ -1607,7 +1615,7 @@ describe("buildTypedData", () => {
     ]);
 
     expect(
-      buildTypedData({ signature: "Call(toString x)", fields: [] }, ALICE, {
+      buildTypedData(typedDataModel("Call(toString x)"), ALICE, {
         x: "hi",
       }),
     ).toEqual({
@@ -1621,11 +1629,7 @@ describe("buildTypedData", () => {
     });
     // A message key that only exists on the prototype is missing.
     expect(
-      buildTypedData(
-        { signature: "Call(uint256 constructor)", fields: [] },
-        ALICE,
-        {},
-      ),
+      buildTypedData(typedDataModel("Call(uint256 constructor)"), ALICE, {}),
     ).toEqual({
       errors: [
         {
@@ -1639,11 +1643,9 @@ describe("buildTypedData", () => {
 
   it("parses nested and array struct references of the encodeType", () => {
     const result = buildTypedData(
-      {
-        signature:
-          "Batch(Order[2] orders,Meta meta)Asset(address token,uint256 amount)Meta(bytes32 id)Order(Asset[] assets,uint256 deadline)",
-        fields: [],
-      },
+      typedDataModel(
+        "Batch(Order[2] orders,Meta meta)Asset(address token,uint256 amount)Meta(bytes32 id)Order(Asset[] assets,uint256 deadline)",
+      ),
       ALICE,
       {
         orders: [

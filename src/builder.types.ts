@@ -91,24 +91,13 @@ export interface InputFieldGroup {
   fields: InputField[];
 }
 
-/**
- * The inputs of one function (calldata) or one primary type (EIP-712), in
- * descriptor display order. Pass it with the user input to `buildCalldata`
- * or `buildTypedData` from the `builder` entry point.
- */
-export interface InputModel {
+/** The properties that every {@link InputModel} has. */
+export interface BaseInputModel {
   /**
    * The `display.formats` key: the function signature (calldata) or the
    * EIP-712 `encodeType` string.
    */
   signature: string;
-  /** 4-byte function selector as hex. Calldata only. */
-  selector?: string;
-  /**
-   * EIP-712 only: `chainId` and `verifyingContract` of the request, plus
-   * `name`, `version` and `salt` when the descriptor declares them.
-   */
-  domain?: TypedDataDomain;
   metadata?: DisplayModel["metadata"];
   intent?: string | Record<string, string>;
   /**
@@ -118,9 +107,32 @@ export interface InputModel {
   fields: (InputField | InputFieldGroup)[];
 }
 
+/**
+ * The inputs of one function, in descriptor display order. Pass it with the
+ * user input to `buildCalldata`.
+ */
+export interface CalldataInputModel extends BaseInputModel {
+  /** 4-byte function selector as hex. */
+  selector: string;
+}
+
+/**
+ * The inputs of one EIP-712 primary type, in descriptor display order. Pass
+ * it with the user input to `buildTypedData`.
+ */
+export interface TypedDataInputModel extends BaseInputModel {
+  /**
+   * `chainId` and `verifyingContract` of the request, plus `name`, `version`
+   * and `salt` when the descriptor declares them.
+   */
+  domain: TypedDataDomain;
+}
+
+export type InputModel = CalldataInputModel | TypedDataInputModel;
+
 /** Result of `getCalldataInputModels` / `getTypedDataInputModels`. */
-export interface InputModels {
-  models?: InputModel[];
+export interface InputModels<M extends InputModel = InputModel> {
+  models?: M[];
   warnings?: Warning[];
 }
 
