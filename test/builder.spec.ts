@@ -655,6 +655,30 @@ describe("getCalldataInputModels", () => {
     });
   });
 
+  it("returns NO_FORMAT_MATCH when the descriptor has no function format", async () => {
+    const result = await getCalldataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        { calldataIndex: { [CAIP]: "vault.json" } },
+        {
+          "vault.json": {
+            ...descriptor,
+            display: { formats: { NotAFunction: { intent: "None" } } },
+          },
+        },
+      ),
+    );
+    expect(result).toEqual({
+      warnings: [
+        {
+          code: "NO_FORMAT_MATCH",
+          message: `Descriptor for chain ${CHAIN_ID} and address ${CONTRACT} has no function format`,
+        },
+      ],
+    });
+  });
+
   it("returns DESCRIPTOR_FETCH_ERROR when the descriptor fetch throws", async () => {
     const result = await getCalldataInputModels(
       CHAIN_ID,

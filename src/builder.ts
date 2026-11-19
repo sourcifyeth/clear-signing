@@ -143,6 +143,14 @@ export async function getCalldataInputModels(
         fields: result.fields,
       });
     }
+    if (models.length === 0 && warnings.length === 0) {
+      warnings.push(
+        warn(
+          "NO_FORMAT_MATCH",
+          `Descriptor for chain ${chainId} and address ${to} has no function format`,
+        ),
+      );
+    }
     return inputModels(models, warnings);
   } catch (error) {
     return { warnings: [unexpectedErrorWarning(error)] };

@@ -411,7 +411,8 @@ only the attestation revocation read uses.
 `signature` and `selector`. Its `fields` are the descriptor fields in display order
 (`buildInputFields`), then the ABI inputs that no field covers, labeled with their
 name. A format whose fields fail (`$ref` error, nested group) gives its warning and
-no model.
+no model. A descriptor without any function format gives `NO_FORMAT_MATCH`, so
+the result always has `models` or `warnings`.
 
 **Field classification** (in `buildInputFields`, after `mergeDefinitions`):
 

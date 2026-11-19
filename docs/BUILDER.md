@@ -357,6 +357,7 @@ the descriptor or the formatting.
 | `CYCLIC_INCLUDES`                | The `includes` chain of the descriptor is cyclic                  |
 | `DESCRIPTOR_FETCH_ERROR`         | Fetching the descriptor (or the revocation read) failed           |
 | `DEPLOYMENT_MISMATCH`            | The descriptor is not bound to the chain and address              |
+| `NO_FORMAT_MATCH`                | The descriptor has no function format                             |
 | `DEFINITIONS_RESOLUTION_ERROR`   | A `$ref` cannot be resolved; that function gets no model          |
 | `UNSUPPORTED_NESTED_FIELD_GROUP` | A nested field group; that function gets no model                 |
 | `UNEXPECTED_LIB_ERROR`           | A bug in the library                                              |
