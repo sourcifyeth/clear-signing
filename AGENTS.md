@@ -424,7 +424,9 @@ schema is parsed from the `encodeType` key; a legacy bare primary type key gives
 `NO_FORMAT_MATCH` and no model. `resolveTypedDataDescriptors` resolves each unique
 indexed path in parallel with its own try/catch, so one failing descriptor gives a
 `DESCRIPTOR_FETCH_ERROR` and the others keep their models. Every per-descriptor
-warning is prefixed with `Descriptor '<path>': `. Struct lookups use
+warning is prefixed with `Descriptor '<path>': `, unless its message already names
+the path. EIP-712 struct members are looked up on demand (`structComponents`), so a
+field path into a recursive type resolves. Struct lookups use
 `Object.hasOwn`, and the calldata-only `tuple` type is not accepted in EIP-712. A format whose fields fail (`$ref` error, nested
 group) gives its warning and no model.
 

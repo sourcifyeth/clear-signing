@@ -258,7 +258,8 @@ export async function getTypedDataInputModels(
           spec,
           descriptor.display?.definitions ?? {},
           descriptor.metadata,
-          structInputs(parsed.primaryType, parsed.types, new Set()),
+          structMembers(parsed.primaryType, parsed.types),
+          (node) => structComponents(node, parsed.types),
         );
         if ("warnings" in fields) {
           warnings.push(
@@ -340,7 +341,9 @@ function descriptorWarning(
   path: string | undefined,
   warning: Warning,
 ): Warning {
-  if (path === undefined) return warning;
+  if (path === undefined || warning.message.includes(`'${path}'`)) {
+    return warning;
+  }
   return warn(warning.code, `Descriptor '${path}': ${warning.message}`);
 }
 
@@ -355,11 +358,13 @@ export function buildInputFields(
   definitions: Record<string, DescriptorFieldFormat>,
   metadata: DescriptorMetadata | undefined,
   inputs: FunctionInput[],
+  componentsOf: ComponentsOf = (node) => node.components,
 ): { fields: (InputField | InputFieldGroup)[] } | { warnings: Warning[] } {
   const ctx: FieldsContext = {
     definitions,
     metadata,
     inputs,
+    componentsOf,
     covered: new Set(),
   };
   const fields: (InputField | InputFieldGroup)[] = [];
@@ -376,14 +381,18 @@ export function buildInputFields(
     }
   }
 
-  appendUncovered(inputs, "", ctx.covered, fields);
+  appendUncovered(inputs, "", ctx, fields);
   return { fields };
 }
+
+/** The members of a tuple or struct input, or of its array elements. */
+type ComponentsOf = (node: FunctionInput) => FunctionInput[] | undefined;
 
 interface FieldsContext {
   definitions: Record<string, DescriptorFieldFormat>;
   metadata: DescriptorMetadata | undefined;
   inputs: FunctionInput[];
+  componentsOf: ComponentsOf;
   /** Absolute input paths that a descriptor field covers. */
   covered: Set<string>;
 }
@@ -503,7 +512,7 @@ function buildField(
 
   // A path that names no input gets no field. Nothing is covered, so the
   // inputs it would reach are appended.
-  const node = findInput(ctx.inputs, path);
+  const node = findInput(ctx.inputs, path, ctx.componentsOf);
   if (!node) return { field: null };
 
   ctx.covered.add(path);
@@ -581,6 +590,7 @@ function elementInput(node: FunctionInput): FunctionInput | undefined {
 function findInput(
   inputs: FunctionInput[],
   path: string,
+  componentsOf: ComponentsOf,
 ): FunctionInput | undefined {
   let node: FunctionInput | undefined;
   let members: FunctionInput[] | undefined = inputs;
@@ -592,7 +602,7 @@ function findInput(
       node = members?.find((m) => m.name === segment);
       if (!node) return undefined;
     }
-    members = parseArrayType(node.type) ? undefined : node.components;
+    members = parseArrayType(node.type) ? undefined : componentsOf(node);
   }
   return node;
 }
@@ -615,14 +625,14 @@ function inputType(node: FunctionInput): string {
 function appendUncovered(
   inputs: FunctionInput[],
   prefix: string,
-  covered: Set<string>,
+  ctx: FieldsContext,
   out: (InputField | InputFieldGroup)[],
 ): void {
   for (const input of inputs) {
     appendUncoveredInput(
       input,
       prefix ? `${prefix}.${input.name}` : input.name,
-      covered,
+      ctx,
       out,
     );
   }
@@ -631,11 +641,11 @@ function appendUncovered(
 function appendUncoveredInput(
   input: FunctionInput,
   path: string,
-  covered: Set<string>,
+  ctx: FieldsContext,
   out: (InputField | InputFieldGroup)[],
 ): void {
   let partly = false;
-  for (const c of covered) {
+  for (const c of ctx.covered) {
     if (c === path || path.startsWith(`${c}.`)) return;
     if (c.startsWith(`${path}.`)) partly = true;
   }
@@ -645,10 +655,11 @@ function appendUncoveredInput(
   }
   const element = elementInput(input);
   if (element) {
-    appendUncoveredInput(element, `${path}.[]`, covered, out);
-  } else if (input.components) {
-    appendUncovered(input.components, path, covered, out);
+    appendUncoveredInput(element, `${path}.[]`, ctx, out);
+    return;
   }
+  const components = ctx.componentsOf(input);
+  if (components) appendUncovered(components, path, ctx, out);
 }
 
 /** Give each unnamed input the name `param<i>`, at every level. */
@@ -660,30 +671,25 @@ function nameInputs(inputs: FunctionInput[]): FunctionInput[] {
   }));
 }
 
-/**
- * Input nodes of an EIP-712 struct. A member whose base type is a struct gets
- * its members as components. `visiting` stops at cyclic types.
- */
-function structInputs(
+/** The members of an EIP-712 struct as input nodes, one level deep. */
+function structMembers(
   typeName: string,
   types: Record<string, TypeMember[]>,
-  visiting: Set<string>,
 ): FunctionInput[] {
-  visiting.add(typeName);
   const members = Object.hasOwn(types, typeName) ? types[typeName] : [];
-  const inputs = members.map((member): FunctionInput => {
-    const base = member.type.replace(/(\[\d*\])+$/, "");
-    if (Object.hasOwn(types, base) && !visiting.has(base)) {
-      return {
-        name: member.name,
-        type: member.type,
-        components: structInputs(base, types, visiting),
-      };
-    }
-    return { name: member.name, type: member.type };
-  });
-  visiting.delete(typeName);
-  return inputs;
+  return members.map((member) => ({ name: member.name, type: member.type }));
+}
+
+/**
+ * The members of a struct-typed EIP-712 node. The lookup is on demand, so a
+ * recursive type needs no cycle check.
+ */
+function structComponents(
+  node: FunctionInput,
+  types: Record<string, TypeMember[]>,
+): FunctionInput[] | undefined {
+  const base = node.type.replace(/(\[\d*\])+$/, "");
+  return Object.hasOwn(types, base) ? structMembers(base, types) : undefined;
 }
 
 /**

@@ -957,6 +957,62 @@ describe("getTypedDataInputModels", () => {
       ],
     });
   });
+
+  it("resolves a field path into a recursive struct type", async () => {
+    const TREE = "Mail(Tree tree)Tree(uint256 value,Tree[] children)";
+    const result = await getTypedDataInputModels(
+      CHAIN_ID,
+      CONTRACT,
+      memoryOpts(
+        {
+          typedDataIndex: {
+            [CAIP]: { Mail: [{ path: "tree.json", encodeTypeHashes: [] }] },
+          },
+        },
+        {
+          "tree.json": {
+            context: { eip712: { deployments } },
+            display: {
+              formats: {
+                [TREE]: {
+                  fields: [
+                    {
+                      path: "tree.children.[].value",
+                      label: "Child value",
+                      format: "raw",
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ),
+    );
+
+    expect(result).toEqual({
+      models: [
+        {
+          signature: TREE,
+          domain: { chainId: CHAIN_ID, verifyingContract: CONTRACT },
+          fields: [
+            {
+              label: "Child value",
+              path: "tree.children.[].value",
+              type: "uint256",
+              format: "raw",
+            },
+            { label: "value", path: "tree.value", type: "uint256" },
+            {
+              label: "children",
+              path: "tree.children.[].children",
+              type: "Tree[]",
+            },
+          ],
+        },
+      ],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
