@@ -180,7 +180,20 @@ docs/
    → returns DisplayModel
    ```
 
-3. **Input models and building (`builder.ts`):**
+3. **EIP-5792 batch formatting:**
+
+   ```
+   formatEip5792Batch(batch, opts?)
+   → for each call in batch.calls:
+       → skip with BATCH_VALUE_TRANSFER warning if call.data is absent
+       → skip with BATCH_CONTRACT_CREATION warning if call.to is absent
+       → format({ chainId, to, data, value, from }, opts)
+   → join interpolatedIntent strings with " and "
+       (or emit BATCH_INTERPOLATION_INCOMPLETE if any call lacks one)
+   → returns BatchDisplayModel
+   ```
+
+4. **Input models and building (`builder.ts`):**
 
    ```
    getCalldataInputModels(chainId, to, opts?)
@@ -197,18 +210,6 @@ docs/
 
    buildCalldata(model, values) → validate + ABI-encode → { data } | { errors }
    buildTypedData(model, account, values, domain?) → validate → { typedData } | { errors }
-   ```
-
-4. **EIP-5792 batch formatting:**
-   ```
-   formatEip5792Batch(batch, opts?)
-   → for each call in batch.calls:
-       → skip with BATCH_VALUE_TRANSFER warning if call.data is absent
-       → skip with BATCH_CONTRACT_CREATION warning if call.to is absent
-       → format({ chainId, to, data, value, from }, opts)
-   → join interpolatedIntent strings with " and "
-       (or emit BATCH_INTERPOLATION_INCOMPLETE if any call lacks one)
-   → returns BatchDisplayModel
    ```
 
 Both calldata and EIP-712 paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
