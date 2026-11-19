@@ -131,6 +131,14 @@ export interface BuildInputError {
    * the array index in place of `[]`, e.g. `orders.[1].amount`.
    */
   path: string;
+  /**
+   * The {@link InputField.path} of the model field that takes the bad value,
+   * e.g. `orders.[].amount`. Use it to show the error at that input. It is
+   * the field at `path`, else the field that contains it, else the first
+   * field inside it. Absent when no field of the model matches (an unknown
+   * key in `values`, or an error on the whole `values` object).
+   */
+  fieldPath?: string;
   code: BuildInputErrorCode;
   /** Short message for the user, e.g. "Value does not fit uint8". */
   message: string;

@@ -552,7 +552,9 @@ export function buildCalldata(
     const inputs = nameInputs(parsed.inputs);
     const errors: BuildInputError[] = [];
     const normalized = normalizeMembers(inputs, values, "", errors);
-    if (errors.length > 0 || !normalized) return { errors };
+    if (errors.length > 0 || !normalized) {
+      return { errors: withFieldPaths(errors, model) };
+    }
 
     return {
       data: bytesToHex(
@@ -562,6 +564,42 @@ export function buildCalldata(
   } catch (error) {
     return { errors: [unexpectedBuildError(error)] };
   }
+}
+
+/** Add to each error the path of the model field that takes the bad value. */
+function withFieldPaths(
+  errors: BuildInputError[],
+  model: InputModel,
+): BuildInputError[] {
+  const fieldPaths = model.fields
+    .flatMap((item) => ("fields" in item ? item.fields : [item]))
+    .map((field) => field.path)
+    .filter((path): path is string => path !== undefined);
+
+  return errors.map((error) => {
+    const fieldPath = findFieldPath(fieldPaths, error.path);
+    return fieldPath === undefined ? error : { ...error, fieldPath };
+  });
+}
+
+/**
+ * Find the field path for a concrete error path. The exact field wins, then
+ * the longest field that contains the path, then the first field inside it.
+ */
+function findFieldPath(
+  fieldPaths: string[],
+  errorPath: string,
+): string | undefined {
+  if (!errorPath) return undefined;
+  const pattern = errorPath.replace(/\[\d+\]/g, "[]");
+  if (fieldPaths.includes(pattern)) return pattern;
+
+  const containing = fieldPaths
+    .filter((path) => pattern.startsWith(`${path}.`))
+    .sort((a, b) => b.length - a.length);
+  if (containing.length > 0) return containing[0];
+
+  return fieldPaths.find((path) => path.startsWith(`${pattern}.`));
 }
 
 function buildError(

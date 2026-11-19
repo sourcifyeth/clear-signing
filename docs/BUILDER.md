@@ -172,7 +172,7 @@ function onInputChange() {
   const result = buildCalldata(model, collectValues());
   clearInputErrors();
   if ("errors" in result) {
-    for (const error of result.errors) markInput(error.path, error.message);
+    for (const error of result.errors) showError(error);
   }
   submitButton.disabled = "errors" in result;
 }
@@ -183,12 +183,29 @@ on `error.code` if you do not want to show those before the user submits.
 
 ### Step 5: Show the errors, or send the transaction
 
+`buildCalldata` returns the errors of all inputs at once, not only the first.
+Each error names the input field it belongs to in `fieldPath`, which is the
+`path` of an `InputField` of the model. Use it to show the message directly
+below that input:
+
 ```typescript
-if ("errors" in result) {
-  for (const error of result.errors) {
-    // error.path is the concrete path, e.g. "orders.[1].amount".
-    markInput(error.path, error.message);
+import type { BuildInputError } from "@ethereum-sourcify/clear-signing/builder";
+
+function showError(error: BuildInputError) {
+  if (error.fieldPath === undefined) {
+    // No input takes this value, e.g. an unknown key in values.
+    showFormError(error.message);
+    return;
   }
+  // The input box that you rendered for the field with this path.
+  const input = inputsByFieldPath.get(error.fieldPath);
+  // error.path is the concrete value, e.g. "orders.[1].amount" for the
+  // field "orders.[].amount". Use it to find the row of a repeated input.
+  input.showErrorBelow(error.message, error.path);
+}
+
+if ("errors" in result) {
+  for (const error of result.errors) showError(error);
   return;
 }
 
@@ -258,7 +275,8 @@ interface InputFieldGroup {
 }
 
 interface BuildInputError {
-  path: string;
+  path: string; // concrete path of the bad value, e.g. "orders.[1].amount"
+  fieldPath?: string; // path of the InputField that takes it, e.g. "orders.[].amount"
   code: BuildInputErrorCode;
   message: string;
 }
@@ -312,6 +330,17 @@ argument uses the name `param<i>` (also its key in `values`).
 `path` is in the `InputField.path` syntax with the concrete array index in
 place of `[]`, e.g. `orders.[1].amount`. The root object is `""`. `message`
 is short and can be shown to the user.
+
+`fieldPath` is the `path` of the model field that takes the bad value:
+
+- the field at that path (`orders.[1].amount` → `orders.[].amount`);
+- else the field that contains it (`order.fee` → `order`, when one field
+  covers the whole tuple);
+- else the first field inside it (`orders` is not an array →
+  `orders.[].amount`).
+
+It is absent when no field matches: an `UNKNOWN_FIELD` key, or an error on
+the `values` object itself.
 
 These errors describe bad user input. They are not `Warning`s, which describe
 the descriptor or the formatting.

@@ -446,7 +446,10 @@ raw (integers as `bigint` / safe number / decimal or `0x` string; hex for
 
 **`BuildInputError`.** `buildCalldata` validates every value, collects all
 errors, and returns `{ errors }` with a concrete `path` (`orders.[1].amount`), a
-`BuildInputErrorCode` and a short user-facing `message`. This is deliberately
+`BuildInputErrorCode` and a short user-facing `message`. `withFieldPaths` adds
+`fieldPath`, the `path` of the model field that takes the value (exact field, else
+the containing field, else the first field inside), so a UI can show the error at
+that input. This is deliberately
 outside the `Warning` scheme: warnings describe the descriptor or the formatting
 and go to wallet users, build errors describe bad user input and go next to the
 form input. Do not add a `WarningCode` for builder input errors.

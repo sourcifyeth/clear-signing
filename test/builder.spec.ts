@@ -1080,4 +1080,88 @@ describe("buildCalldata", () => {
       ],
     });
   });
+
+  it("adds the path of the model field that takes each bad value", () => {
+    const model: InputModel = {
+      ...calldataModel(
+        "f((address token,uint256 amount)[] orders,(uint256 fee,address to) order,uint8 kind,bytes data)",
+      ),
+      fields: [
+        {
+          path: "orders.[]",
+          fields: [
+            { label: "Amount", path: "orders.[].amount", type: "uint256" },
+            { label: "Token", path: "orders.[].token", type: "address" },
+          ],
+        },
+        { label: "Order", path: "order", type: "(uint256 fee,address to)" },
+        { label: "Kind", path: "kind", type: "uint8" },
+        { label: "Data", path: "data", type: "bytes" },
+      ],
+    };
+
+    const result = buildCalldata(model, {
+      orders: [
+        { token: ALICE, amount: 1 },
+        { token: ALICE, amount: -1 },
+      ],
+      order: { fee: "x", to: ALICE },
+      kind: 256,
+      extra: 1,
+    });
+
+    expect(result).toEqual({
+      errors: [
+        // The exact field.
+        {
+          path: "orders.[1].amount",
+          fieldPath: "orders.[].amount",
+          code: "OUT_OF_RANGE",
+          message: "Value does not fit uint256",
+        },
+        // The field that contains the bad value.
+        {
+          path: "order.fee",
+          fieldPath: "order",
+          code: "INVALID_TYPE",
+          message: "Value is not an integer",
+        },
+        {
+          path: "kind",
+          fieldPath: "kind",
+          code: "OUT_OF_RANGE",
+          message: "Value does not fit uint8",
+        },
+        {
+          path: "data",
+          fieldPath: "data",
+          code: "MISSING_VALUE",
+          message: "Value is required",
+        },
+        // No field takes an unknown key.
+        { path: "extra", code: "UNKNOWN_FIELD", message: "Unknown field" },
+      ],
+    });
+  });
+
+  it("uses the first field inside a bad value that no field names", () => {
+    const model: InputModel = {
+      ...calldataModel("f((address token,uint256 amount)[] orders)"),
+      fields: [
+        { label: "Amount", path: "orders.[].amount", type: "uint256" },
+        { label: "Token", path: "orders.[].token", type: "address" },
+      ],
+    };
+
+    expect(buildCalldata(model, { orders: 1 })).toEqual({
+      errors: [
+        {
+          path: "orders",
+          fieldPath: "orders.[].amount",
+          code: "INVALID_TYPE",
+          message: "Value must be an array",
+        },
+      ],
+    });
+  });
 });
