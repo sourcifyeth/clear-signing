@@ -2,10 +2,6 @@
 
 A concise guide for integrating `@ethereum-sourcify/clear-signing` into a wallet.
 
-To build calldata or typed data from user input instead, using the descriptor
-format to render the input fields (e.g. in a block explorer), see the
-[Builder Guide](docs/BUILDER.md).
-
 ## 1. Install
 
 ```bash
