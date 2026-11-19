@@ -7,6 +7,7 @@
 import { describe, it, expect, assert } from "vitest";
 import { buildTypedData, getTypedDataInputModels } from "../../src/builder.js";
 import type { TypedData } from "../../src/types.js";
+import type { BuilderOptions } from "../../src/builder.types.js";
 import {
   buildFilesystemResolverOpts,
   computeEncodeTypeOrThrow,
@@ -62,8 +63,8 @@ describe("builder — Rarible ERC-721 lazy mint", () => {
     },
   };
 
-  function buildOpts() {
-    return buildFilesystemResolverOpts(
+  function buildOpts(): BuilderOptions {
+    const { descriptorResolverOptions } = buildFilesystemResolverOpts(
       `${__dirname}/../registry-cases/rarible`,
       {
         eip712DescriptorFiles: [
@@ -78,6 +79,7 @@ describe("builder — Rarible ERC-721 lazy mint", () => {
         ],
       },
     );
+    return { descriptorResolverOptions };
   }
 
   it("lists the input model and builds the same typed data from it", async () => {

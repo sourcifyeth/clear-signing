@@ -5,7 +5,8 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { buildCalldata, getCalldataInputModels } from "../../src/builder.js";
-import type { FormatOptions, TrustedTokens } from "../../src/types.js";
+import type { BuilderOptions } from "../../src/builder.types.js";
+import type { TrustedTokens } from "../../src/types.js";
 import { padAddr, padInt } from "../utils.js";
 
 const CHAIN_ID = 1;
@@ -16,8 +17,8 @@ const TRUSTED_ERC20: TrustedTokens = {
   [CHAIN_ID]: { [TOKEN.toLowerCase()]: "erc20" },
 };
 
-/** FormatOptions with an empty registry index (no network) + a trusted-token list. */
-function opts(trustedTokens: TrustedTokens): FormatOptions {
+/** Options with an empty registry index (no network) + a trusted-token list. */
+function opts(trustedTokens: TrustedTokens): BuilderOptions {
   return {
     descriptorResolverOptions: {
       type: "github",

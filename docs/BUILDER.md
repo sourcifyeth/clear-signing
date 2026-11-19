@@ -49,7 +49,7 @@ The example is a vault with this descriptor format:
 const { models, warnings } = await getCalldataInputModels(
   chainId,
   vaultAddress,
-  opts, // optional, the same FormatOptions as for format()
+  opts, // optional BuilderOptions
 );
 
 if (!models) {
@@ -65,9 +65,9 @@ for (const model of models) {
 ```
 
 `opts` resolves the descriptor exactly as in `format()`: use the same
-registry index, `trustedTokens` and attestation policy. Of the
-`externalDataProvider`, only `chainClient` is used, for the attestation
-revocation read. A function whose format is broken (e.g. a bad `$ref`) gets
+registry index, `trustedTokens` and attestation policy in
+`opts.descriptorResolverOptions`. `opts.chainClient` is needed only with an
+attestation policy, for the revocation read. A function whose format is broken (e.g. a bad `$ref`) gets
 no model and adds a warning; the other functions still get their models.
 
 ### Step 2: Render the input fields
@@ -233,11 +233,18 @@ if ("errors" in result) {
 ### Functions
 
 ```typescript
-getCalldataInputModels(chainId: number, to: string, opts?: FormatOptions): Promise<InputModels>
+getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels>
 buildCalldata(model: InputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
 
-getTypedDataInputModels(chainId: number, verifyingContract: string, opts?: FormatOptions): Promise<InputModels>
+getTypedDataInputModels(chainId: number, verifyingContract: string, opts?: BuilderOptions): Promise<InputModels>
 buildTypedData(model: InputModel, account: string, values: Record<string, unknown>, domain?: TypedDataDomain): { typedData: TypedData } | { errors: BuildInputError[] }
+
+interface BuilderOptions {
+  // Descriptor source, the same value as FormatOptions.descriptorResolverOptions.
+  descriptorResolverOptions?: GitHubResolverOptions | CustomResolverOptions;
+  // Read-only RPC access for the attestation revocation read.
+  chainClient?: ChainClient;
+}
 ```
 
 The `get*InputModels` functions never throw. The build functions are

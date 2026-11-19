@@ -10,6 +10,7 @@ import {
   getCalldataInputModels,
   getTypedDataInputModels,
 } from "../../src/builder.js";
+import type { BuilderOptions } from "../../src/builder.types.js";
 import type {
   AttestationOptions,
   ChainClient,
@@ -28,15 +29,17 @@ const MINT_ENCODE_TYPE =
 /** Chain client whose EAS reads report every attestation as not revoked. */
 const notRevoked: ChainClient = { call: async () => "0x" + "00".repeat(32) };
 
+/** Builder options from filesystem resolver options, with a policy. */
 function withPolicy(
   fsOpts: FormatOptions,
   attestations: AttestationOptions,
-): FormatOptions {
+  chainClient?: ChainClient,
+): BuilderOptions {
   const resolverOptions = fsOpts.descriptorResolverOptions;
   assert(resolverOptions);
   return {
-    ...fsOpts,
     descriptorResolverOptions: { ...resolverOptions, attestations },
+    chainClient,
   };
 }
 
@@ -44,18 +47,15 @@ function withPolicy(
 function tetherOpts(
   attestations: AttestationOptions,
   chainClient: ChainClient | null = notRevoked,
-): FormatOptions {
+): BuilderOptions {
   return withPolicy(
-    buildFilesystemResolverOpts(
-      `${__dirname}/../attestations`,
-      {
-        calldataDescriptorFiles: [
-          { chainId: CHAIN_ID, address: USDT, file: "calldata-usdt.json" },
-        ],
-      },
-      chainClient ? { chainClient } : undefined,
-    ),
+    buildFilesystemResolverOpts(`${__dirname}/../attestations`, {
+      calldataDescriptorFiles: [
+        { chainId: CHAIN_ID, address: USDT, file: "calldata-usdt.json" },
+      ],
+    }),
     attestations,
+    chainClient ?? undefined,
   );
 }
 
@@ -90,7 +90,7 @@ describe("builder — attestation policy on getCalldataInputModels", () => {
     });
   });
 
-  it("returns ATTESTATION_OPTIONS_INCOMPLETE when the provider has no chainClient", async () => {
+  it("returns ATTESTATION_OPTIONS_INCOMPLETE when the options have no chainClient", async () => {
     const result = await getCalldataInputModels(
       CHAIN_ID,
       USDT,
@@ -111,21 +111,18 @@ describe("builder — attestation policy on getCalldataInputModels", () => {
 describe("builder — attestation policy on getTypedDataInputModels", () => {
   it("returns NO_TRUSTED_ATTESTATION when the descriptor has no attestation", async () => {
     const opts = withPolicy(
-      buildFilesystemResolverOpts(
-        `${__dirname}/../registry-cases/rarible`,
-        {
-          eip712DescriptorFiles: [
-            {
-              chainId: CHAIN_ID,
-              address: RARIBLE_COLLECTION,
-              file: "eip712-rarible-erc-721.json",
-              encodeTypes: [MINT_ENCODE_TYPE],
-            },
-          ],
-        },
-        { chainClient: notRevoked },
-      ),
+      buildFilesystemResolverOpts(`${__dirname}/../registry-cases/rarible`, {
+        eip712DescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: RARIBLE_COLLECTION,
+            file: "eip712-rarible-erc-721.json",
+            encodeTypes: [MINT_ENCODE_TYPE],
+          },
+        ],
+      }),
       { trustedAttesters: [CYFRIN_ATTESTER] },
+      notRevoked,
     );
 
     const result = await getTypedDataInputModels(

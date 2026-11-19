@@ -13,11 +13,10 @@ import {
 } from "../src/builder.js";
 import { parseFunctionSignatureKey } from "../src/calldata.js";
 import type { FunctionInput } from "../src/calldata.js";
-import type { InputModel } from "../src/builder.types.js";
+import type { BuilderOptions, InputModel } from "../src/builder.types.js";
 import type {
   Descriptor,
   DescriptorFormatSpec,
-  FormatOptions,
   RegistryIndex,
 } from "../src/types.js";
 import { bytesToHex, selectorForSignature } from "../src/utils.js";
@@ -47,7 +46,7 @@ function fieldsOf(
 function memoryOpts(
   index: Partial<RegistryIndex>,
   descriptors: Record<string, Descriptor>,
-): FormatOptions {
+): BuilderOptions {
   return {
     descriptorResolverOptions: {
       type: "custom",

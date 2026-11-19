@@ -4,12 +4,30 @@
  */
 
 import type {
+  ChainClient,
   DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DisplayModel,
+  FormatOptions,
   TypedDataDomain,
   Warning,
 } from "./types.js";
+
+/**
+ * Options of `getCalldataInputModels` / `getTypedDataInputModels`. The
+ * builder only resolves descriptors, so it takes the descriptor source of
+ * {@link FormatOptions} and no external data provider.
+ */
+export interface BuilderOptions {
+  /** Descriptor source. Same as {@link FormatOptions.descriptorResolverOptions}. */
+  descriptorResolverOptions?: FormatOptions["descriptorResolverOptions"];
+
+  /**
+   * Read-only RPC access for the attestation revocation read. Required when
+   * `descriptorResolverOptions.attestations` is set.
+   */
+  chainClient?: ChainClient;
+}
 
 /**
  * One input of an {@link InputModel}, from the `builder` entry point

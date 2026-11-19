@@ -61,6 +61,7 @@ import {
 import type {
   BuildInputError,
   BuildInputErrorCode,
+  BuilderOptions,
   InputField,
   InputFieldGroup,
   InputModel,
@@ -75,7 +76,6 @@ import type {
   DescriptorFieldGroup,
   DescriptorFormatSpec,
   DescriptorMetadata,
-  FormatOptions,
   GitHubResolverOptions,
   TypedData,
   TypedDataDomain,
@@ -85,10 +85,12 @@ import type {
 
 export type * from "./builder.types.js";
 export type {
+  ChainClient,
+  CustomResolverOptions,
   DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DescriptorMapReference,
-  FormatOptions,
+  GitHubResolverOptions,
   TypedData,
   TypedDataDomain,
   Warning,
@@ -104,15 +106,15 @@ export type {
  * {@link InputModel} per `display.formats` function.
  *
  * Descriptor resolution is the same as in `format()`: `trustedTokens` and the
- * attestation policy apply. Of `opts.externalDataProvider`, only
- * `chainClient` is used (the attestation revocation read). Never throws:
+ * attestation policy apply. `opts.chainClient` serves the attestation
+ * revocation read. Never throws:
  * failures are returned as `warnings`. A format that fails (e.g. a broken
  * `$ref`) adds its warning and gets no model.
  */
 export async function getCalldataInputModels(
   chainId: number,
   to: string,
-  opts?: FormatOptions,
+  opts?: BuilderOptions,
 ): Promise<InputModels> {
   try {
     let descriptor: Descriptor;
@@ -121,7 +123,7 @@ export async function getCalldataInputModels(
         chainId,
         to,
         opts?.descriptorResolverOptions,
-        opts?.externalDataProvider?.chainClient,
+        opts?.chainClient,
       );
       if ("warning" in result) return { warnings: [result.warning] };
       descriptor = result.descriptor;
@@ -178,7 +180,7 @@ export async function getCalldataInputModels(
 export async function getTypedDataInputModels(
   chainId: number,
   verifyingContract: string,
-  opts?: FormatOptions,
+  opts?: BuilderOptions,
 ): Promise<InputModels> {
   try {
     if (!Number.isSafeInteger(chainId) || chainId < 0 || !verifyingContract) {
@@ -198,7 +200,7 @@ export async function getTypedDataInputModels(
         chainId,
         verifyingContract,
         opts?.descriptorResolverOptions,
-        opts?.externalDataProvider?.chainClient,
+        opts?.chainClient,
       );
     } catch (error) {
       return {

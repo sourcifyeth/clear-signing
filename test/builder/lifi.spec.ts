@@ -7,6 +7,7 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { buildCalldata, getCalldataInputModels } from "../../src/builder.js";
+import type { BuilderOptions } from "../../src/builder.types.js";
 import { buildFilesystemResolverOpts } from "../utils.js";
 
 describe("builder — LI.FI LIFIDiamond", () => {
@@ -19,16 +20,20 @@ describe("builder — LI.FI LIFIDiamond", () => {
   // WETH is the intermediate hop. It appears only in the raw calldata.
   const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
-  function buildOpts() {
-    return buildFilesystemResolverOpts(`${__dirname}/../registry-cases/lifi`, {
-      calldataDescriptorFiles: [
-        {
-          chainId: CHAIN_ID,
-          address: CONTRACT,
-          file: "calldata-LIFIDiamond.json",
-        },
-      ],
-    });
+  function buildOpts(): BuilderOptions {
+    const { descriptorResolverOptions } = buildFilesystemResolverOpts(
+      `${__dirname}/../registry-cases/lifi`,
+      {
+        calldataDescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: CONTRACT,
+            file: "calldata-LIFIDiamond.json",
+          },
+        ],
+      },
+    );
+    return { descriptorResolverOptions };
   }
 
   // =========================================================================

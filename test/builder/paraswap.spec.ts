@@ -8,7 +8,7 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { buildCalldata, getCalldataInputModels } from "../../src/builder.js";
-import type { InputModel } from "../../src/builder.types.js";
+import type { BuilderOptions, InputModel } from "../../src/builder.types.js";
 import { buildFilesystemResolverOpts, padAddr } from "../utils.js";
 
 describe("builder — Paraswap AugustusSwapper v6.2", () => {
@@ -48,8 +48,8 @@ describe("builder — Paraswap AugustusSwapper v6.2", () => {
     return model;
   }
 
-  function buildOpts() {
-    return buildFilesystemResolverOpts(
+  function buildOpts(): BuilderOptions {
+    const { descriptorResolverOptions } = buildFilesystemResolverOpts(
       `${__dirname}/../registry-cases/paraswap`,
       {
         calldataDescriptorFiles: [
@@ -61,6 +61,7 @@ describe("builder — Paraswap AugustusSwapper v6.2", () => {
         ],
       },
     );
+    return { descriptorResolverOptions };
   }
 
   // =========================================================================

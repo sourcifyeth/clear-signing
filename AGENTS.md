@@ -371,8 +371,8 @@ by satisfying the `DescriptorResolver` shape directly and wrapping it in
 `{ type: "custom", resolver }`.
 
 The builder (`src/builder.ts`) is the second subpath entry,
-`@ethereum-sourcify/clear-signing/builder`. It takes the same `FormatOptions`, so
-all descriptor sources above work with it. See [Builder](#builder).
+`@ethereum-sourcify/clear-signing/builder`. Its `BuilderOptions` take the same
+`descriptorResolverOptions`, so all descriptor sources above work with it. See [Builder](#builder).
 
 ### GitHub client module (`github-registry-client.ts`)
 
@@ -415,10 +415,15 @@ in `builder.ts`, so it never lands in a shared chunk of the ESM build. `builder.
 imports only existing internals from shared modules (`calldata.ts`: signature
 parsing, `functionFormats`; `resolver.ts`: `createResolver`,
 `resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning`), which the
-main entry uses anyway. The builder types (`InputModel`, `InputField`,
+main entry uses anyway. The builder types (`BuilderOptions`, `InputModel`, `InputField`,
 `InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
 `builder.types.ts`, not in `types.ts`, so the main entry does not expose them.
 `builder.ts` re-exports them.
+
+**Options.** `get*InputModels` take `BuilderOptions`, not `FormatOptions`: the
+builder formats nothing, so it has no `externalDataProvider`. The options hold
+`descriptorResolverOptions` (typed from `FormatOptions`) and `chainClient`, which
+only the attestation revocation read uses.
 
 **Input model.** One `InputModel` per `display.formats` key. Its `fields` are the
 descriptor fields in display order (`buildInputFields`), then the ABI inputs /
