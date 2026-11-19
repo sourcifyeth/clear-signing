@@ -164,6 +164,23 @@ const result = buildCalldata(model, values);
 `buildCalldata` is synchronous and never throws. It validates every value and
 returns either `{ data }` or `{ errors }`.
 
+Because it is synchronous and has no side effects, you can also call it on
+each change of the user input, to validate the form while the user types:
+
+```typescript
+function onInputChange() {
+  const result = buildCalldata(model, collectValues());
+  clearInputErrors();
+  if ("errors" in result) {
+    for (const error of result.errors) markInput(error.path, error.message);
+  }
+  submitButton.disabled = "errors" in result;
+}
+```
+
+An input that the user did not fill yet gives a `MISSING_VALUE` error. Filter
+on `error.code` if you do not want to show those before the user submits.
+
 ### Step 5: Show the errors, or send the transaction
 
 ```typescript
@@ -258,7 +275,9 @@ interface BuildInputError {
 | `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered       |
 | `path` that names no argument (e.g. a typo)                          | left out. The inputs are appended as uncovered                              |
 | path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                   |
+| a second field with the same `path`                                  | left out: one input for each path. The first field is the input             |
 | `visible: "never"`                                                   | input field with `hidden: true`                                             |
+| other `visible` rules (`ifNotIn`, `mustMatch`, ...)                  | ignored: they depend on the value                                           |
 | no `label`                                                           | the ABI parameter name (the last name in `path`) is the label               |
 | `$ref`                                                               | merged with its definition first                                            |
 | field group                                                          | `InputFieldGroup`; child paths get the group prefix, as in `format()`       |

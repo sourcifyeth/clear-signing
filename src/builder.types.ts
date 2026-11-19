@@ -13,9 +13,9 @@ import type {
 } from "./types.js";
 
 /**
- * Options of `getCalldataInputModels`. The
- * builder only resolves descriptors, so it takes the descriptor source of
- * {@link FormatOptions} and no external data provider.
+ * Options of `getCalldataInputModels`. The builder only resolves descriptors,
+ * so it takes the descriptor source of {@link FormatOptions} and no external
+ * data provider.
  */
 export interface BuilderOptions {
   /** Descriptor source. Same as {@link FormatOptions.descriptorResolverOptions}. */
@@ -41,7 +41,7 @@ export interface InputField {
   label: string;
 
   /**
-   * Where the value goes in the `values` object of the build functions.
+   * Where the value goes in the `values` object of `buildCalldata`.
    * Absolute, with the `#.` prefix stripped and the group prefix applied, e.g.
    * `to`, `order.fee` or `orders.[].amount` (`.[]` stands for each array
    * element). `@.value` names the transaction value, which is not part of
@@ -122,7 +122,7 @@ export type BuildInputErrorCode =
   | "INVALID_SIGNATURE"; // model.signature cannot be parsed
 
 /**
- * A validation error of the build functions. It is not a {@link Warning}: it
+ * A validation error of `buildCalldata`. It is not a {@link Warning}: it
  * describes bad user input, and a UI shows it at the input that `path` names.
  */
 export interface BuildInputError {

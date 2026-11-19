@@ -426,7 +426,9 @@ no model.
   children have `.[]` paths does not; `@.` / `$.` children stay absolute). The
   path must name an input; else the field is left out and nothing is covered.
   The path is marked covered and gets `type` (a tuple is spelled
-  `(address token,uint256 amount)[]`).
+  `(address token,uint256 amount)[]`). A later field with the same path is left
+  out: a descriptor can show one input in more than one way (alternative
+  `visible` rules), but the model has one input for each path.
 - `visible: "never"` → `hidden: true`. No label → the last name segment of the
   path. Path params are absolute like `path`: every string param whose key ends
   in `Path` and every map reference `keyPath`, except `@.` / `$.` values, get `#.`
@@ -442,8 +444,8 @@ tuple is an object keyed by component name, an array is a JS array. Values are
 raw (integers as `bigint` / safe number / decimal or `0x` string; hex for
 `address` / `bytes` / `bytesN`). Constants and `@.value` are not part of it.
 
-**`BuildInputError`.** The build functions validate every value, collect all
-errors, and return `{ errors }` with a concrete `path` (`orders.[1].amount`), a
+**`BuildInputError`.** `buildCalldata` validates every value, collects all
+errors, and returns `{ errors }` with a concrete `path` (`orders.[1].amount`), a
 `BuildInputErrorCode` and a short user-facing `message`. This is deliberately
 outside the `Warning` scheme: warnings describe the descriptor or the formatting
 and go to wallet users, build errors describe bad user input and go next to the

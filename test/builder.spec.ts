@@ -356,6 +356,31 @@ describe("buildInputFields", () => {
     });
   });
 
+  it("keeps only the first field of a path", () => {
+    const result = fieldsOf(
+      {
+        fields: [
+          { path: "chainId", label: "Chain", format: "chainId" },
+          { path: "#.chainId", label: "Chain override", format: "enum" },
+          { path: "amount", label: "Amount", format: "raw" },
+        ],
+      },
+      "f(uint256 chainId,uint256 amount)",
+    );
+
+    expect(result).toEqual({
+      fields: [
+        {
+          label: "Chain",
+          path: "chainId",
+          type: "uint256",
+          format: "chainId",
+        },
+        { label: "Amount", path: "amount", type: "uint256", format: "raw" },
+      ],
+    });
+  });
+
   it("makes path params absolute like the path, inside and outside groups", () => {
     const fieldSpec = {
       path: "amount",

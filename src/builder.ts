@@ -89,9 +89,8 @@ export type {
  *
  * Descriptor resolution is the same as in `format()`: `trustedTokens` and the
  * attestation policy apply. `opts.chainClient` serves the attestation
- * revocation read. Never throws:
- * failures are returned as `warnings`. A format that fails (e.g. a broken
- * `$ref`) adds its warning and gets no model.
+ * revocation read. Never throws: failures are returned as `warnings`. A format
+ * that fails (e.g. a broken `$ref`) adds its warning and gets no model.
  */
 export async function getCalldataInputModels(
   chainId: number,
@@ -312,6 +311,10 @@ function buildField(
   const node = findInput(ctx.inputs, path);
   if (!node) return { field: null };
 
+  // A descriptor can show one input in more than one way. The first field
+  // of a path is the input.
+  if (ctx.covered.has(path)) return { field: null };
+
   ctx.covered.add(path);
   return {
     field: {
@@ -404,8 +407,8 @@ function findInput(
 }
 
 /**
- * The type of an input for {@link InputField.type}. A calldata tuple is
- * spelled out with its component names, e.g. `(address token,uint256 amount)[]`.
+ * The type of an input for {@link InputField.type}. A tuple is spelled out
+ * with its component names, e.g. `(address token,uint256 amount)[]`.
  */
 function inputType(node: FunctionInput): string {
   if (!node.components || !node.type.startsWith("tuple")) return node.type;
@@ -516,7 +519,7 @@ function unexpectedErrorWarning(error: unknown): Warning {
 }
 
 // ---------------------------------------------------------------------------
-// Build functions
+// Calldata building
 // ---------------------------------------------------------------------------
 
 /**
