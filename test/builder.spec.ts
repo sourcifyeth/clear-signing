@@ -13,11 +13,11 @@ import {
 } from "../src/builder.js";
 import { parseFunctionSignatureKey } from "../src/calldata.js";
 import type { FunctionInput } from "../src/calldata.js";
+import type { InputModel } from "../src/builder.types.js";
 import type {
   Descriptor,
   DescriptorFormatSpec,
   FormatOptions,
-  InputModel,
   RegistryIndex,
 } from "../src/types.js";
 import { bytesToHex, selectorForSignature } from "../src/utils.js";

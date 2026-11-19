@@ -2,12 +2,10 @@
  * Tests for LI.FI LIFIDiamond descriptor:
  * - swapTokensMultipleV3ERC20ToERC20: dynamic tuple array with array-indexed
  *   token paths (_swapData.[0].sendingAssetId, _swapData.[-1].receivingAssetId).
- * - its input model (`.[]` and fixed-index paths), and calldata built from it.
  */
 
 import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../../src/index.js";
-import { buildCalldata, getCalldataInputModels } from "../../../src/builder.js";
 import type { DisplayModel, ExternalDataProvider } from "../../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
 import { buildFilesystemResolverOpts } from "../../utils.js";
@@ -20,8 +18,7 @@ describe("LI.FI LIFIDiamond", () => {
 
   const USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
   const DAI = "0x6b175474e89094c44da98b954eedeac495271d0f";
-  // WETH is the intermediate hop. It appears only in the raw calldata.
-  const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+  // WETH (0xc02a...cc2) is the intermediate hop; appears only in raw calldata.
 
   const resolveToken: ExternalDataProvider["resolveToken"] = async (
     chainId,
@@ -115,7 +112,19 @@ describe("LI.FI LIFIDiamond", () => {
       "0000000000000000000000000000000000000000000000000000000000000000" + // requiresDeposit = false
       "0000000000000000000000000000000000000000000000000000000000000000"; // callData length = 0
 
-    function assertSwap(result: DisplayModel) {
+    it("formats a two-hop ERC20→ERC20 swap with array-indexed token paths", async () => {
+      const opts = buildOpts({ resolveToken, resolveLocalName });
+
+      const result: DisplayModel = await format(
+        {
+          chainId: CHAIN_ID,
+          to: CONTRACT,
+          from: FROM,
+          data: SWAP_CALLDATA,
+        },
+        opts,
+      );
+
       expect(result.intent).toBe("Swap");
 
       assert(result.fields);
@@ -176,163 +185,6 @@ describe("LI.FI LIFIDiamond", () => {
       expect(result.interpolatedIntent).toBeUndefined();
       expect(result.rawCalldataFallback).toBeUndefined();
       expect(result.warnings).toBeUndefined();
-    }
-
-    it("formats a two-hop ERC20→ERC20 swap with array-indexed token paths", async () => {
-      const opts = buildOpts({ resolveToken, resolveLocalName });
-
-      const result: DisplayModel = await format(
-        {
-          chainId: CHAIN_ID,
-          to: CONTRACT,
-          from: FROM,
-          data: SWAP_CALLDATA,
-        },
-        opts,
-      );
-
-      assertSwap(result);
-    });
-
-    it("lists the input model and builds the same calldata from it", async () => {
-      const result = await getCalldataInputModels(
-        CHAIN_ID,
-        CONTRACT,
-        buildOpts(),
-      );
-      expect(result.warnings).toBeUndefined();
-      assert(result.models);
-      // One model per display.formats entry of the descriptor.
-      expect(result.models).toHaveLength(7);
-      const model = result.models.find((m) => m.selector === "0x5fd9ae2e");
-      assert(model);
-
-      expect(model).toEqual({
-        signature:
-          "swapTokensMultipleV3ERC20ToERC20(bytes32 _transactionId, string _integrator, string _referrer, address _receiver, uint256 _minAmountOut, (address callTo, address approveTo, address sendingAssetId, address receivingAssetId, uint256 fromAmount, bytes callData, bool requiresDeposit)[] _swapData)",
-        selector: "0x5fd9ae2e",
-        metadata: {
-          owner: "LI.FI",
-          contractName: "LI.FI Service GmbH",
-          info: { url: "https://li.fi" },
-        },
-        intent: "Swap",
-        fields: [
-          // "Amount to Send" has the fixed-index path _swapData.[0].fromAmount.
-          // It names no whole input, so it is left out, and
-          // _swapData.[].fromAmount is appended below.
-          {
-            label: "Minimum to Receive",
-            path: "_minAmountOut",
-            type: "uint256",
-            format: "tokenAmount",
-            params: { tokenPath: "_swapData.[-1].receivingAssetId" },
-          },
-          {
-            label: "Recipient",
-            path: "_receiver",
-            type: "address",
-            format: "addressName",
-            params: { types: ["eoa", "contract"], sources: ["local", "ens"] },
-          },
-          {
-            label: "Transaction Id",
-            path: "_transactionId",
-            type: "bytes32",
-            hidden: true,
-          },
-          {
-            label: "Integrator",
-            path: "_integrator",
-            type: "string",
-            hidden: true,
-          },
-          {
-            label: "Referrer",
-            path: "_referrer",
-            type: "string",
-            hidden: true,
-          },
-          {
-            label: "Swap Data Call Data",
-            path: "_swapData.[].callData",
-            type: "bytes",
-            hidden: true,
-          },
-          {
-            label: "Swap Data Call To",
-            path: "_swapData.[].callTo",
-            type: "address",
-            hidden: true,
-          },
-          {
-            label: "Swap Data Approve To",
-            path: "_swapData.[].approveTo",
-            type: "address",
-            hidden: true,
-          },
-          {
-            label: "Swap Data Requires Deposit",
-            path: "_swapData.[].requiresDeposit",
-            type: "bool",
-            hidden: true,
-          },
-          {
-            label: "sendingAssetId",
-            path: "_swapData.[].sendingAssetId",
-            type: "address",
-          },
-          {
-            label: "receivingAssetId",
-            path: "_swapData.[].receivingAssetId",
-            type: "address",
-          },
-          {
-            label: "fromAmount",
-            path: "_swapData.[].fromAmount",
-            type: "uint256",
-          },
-        ],
-      });
-
-      const hop = {
-        callTo: "0x1111111111111111111111111111111111111111",
-        approveTo: "0x1111111111111111111111111111111111111111",
-        callData: "0x",
-        requiresDeposit: false,
-      };
-      const built = buildCalldata(model, {
-        _transactionId:
-          "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        _integrator: "lifi-api",
-        _referrer: "",
-        _receiver: BENEFICIARY,
-        _minAmountOut: 950_000_000_000_000_000_000n,
-        _swapData: [
-          {
-            ...hop,
-            sendingAssetId: USDC,
-            receivingAssetId: WETH,
-            fromAmount: 1_000_000_000n,
-          },
-          {
-            ...hop,
-            sendingAssetId: WETH,
-            receivingAssetId: DAI,
-            fromAmount: 0,
-          },
-        ],
-      });
-      assert("data" in built);
-      expect(built.data).toBe(SWAP_CALLDATA);
-
-      const opts = buildOpts({ resolveToken, resolveLocalName });
-      assertSwap(
-        await format(
-          { chainId: CHAIN_ID, to: CONTRACT, from: FROM, data: built.data },
-          opts,
-        ),
-      );
     });
   });
 });

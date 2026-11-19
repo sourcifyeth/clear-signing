@@ -25,7 +25,8 @@ src/
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
 ├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
 ├── filesystem.ts               # Separate entry point (/filesystem): Node-only filesystem resolver
-└── builder.ts                  # Separate entry point (/builder): input models, buildCalldata(), buildTypedData()
+├── builder.ts                  # Separate entry point (/builder): input models, buildCalldata(), buildTypedData()
+└── builder.types.ts            # Public types of the builder entry point
 
 docs/
 ├── BUILDER.md                  # Builder integrator walkthrough and reference
@@ -415,7 +416,8 @@ parsing, `functionFormats`; `resolver.ts`: `createResolver`,
 `resolveWithIncludes`, `applyAttestationPolicy`, `noDescriptorWarning`), which the
 main entry uses anyway. The builder types (`InputModel`, `InputField`,
 `InputFieldGroup`, `InputModels`, `BuildInputError`, `BuildInputErrorCode`) live in
-`types.ts` and `builder.ts` re-exports them.
+`builder.types.ts`, not in `types.ts`, so the main entry does not expose them.
+`builder.ts` re-exports them.
 
 **Input model.** One `InputModel` per `display.formats` key. Its `fields` are the
 descriptor fields in display order (`buildInputFields`), then the ABI inputs /
@@ -753,19 +755,20 @@ Tests live in `test/`. Current test files:
 - `test/utils.spec.ts` — unit tests for the shared utility functions in `utils.ts` (signed integer decoding of sign-extended ABI words)
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators, encryption, `metadata.maps` references)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
-- `test/builder.spec.ts` — unit tests for `builder.ts`: `buildInputFields` field classification (`$ref`, constants, `@.value`, slices, fixed indices, `hidden`, group prefixes, partial tuple coverage, appended inputs, definition errors, nested groups), `get*InputModels` warnings with an in-memory resolver, `buildCalldata` known-answer vectors and every `BuildInputErrorCode`, `buildTypedData` (domain merge, `EIP712Domain`, errors) and `encodeType` parsing
+- `test/builder.spec.ts` — unit tests for `builder.ts` (unit tests only): `buildInputFields` field classification (`$ref`, constants, `@.value`, slices, fixed indices, `hidden`, group prefixes, partial tuple coverage, appended inputs, definition errors, nested groups), `get*InputModels` warnings with an in-memory resolver, `buildCalldata` known-answer vectors and every `BuildInputErrorCode`, `buildTypedData` (domain merge, `EIP712Domain`, errors) and `encodeType` parsing
+- `test/builder/*.spec.ts` — builder end-to-end tests, one file per descriptor owner or topic. They read the descriptors in `test/registry-cases/<owner>/` (and `test/attestations/`) and assert the input models and the built calldata / typed data: `paraswap.spec.ts` (byte slices, tuple array, struct group), `lifi.spec.ts` (`.[]` and fixed-index paths), `rarible.spec.ts` (EIP-712), `trusted-tokens.spec.ts` (bundled ERC-20), `attestations.spec.ts` (attestation policy)
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/erc7730-test-cases/example-maps.spec.ts` / `example-maps-pools.spec.ts` — `metadata.maps` references keyed on `@.chainId`; the spec files' `underlyingToken` addresses are 21 bytes, so that field asserts `FORMAT_PARAM_RESOLUTION_ERROR` as is (spec files are never edited)
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
-- `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices) + CurveV1 (struct group); input models of all three and `buildCalldata` round trips to the same calldata
-- `test/registry-cases/lifi/lifi.spec.ts` — LI.FI LIFIDiamond: two-hop swap with array-indexed token paths; input model (`.[]` and fixed-index paths) and `buildCalldata` round trip
-- `test/registry-cases/rarible/rarible.spec.ts` — Rarible ERC-721 lazy mint (EIP-712, mid-path `.[]` iteration); `getTypedDataInputModels` and `buildTypedData` round trip
+- `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
+- `test/registry-cases/lifi/lifi.spec.ts` — LI.FI LIFIDiamond: two-hop swap with array-indexed token paths
+- `test/registry-cases/rarible/rarible.spec.ts` — Rarible ERC-721 lazy mint (EIP-712, mid-path `.[]` iteration)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
 - `test/registry-cases/across/across.spec.ts` — Across Ethereum SpokePool: deposit + depositNow (`addressName` / `tokenTicker` on `bytes32`, zero-padded EVM addresses and a Solana key)
-- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence; input models of the bundled ERC-20 and a `transfer` round trip
-- `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing), and the policy through `getCalldataInputModels` / `getTypedDataInputModels` (`NO_TRUSTED_ATTESTATION`, `ATTESTATION_OPTIONS_INCOMPLETE`)
+- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
+- `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
 
 ### Test guidelines
 
@@ -776,6 +779,9 @@ Tests live in `test/`. Current test files:
   a new test directory layout for it.
 - **Unit tests live in `test/<module>.spec.ts`**, named after the `src/` module they cover.
   Do not name a test file after the feature or bug.
+- **Builder end-to-end tests live in `test/builder/`.** They reuse the descriptor files in
+  `test/registry-cases/<owner>/`. Do not add builder tests to the format spec files, and keep
+  `test/builder.spec.ts` for unit tests only.
 - **Be consistent** with the style and patterns of existing tests in the same file.
 - **Test all properties** of the returned `DisplayModel` and its nested objects:
   `intent`, `interpolatedIntent`, `fields`, `metadata` (including `owner`, `contractName`, `info`),
@@ -882,6 +888,9 @@ with `export type *`). A type belongs there when it is a parameter or return
 type of a public function, a member of a public interface, or a nested part
 of one (e.g. `Descriptor` → `DescriptorContext`, `OffchainAttestation` →
 `OffchainAttestationMessage`).
+
+Types that only the builder entry point uses live in `builder.types.ts`, by the
+same rule. Do not add them to `types.ts`.
 
 A type that a consumer can never reach stays in the module that owns it —
 module-private, or exported for other internal modules only. Examples:

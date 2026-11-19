@@ -61,6 +61,12 @@ import {
 import type {
   BuildInputError,
   BuildInputErrorCode,
+  InputField,
+  InputFieldGroup,
+  InputModel,
+  InputModels,
+} from "./builder.types.js";
+import type {
   ChainClient,
   CustomResolverOptions,
   Descriptor,
@@ -71,27 +77,18 @@ import type {
   DescriptorMetadata,
   FormatOptions,
   GitHubResolverOptions,
-  InputField,
-  InputFieldGroup,
-  InputModel,
-  InputModels,
   TypedData,
   TypedDataDomain,
   TypeMember,
   Warning,
 } from "./types.js";
 
+export type * from "./builder.types.js";
 export type {
-  BuildInputError,
-  BuildInputErrorCode,
   DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DescriptorMapReference,
   FormatOptions,
-  InputField,
-  InputFieldGroup,
-  InputModel,
-  InputModels,
   TypedData,
   TypedDataDomain,
   Warning,

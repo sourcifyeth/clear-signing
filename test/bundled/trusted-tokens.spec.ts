@@ -6,7 +6,6 @@
 
 import { describe, it, expect, assert } from "vitest";
 import { format, isFieldGroup } from "../../src/index.js";
-import { buildCalldata, getCalldataInputModels } from "../../src/builder.js";
 import type {
   DisplayModel,
   ExternalDataProvider,
@@ -139,125 +138,6 @@ describe("trusted tokens — bundled ERC-20", () => {
     expect(amount.rawAddress).toBeUndefined();
     expect(amount.embeddedCalldata).toBeUndefined();
     expect(amount.warning).toBeUndefined();
-  });
-});
-
-describe("trusted tokens — bundled ERC-20 input models", () => {
-  it("lists the bundled ERC-20 functions as input models", async () => {
-    const result = await getCalldataInputModels(
-      CHAIN_ID,
-      TOKEN,
-      opts(TRUSTED_ERC20),
-    );
-
-    expect(result).toEqual({
-      models: [
-        {
-          signature: "transfer(address _to, uint256 _value)",
-          selector: "0xa9059cbb",
-          intent: "Send",
-          fields: [
-            {
-              label: "Amount",
-              path: "_value",
-              type: "uint256",
-              format: "tokenAmount",
-              params: { tokenPath: "@.to" },
-            },
-            {
-              label: "To",
-              path: "_to",
-              type: "address",
-              format: "addressName",
-              params: { types: ["eoa"], sources: ["local", "ens"] },
-            },
-          ],
-        },
-        {
-          signature: "approve(address _spender, uint256 _value)",
-          selector: "0x095ea7b3",
-          intent: "Approve",
-          fields: [
-            {
-              label: "Spender",
-              path: "_spender",
-              type: "address",
-              format: "addressName",
-              params: { types: ["eoa", "contract"] },
-            },
-            {
-              label: "Amount",
-              path: "_value",
-              type: "uint256",
-              format: "tokenAmount",
-              params: {
-                tokenPath: "@.to",
-                threshold:
-                  "0x8000000000000000000000000000000000000000000000000000000000000000",
-              },
-            },
-          ],
-        },
-      ],
-    });
-    // The bundled template carries no metadata.
-    expect(result.models?.[0].metadata).toBeUndefined();
-  });
-
-  it("builds transfer calldata that formats as Send", async () => {
-    const result = await getCalldataInputModels(
-      CHAIN_ID,
-      TOKEN,
-      opts(TRUSTED_ERC20),
-    );
-    const model = result.models?.find((m) => m.selector === "0xa9059cbb");
-    assert(model);
-
-    const built = buildCalldata(model, { _to: ALICE, _value: 1_000_000n });
-    assert("data" in built);
-    expect(built.data).toBe("0xa9059cbb" + padAddr(ALICE) + padInt(1_000_000n));
-
-    const display = await format(
-      { chainId: CHAIN_ID, to: TOKEN, data: built.data },
-      opts(TRUSTED_ERC20),
-    );
-    expect(display.intent).toBe("Send");
-    expect(display.interpolatedIntent).toBeUndefined();
-    expect(display.rawCalldataFallback).toBeUndefined();
-    expect(display.warnings).toBeUndefined();
-    expect(display.metadata).toBeUndefined();
-    assert(display.fields);
-    expect(display.fields).toHaveLength(2);
-    const [amount, to] = display.fields;
-    assert(!isFieldGroup(amount) && !isFieldGroup(to));
-    expect(amount).toEqual({
-      label: "Amount",
-      value: "1 TKN",
-      fieldType: "uint",
-      format: "tokenAmount",
-      warning: undefined,
-      tokenAddress: checksum(TOKEN),
-    });
-    expect(to).toEqual({
-      label: "To",
-      value: ALICE_NAME,
-      fieldType: "address",
-      format: "addressName",
-      warning: undefined,
-      rawAddress: checksum(ALICE),
-    });
-  });
-
-  it("returns NO_DESCRIPTOR when the token is not trusted", async () => {
-    const result = await getCalldataInputModels(CHAIN_ID, TOKEN, opts({}));
-    expect(result).toEqual({
-      warnings: [
-        {
-          code: "NO_DESCRIPTOR",
-          message: `No descriptor found for chain ${CHAIN_ID} and address ${TOKEN}`,
-        },
-      ],
-    });
   });
 });
 

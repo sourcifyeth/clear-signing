@@ -4,21 +4,11 @@
  *   domain (name = "Rarible", version = "2").
  * - Exercises six visible top-level fields, four of which iterate over
  *   the `creators` and `royalties` arrays via mid-path `.[]` segments.
- * - The input model from the descriptor's encodeType, and typed data built
- *   from it.
  */
 
 import { describe, it, expect, assert } from "vitest";
 import { formatTypedData, isFieldGroup } from "../../../src/index.js";
-import {
-  buildTypedData,
-  getTypedDataInputModels,
-} from "../../../src/builder.js";
-import type {
-  DisplayModel,
-  ExternalDataProvider,
-  TypedData,
-} from "../../../src/types.js";
+import type { ExternalDataProvider, TypedData } from "../../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../../src/utils.js";
 import {
   buildFilesystemResolverOpts,
@@ -94,7 +84,11 @@ describe("Rarible ERC-721 lazy mint", () => {
     );
   }
 
-  function assertMint(result: DisplayModel) {
+  it("formats a Mint721 lazy mint with iterated creators and royalties", async () => {
+    const opts = buildOpts();
+
+    const result = await formatTypedData(MINT, opts);
+
     expect(result.intent).toBe("Lazy Mint ERC-721");
 
     assert(result.fields);
@@ -237,86 +231,5 @@ describe("Rarible ERC-721 lazy mint", () => {
     expect(result.interpolatedIntent).toBeUndefined();
     expect(result.rawCalldataFallback).toBeUndefined();
     expect(result.warnings).toBeUndefined();
-  }
-
-  it("formats a Mint721 lazy mint with iterated creators and royalties", async () => {
-    const opts = buildOpts();
-
-    const result = await formatTypedData(MINT, opts);
-
-    assertMint(result);
-  });
-
-  it("lists the input model and builds the same typed data from it", async () => {
-    const result = await getTypedDataInputModels(
-      CHAIN_ID,
-      COLLECTION,
-      buildOpts(),
-    );
-    expect(result.warnings).toBeUndefined();
-    assert(result.models);
-    expect(result.models).toEqual([
-      {
-        signature:
-          "Mint721(uint256 tokenId,string tokenURI,Part[] creators,Part[] royalties)Part(address account,uint96 value)",
-        // name and version come from the descriptor's domain binding.
-        domain: {
-          name: "Rarible",
-          version: "2",
-          chainId: CHAIN_ID,
-          verifyingContract: COLLECTION,
-        },
-        metadata: {
-          owner: "Rarible ERC-721 Collection",
-          contractName: undefined,
-          info: undefined,
-        },
-        intent: "Lazy Mint ERC-721",
-        fields: [
-          {
-            label: "Token ID",
-            path: "tokenId",
-            type: "uint256",
-            format: "raw",
-          },
-          {
-            label: "Token URI",
-            path: "tokenURI",
-            type: "string",
-            format: "raw",
-          },
-          {
-            label: "Creator account address",
-            path: "creators.[].account",
-            type: "address",
-            format: "raw",
-          },
-          {
-            label: "Creator value (10000 = 100%)",
-            path: "creators.[].value",
-            type: "uint96",
-            format: "raw",
-          },
-          {
-            label: "Royalties account address",
-            path: "royalties.[].account",
-            type: "address",
-            format: "raw",
-          },
-          {
-            label: "Royalties value (10000 = 100%)",
-            path: "royalties.[].value",
-            type: "uint96",
-            format: "raw",
-          },
-        ],
-      },
-    ]);
-
-    const built = buildTypedData(result.models[0], SIGNER, MINT.message);
-    assert("typedData" in built);
-    expect(built.typedData).toEqual(MINT);
-
-    assertMint(await formatTypedData(built.typedData, buildOpts()));
   });
 });
