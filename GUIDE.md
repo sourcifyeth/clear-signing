@@ -190,7 +190,7 @@ const externalDataProvider: ExternalDataProvider = {
   // Used by fields carrying an `encryption` annotation, to decrypt the value.
   // Optional and scheme-specific — omit it and encrypted fields render the
   // descriptor's `fallbackLabel` while everything else formats as usual.
-  // See DECRYPTION.md.
+  // See docs/DECRYPTION.md.
   resolveDecryptedValue: async (chainId, encryptedValue, params) => {
     const result: DecryptedValueResult | null = { value: "0x00000000000f4240" };
     return result;
@@ -216,7 +216,7 @@ const opts: FormatOptions = {
 See [`src/types.ts`](src/types.ts) for the exact result type definitions.
 
 To decrypt encrypted fields (`resolveDecryptedValue`), see
-[DECRYPTION.md](DECRYPTION.md). It covers the scheme-agnostic contract and
+[docs/DECRYPTION.md](docs/DECRYPTION.md). It covers the scheme-agnostic contract and
 `fhevm` (Zama Protocol), the only scheme ERC-7730 currently defines.
 
 ## 6. Call the format functions

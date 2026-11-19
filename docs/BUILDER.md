@@ -1,0 +1,385 @@
+# Builder Guide
+
+The `builder` entry point works in the opposite direction of `format()`. A
+builder UI (for example a block explorer) has a chain ID and a contract
+address and lets the user call the contract. The builder:
+
+1. resolves the ERC-7730 descriptor of the contract and returns an **input
+   model** for each function: the inputs to render, with the clear signing
+   labels and format hints of the descriptor;
+2. **builds** the calldata from the user input, and returns errors that the
+   UI can show next to each bad input.
+
+No formatting runs, and no `ExternalDataProvider` resolver is called.
+
+```typescript
+import {
+  getCalldataInputModels,
+  buildCalldata,
+} from "@ethereum-sourcify/clear-signing/builder";
+```
+
+The builder is a separate entry point. Integrators that only format carry
+none of its code.
+
+## Walkthrough: build a contract call
+
+The example is a vault with this descriptor format:
+
+```json
+"deposit(uint256 assets,address receiver)": {
+  "intent": "Deposit",
+  "fields": [
+    {
+      "path": "assets",
+      "label": "Amount",
+      "format": "tokenAmount",
+      "params": { "token": "0xA0b86991c6218b36c1d19D4a2E9Eb0cE3606eB48" }
+    },
+    { "path": "receiver", "label": "Receiver", "format": "addressName" }
+  ]
+}
+```
+
+### Step 1: Get the input models and list the functions
+
+```typescript
+const { models, warnings } = await getCalldataInputModels(
+  chainId,
+  vaultAddress,
+  opts, // optional BuilderOptions
+);
+
+if (!models) {
+  // No usable descriptor: warnings says why (e.g. NO_DESCRIPTOR).
+  showFallbackAbiForm();
+  return;
+}
+
+for (const model of models) {
+  // model.intent: "Deposit"; model.signature: the function signature.
+  addFunctionTab(model.intent ?? model.signature, model);
+}
+```
+
+`opts` resolves the descriptor exactly as in `format()`: use the same
+registry index, `trustedTokens` and attestation policy in
+`opts.descriptorResolverOptions`. `opts.chainClient` is needed only with an
+attestation policy, for the revocation read. A function whose format is broken (e.g. a bad `$ref`) gets
+no model and adds a warning; the other functions still get their models.
+
+### Step 2: Render the input fields
+
+`model.fields` lists the descriptor fields in display order, then the
+function inputs that no descriptor field covers. For the example:
+
+```typescript
+[
+  {
+    label: "Amount",
+    path: "assets",
+    type: "uint256",
+    format: "tokenAmount",
+    params: { token: "0xA0b8...eB48" },
+  },
+  {
+    label: "Receiver",
+    path: "receiver",
+    type: "address",
+    format: "addressName",
+  },
+];
+```
+
+Render one input per field:
+
+```typescript
+import type { InputField } from "@ethereum-sourcify/clear-signing/builder";
+
+for (const item of model.fields) {
+  if ("fields" in item) {
+    // An InputFieldGroup.
+    renderSection(item.label, item.fields.map(renderInput));
+  } else {
+    renderInput(item);
+  }
+}
+
+function renderInput(field: InputField) {
+  if (field.constant !== undefined)
+    return renderReadOnly(field.label, field.constant);
+  if (field.path === "@.value") return renderNativeAmount(field.label);
+  // Use type, format and params to pick the control, e.g. a token amount
+  // input with decimals for "tokenAmount", an address book for "addressName".
+  return renderControl(field.label, field.type, field.format, field.params, {
+    advanced: field.hidden, // visible: "never": still needed, show collapsed
+  });
+}
+```
+
+- `label` is the descriptor label. A field without one uses the ABI
+  parameter name.
+- `type` is the Solidity type of the input. A tuple is spelled out with its
+  component names, e.g. `(address token,uint256 amount)[]`.
+- `format` and `params` are the descriptor values. They are hints for a
+  better input control. Path params (e.g. `tokenPath`) are absolute like
+  `path`, so they name another input of the same `values` object.
+- The model has no descriptor references. Every `$.metadata` value in
+  `params` is resolved to its constant: a `token` param that names
+  `$.metadata.constants.usdc` holds the token address.
+- `options` holds the entries of an `enum` format (raw value → label). Use
+  them for a select input, and put the chosen raw value into `values`.
+- A `metadata.maps` reference in `params` is resolved to its constant when the
+  key is the chain ID or the contract address. When the key is another input
+  (or `@.from` / `@.value`), the param is `{ keyPath, values }`: look up the
+  value at `keyPath` in `values`. Compare the keys case-insensitively.
+- A **constant** field (`constant` set, no `path`) shows a fixed value from the
+  descriptor. It takes no input. A constant without a label and without a
+  `$.metadata` path has the label `""`.
+- `@.value` is the native value of the transaction, not a function argument.
+- `hidden: true` marks a field the descriptor hides in the wallet
+  (`visible: "never"`). The function still needs the value.
+
+### Step 3: Collect the user input into `values`
+
+`values` mirrors the function arguments. Each field's `path` says where its
+value goes:
+
+| `path`             | goes to                    |
+| ------------------ | -------------------------- |
+| `receiver`         | `values.receiver`          |
+| `order.fee`        | `values.order.fee`         |
+| `orders.[].amount` | `values.orders[i].amount`  |
+| `recipients.[]`    | `values.recipients[i]`     |
+| `@.value`          | the transaction, see below |
+
+The values are **raw**. The UI converts display input itself, for example a
+decimal token amount with the token decimals:
+
+```typescript
+const values = {
+  assets: parseUnits(amountInput, 6), // your helper: 1.5 USDC → 1500000n
+  receiver: receiverInput, // "0x..."
+};
+```
+
+### Step 4: Build the calldata
+
+```typescript
+const result = buildCalldata(model, values);
+```
+
+`buildCalldata` is synchronous and never throws. It validates every value and
+returns either `{ data }` or `{ errors }`.
+
+Because it is synchronous and has no side effects, you can also call it on
+each change of the user input, to validate the form while the user types:
+
+```typescript
+function onInputChange() {
+  const result = buildCalldata(model, collectValues());
+  clearInputErrors();
+  if ("errors" in result) {
+    for (const error of result.errors) showError(error);
+  }
+  submitButton.disabled = "errors" in result;
+}
+```
+
+An input that the user did not fill yet gives a `MISSING_VALUE` error. Filter
+on `error.code` if you do not want to show those before the user submits.
+
+### Step 5: Show the errors, or send the transaction
+
+`buildCalldata` returns the errors of all inputs at once, not only the first.
+Each error names the input field it belongs to in `fieldPath`, which is the
+`path` of an `InputField` of the model. Use it to show the message directly
+below that input:
+
+```typescript
+import type { BuildInputError } from "@ethereum-sourcify/clear-signing/builder";
+
+function showError(error: BuildInputError) {
+  if (error.fieldPath === undefined) {
+    // No input takes this value, e.g. an unknown key in values.
+    showFormError(error.message);
+    return;
+  }
+  // The input box that you rendered for the field with this path.
+  const input = inputsByFieldPath.get(error.fieldPath);
+  // error.path is the concrete value, e.g. "orders.[1].amount" for the
+  // field "orders.[].amount". Use it to find the row of a repeated input.
+  input.showErrorBelow(error.message, error.path);
+}
+
+if ("errors" in result) {
+  for (const error of result.errors) showError(error);
+  return;
+}
+
+await wallet.sendTransaction({
+  to: vaultAddress,
+  data: result.data,
+  value: nativeAmount, // the @.value input, if the model has one
+});
+```
+
+All errors are returned at once, so the form can mark every bad input. The
+wallet can then clear sign the transaction with `format()` as usual.
+
+## Reference
+
+### Functions
+
+```typescript
+getCalldataInputModels(chainId: number, to: string, opts?: BuilderOptions): Promise<InputModels>
+buildCalldata(model: InputModel, values: Record<string, unknown>): { data: string } | { errors: BuildInputError[] }
+
+interface BuilderOptions {
+  // Descriptor source, the same value as FormatOptions.descriptorResolverOptions.
+  descriptorResolverOptions?: GitHubResolverOptions | CustomResolverOptions;
+  // Read-only RPC access for the attestation revocation read.
+  chainClient?: ChainClient;
+}
+```
+
+`getCalldataInputModels` never throws. `buildCalldata` is synchronous, needs
+no descriptor and never throws.
+
+### Types
+
+```typescript
+interface InputModels {
+  models?: InputModel[];
+  warnings?: Warning[];
+}
+
+interface InputModel {
+  signature: string; // display.formats key: the function signature
+  selector: string; // 4-byte function selector as hex
+  metadata?: {
+    owner?: string;
+    contractName?: string;
+    info?: { deploymentDate?: string; url?: string };
+  };
+  intent?: string | Record<string, string>;
+  fields: (InputField | InputFieldGroup)[];
+}
+
+interface InputField {
+  label: string;
+  path?: string; // absent for constants
+  type?: string; // set on every field with a path
+  format?: DescriptorFieldFormatType;
+  params?: InputFieldParams;
+  options?: Record<string, string>; // entries of an enum: raw value → label
+  constant?: string | number | boolean;
+  hidden?: boolean;
+}
+
+// The descriptor params, without `$ref`, with every `$.metadata` value
+// resolved. A map reference is its constant, or an InputMapReference.
+type InputFieldParams = { ... };
+
+interface InputMapReference {
+  keyPath: string; // absolute path of the key value
+  values: Record<string, string | number | boolean>; // the entries of the map
+}
+
+interface InputFieldGroup {
+  label?: string;
+  path?: string;
+  fields: InputField[];
+}
+
+interface BuildInputError {
+  path: string; // concrete path of the bad value, e.g. "orders.[1].amount"
+  fieldPath?: string; // path of the InputField that takes it, e.g. "orders.[].amount"
+  code: BuildInputErrorCode;
+  message: string;
+}
+```
+
+### How fields are treated
+
+| Descriptor field                                                     | Input model                                                                           |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `path` names an argument (`#.` prefix optional)                      | input field with `path` and `type`                                                    |
+| `value` set, or `path` starts with `$.`                              | constant field, `constant` resolved from the descriptor metadata, no `path`           |
+| `path: "@.value"`                                                    | input field with `path: "@.value"` and `type: "uint256"`                              |
+| other `@.` paths (`@.from`, `@.to`, `@.chainId`)                     | left out: the container sets them                                                     |
+| `path` with a byte slice (`data.[:4]`) or a fixed index (`list.[0]`) | left out: it names no whole input. The input is appended as uncovered                 |
+| `path` that names no argument (e.g. a typo)                          | left out. The inputs are appended as uncovered                                        |
+| path params (`tokenPath`, map `keyPath`, ...)                        | absolute like `path`: `#.` stripped, group prefix applied                             |
+| a second field with the same `path`                                  | left out: one input for each path. The first field is the input                       |
+| a field with another field inside it (`order` and `order.fee`)       | left out, in any order. The inner fields are the inputs; uncovered parts are appended |
+| `$.metadata` value in `params`                                       | resolved to its constant. `$ref` of an enum becomes `options`                         |
+| map reference in `params`                                            | its constant for the keys `@.chainId` / `@.to`; else `{ keyPath, values }`            |
+| `visible: "never"`                                                   | input field with `hidden: true`                                                       |
+| other `visible` rules (`ifNotIn`, `mustMatch`, ...)                  | ignored: they depend on the value                                                     |
+| no `label`                                                           | the ABI parameter name (the last name in `path`) is the label                         |
+| `$ref`                                                               | merged with its definition first                                                      |
+| field group                                                          | `InputFieldGroup`; child paths get the group prefix, as in `format()`                 |
+| nested field group                                                   | the function gets no model: `UNSUPPORTED_NESTED_FIELD_GROUP` warning                  |
+
+After the descriptor fields, every input that no field covers is appended,
+with its name as label. An input with no covered path at, above or under it is
+appended whole. Of a partly covered tuple or tuple array, only the uncovered
+components are appended, e.g. `order.fee` or `orders.[].fee`. An unnamed
+argument uses the name `param<i>` (also its key in `values`).
+
+### The `values` shape and raw value types
+
+- Keys are argument names. A tuple is an object keyed by component name. An array is a JS array.
+- Integers (`uintN`, `intN`): `bigint`, a safe-integer number, or a decimal or
+  `0x` hex string.
+- `address`, `bytes`, `bytesN`: `0x` hex string.
+- `bool`: boolean. `string`: string.
+- Constants and `@.value` are not part of `values`.
+
+### `BuildInputError` codes
+
+| Code                | Meaning                                                                |
+| ------------------- | ---------------------------------------------------------------------- |
+| `MISSING_VALUE`     | No value for an argument, tuple component or array element             |
+| `INVALID_TYPE`      | Wrong JS shape, bad hex, not an integer, not a boolean                 |
+| `OUT_OF_RANGE`      | The integer does not fit `uintN` / `intN`                              |
+| `INVALID_LENGTH`    | Wrong byte length of an `address` / `bytesN`, wrong fixed array length |
+| `UNKNOWN_FIELD`     | `values` has a key that the function or tuple does not declare         |
+| `INVALID_SIGNATURE` | `model.signature` cannot be parsed, or it uses an unsupported type     |
+
+`path` is in the `InputField.path` syntax with the concrete array index in
+place of `[]`, e.g. `orders.[1].amount`. The root object is `""`. `message`
+is short and can be shown to the user.
+
+`fieldPath` is the `path` of the model field that takes the bad value:
+
+- the field at that path (`orders.[1].amount` → `orders.[].amount`);
+- else the field that contains it (`order.fee` → `order`, when one field
+  covers the whole tuple);
+- else the first field inside it (`orders` is not an array →
+  `orders.[].amount`).
+
+It is absent when no field matches: an `UNKNOWN_FIELD` key, or an error on
+the `values` object itself.
+
+These errors describe bad user input. They are not `Warning`s, which describe
+the descriptor or the formatting.
+
+### Warnings
+
+`InputModels.warnings` uses the `WarningCode`s of `format()`:
+
+| Code                             | When                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `NO_DESCRIPTOR`                  | Nothing is indexed for the address (and no trusted token matches)                         |
+| `NO_TRUSTED_ATTESTATION`         | The attestation policy rejects the descriptor                                             |
+| `ATTESTATION_OPTIONS_INCOMPLETE` | A policy is set without `chainClient` or `fetchAttestation`                               |
+| `CYCLIC_INCLUDES`                | The `includes` chain of the descriptor is cyclic                                          |
+| `DESCRIPTOR_FETCH_ERROR`         | Fetching the descriptor (or the revocation read) failed                                   |
+| `DEPLOYMENT_MISMATCH`            | The descriptor is not bound to the chain and address                                      |
+| `NO_FORMAT_MATCH`                | The descriptor has no function format                                                     |
+| `DEFINITIONS_RESOLUTION_ERROR`   | A `$ref` cannot be resolved; that function gets no model                                  |
+| `UNSUPPORTED_NESTED_FIELD_GROUP` | A nested field group; that function gets no model                                         |
+| `INVALID_DESCRIPTOR`             | A `$.metadata` or map reference in `params` does not resolve; that function gets no model |
+| `UNEXPECTED_LIB_ERROR`           | A bug in the library                                                                      |

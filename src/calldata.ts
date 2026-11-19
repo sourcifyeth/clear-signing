@@ -241,26 +241,38 @@ function normalizeNegativeIndices(
   return segments.join(".");
 }
 
+/** A `display.formats` entry whose key parses as a function signature. */
+interface FunctionFormat {
+  key: string;
+  selector: Uint8Array;
+  inputs: FunctionInput[];
+  spec: DescriptorFormatSpec;
+}
+
+/** Parse the `display.formats` keys one at a time, so a lookup can stop early. */
+export function* functionFormats(
+  descriptor: Descriptor,
+): Generator<FunctionFormat> {
+  for (const [key, spec] of Object.entries(descriptor.display?.formats ?? {})) {
+    const parsed = parseFunctionSignatureKey(key);
+    if (!parsed) continue;
+    yield { key, selector: parsed.selector, inputs: parsed.inputs, spec };
+  }
+}
+
 /** Find the format spec whose parsed function selector matches the given hex. */
 function findFormatBySelector(
   descriptor: Descriptor,
   selectorHex: string,
-): { inputs: FunctionInput[]; spec: DescriptorFormatSpec } | undefined {
-  const formats = descriptor.display?.formats;
-  if (!formats) return undefined;
-
-  for (const [key, spec] of Object.entries(formats)) {
-    const parsed = parseFunctionSignatureKey(key);
-    if (!parsed) continue;
-    if (bytesToHex(parsed.selector) === selectorHex) {
-      return { inputs: parsed.inputs, spec };
-    }
+): FunctionFormat | undefined {
+  for (const format of functionFormats(descriptor)) {
+    if (bytesToHex(format.selector) === selectorHex) return format;
   }
   return undefined;
 }
 
 /** ABI function input parameter. */
-interface FunctionInput {
+export interface FunctionInput {
   name: string;
   type: string;
   components?: FunctionInput[];
@@ -278,7 +290,7 @@ interface FunctionInput {
  *   "approve(address spender,uint256 value)"
  *   "submitOrder((address token,uint256 amount) order,bytes32 salt)"
  */
-function parseFunctionSignatureKey(
+export function parseFunctionSignatureKey(
   key: string,
 ): { inputs: FunctionInput[]; selector: Uint8Array } | undefined {
   const openParen = key.indexOf("(");
@@ -403,7 +415,7 @@ function canonicalParam(input: FunctionInput): string {
  *   "uint256[][]" → { elementType: "uint256[]", size: undefined }
  *   "address"     → undefined
  */
-function parseArrayType(
+export function parseArrayType(
   type: string,
 ): { elementType: string; size: number | undefined } | undefined {
   const match = type.match(/^(.+)\[(\d*)\]$/);
@@ -425,7 +437,7 @@ interface DecodedArguments {
  * Per ABI spec: bytes, string, T[], T[k] where T is dynamic, and tuples with
  * any dynamic component are dynamic. Everything else is static.
  */
-function isDynamicInput(input: FunctionInput): boolean {
+export function isDynamicInput(input: FunctionInput): boolean {
   if (input.type === "bytes" || input.type === "string") return true;
   const arr = parseArrayType(input.type);
   if (arr) {

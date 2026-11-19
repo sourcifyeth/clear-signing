@@ -23,7 +23,14 @@ src/
 ├── bundled-descriptors.ts      # Bundled ERC-20/721 templates → buildBundledTokenDescriptor()
 ├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
-└── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
+├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
+├── filesystem.ts               # Separate entry point (/filesystem): Node-only filesystem resolver
+├── builder.ts                  # Separate entry point (/builder): input models, buildCalldata()
+└── builder.types.ts            # Public types of the builder entry point
+
+docs/
+├── BUILDER.md                  # Builder integrator walkthrough and reference
+└── DECRYPTION.md               # Wallet-side decryption (fhevm) integration
 ```
 
 ### Module responsibilities
@@ -80,7 +87,11 @@ src/
   selector-to-format lookup (`findFormatBySelector`), and a unified recursive ABI decoder
   (`decodeArguments` → `decodeComponents`/`decodeValue`) supporting all ABI types: static
   and dynamic tuples, dynamic arrays (`T[]`), fixed-size arrays (`T[k]`), nested arrays,
-  `bytes`/`string`, and `bytesN`. All parsing/decoding internals are module-private.
+  `bytes`/`string`, and `bytesN`. For `builder.ts` it exports `FunctionInput`,
+  `parseFunctionSignatureKey`, `parseArrayType`, `isDynamicInput` and
+  the generator `functionFormats(descriptor)` (every `display.formats` entry whose key
+  parses, as `{ key, selector, inputs, spec }`; `findFormatBySelector` is built on it). The other
+  parsing/decoding internals are module-private.
 
 - **`eip712.ts`** — Everything specific to EIP-712 typed data formatting. Contains the
   top-level `formatEip712()` entry point, `encodeType` computation and matching
@@ -103,6 +114,13 @@ src/
   canonicalizer is module-private — for `JSON.parse` output it is exactly
   `JSON.stringify` with recursively sorted keys. The trusted-attester policy
   loop itself lives in `resolver.ts` (`applyAttestationPolicy`).
+
+- **`builder.ts`** — Separate entry point `@ethereum-sourcify/clear-signing/builder`.
+  `getCalldataInputModels` resolves the calldata descriptor and returns one
+  `InputModel` per function; `buildCalldata` validates the user input and builds the
+  calldata. Contains `buildInputFields` (the field classification, exported for unit
+  tests only), the scalar validation and the ABI encoder (all module-private). See
+  [Builder](#builder).
 
 - **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 template descriptors (the
   registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` files, transcribed as TS
@@ -154,6 +172,7 @@ src/
    ```
 
 3. **EIP-5792 batch formatting:**
+
    ```
    formatEip5792Batch(batch, opts?)
    → for each call in batch.calls:
@@ -163,6 +182,18 @@ src/
    → join interpolatedIntent strings with " and "
        (or emit BATCH_INTERPOLATION_INCOMPLETE if any call lacks one)
    → returns BatchDisplayModel
+   ```
+
+4. **Input models and building (`builder.ts`):**
+
+   ```
+   getCalldataInputModels(chainId, to, opts?)
+   → resolveCalldataDescriptor(...) — same resolution as format()
+   → isCalldataDescriptorBoundTo() or DEPLOYMENT_MISMATCH
+   → for each functionFormats() entry: buildInputFields() → InputModel
+   → returns InputModels
+
+   buildCalldata(model, values) → validate + ABI-encode → { data } | { errors }
    ```
 
 Both calldata and EIP-712 paths share the same field processing pipeline in `fields.ts` via `applyFieldFormats()`.
@@ -323,6 +354,10 @@ Any other source (in-memory map, custom HTTP endpoint, ...) is implemented
 by satisfying the `DescriptorResolver` shape directly and wrapping it in
 `{ type: "custom", resolver }`.
 
+The builder (`src/builder.ts`) is the second subpath entry,
+`@ethereum-sourcify/clear-signing/builder`. Its `BuilderOptions` take the same
+`descriptorResolverOptions`, so all descriptor sources above work with it. See [Builder](#builder).
+
 ### GitHub client module (`github-registry-client.ts`)
 
 Pure I/O layer with no caching. Exports:
@@ -349,6 +384,90 @@ The merge is implemented in `mergeDescriptors(including, included)` (internal to
 - **`includes` key:** dropped from the merged result.
 
 Include path resolution uses `new URL(relative, base)` in the resolver.
+
+## Builder
+
+`src/builder.ts` is the opposite direction of `format()`: from a chain ID and an
+address to the inputs of each function, and from the user input to the calldata.
+It covers calldata only; there is no EIP-712 counterpart. The integrator
+walkthrough is [`docs/BUILDER.md`](docs/BUILDER.md).
+
+**Pruneability.** `builder.ts` is a separate tsup entry and package export.
+`index.ts` never imports it, so main-entry bundles contain no builder code. Keep
+it that way: builder-only logic stays in `builder.ts`, so it never lands in a
+shared chunk of the ESM build. From shared modules `builder.ts` imports only what
+the main entry uses anyway (`calldata.ts`: signature parsing, `functionFormats`;
+`resolver.ts`: `resolveCalldataDescriptor`). The builder types (`BuilderOptions`,
+`InputModel`, `InputField`, `InputFieldGroup`, `InputFieldParams`, `InputMapReference`,
+`InputModels`, `BuildInputError`,
+`BuildInputErrorCode`) live in `builder.types.ts`, not in `types.ts`, so the main
+entry does not expose them. `builder.ts` re-exports them.
+
+**Options.** `getCalldataInputModels` takes `BuilderOptions`, not `FormatOptions`:
+the builder formats nothing, so it has no `externalDataProvider`. The options hold
+`descriptorResolverOptions` (typed from `FormatOptions`) and `chainClient`, which
+only the attestation revocation read uses.
+
+**Input model.** One `InputModel` per `display.formats` key, with the function
+`signature` and `selector`. Its `fields` are the descriptor fields in display order
+(`buildInputFields`), then the ABI inputs that no field covers, labeled with their
+name. A format whose fields fail (`$ref` error, nested group) gives its warning and
+no model. A descriptor without any function format gives `NO_FORMAT_MATCH`, so
+the result always has `models` or `warnings`.
+
+**Field classification** (in `buildInputFields`, after `mergeDefinitions`):
+
+- `value` set, or `path` starts with `$.` → constant. `$.metadata.*` is resolved
+  with `resolveMetadataValue`; the field gets `constant` and no `path`. A
+  constant that resolves to no string / number / boolean is left out.
+- `path` is `@.value` → input with `type: "uint256"`. Other `@.` paths → left out.
+- `path` with a byte slice (`parseByteSlice`) or a fixed index (`.[N]`, `.[-N]`)
+  → left out; the input stays uncovered and is appended.
+- Else an input path: `#.` stripped, group prefix applied by the `fields.ts`
+  rules (struct group and `.[]` array group scope their children; a group whose
+  children have `.[]` paths does not; `@.` / `$.` children stay absolute). The
+  path must name an input; else the field is left out and nothing is covered.
+  The path is marked covered and gets `type` (a tuple is spelled
+  `(address token,uint256 amount)[]`). A later field with the same path is left
+  out: a descriptor can show one input in more than one way (alternative
+  `visible` rules), but the model has one input for each path.
+- After all fields: `dropContainingFields` leaves out each field that has
+  another field inside it (`order` when `order.fee` is a field), in any order.
+  Descriptors often list the components of a tuple and then the parent with
+  `visible: "never"`. The inner fields are the inputs; the uncovered parts are
+  appended. A group that loses all its fields is dropped.
+- `visible: "never"` → `hidden: true`. No label → the last name segment of the
+  path.
+- Params (`resolveParams`, on a copy): the model has **no `$` reference**.
+  - A `$.metadata` string (also inside an array) becomes its constant. Under a
+    `...Path` key it moves to the plain key (`tokenPath` → `token`).
+  - `$ref` (enum) becomes `InputField.options`, the entries of the enum.
+  - A map reference becomes its constant when the key path is `@.chainId` or
+    `@.to` (known from the arguments of `getCalldataInputModels`; the lookup is
+    `resolveMetadataEntry`, case-insensitive). Else it becomes an
+    `InputMapReference` `{ keyPath, values }`.
+  - Other path params are absolute like `path`; `@.` paths stay.
+  - A reference that does not resolve gives `INVALID_DESCRIPTOR` and no model
+    for that function. `InputFieldParams` is the type of the result.
+
+Appending: an input with no covered path at, above or under it is appended
+whole; a partly covered tuple / array is recursed. Unnamed inputs are
+named `param<i>` at every level, in the model and in `values`.
+
+**`values` shape.** It mirrors the arguments: a
+tuple is an object keyed by component name, an array is a JS array. Values are
+raw (integers as `bigint` / safe number / decimal or `0x` string; hex for
+`address` / `bytes` / `bytesN`). Constants and `@.value` are not part of it.
+
+**`BuildInputError`.** `buildCalldata` validates every value, collects all
+errors, and returns `{ errors }` with a concrete `path` (`orders.[1].amount`), a
+`BuildInputErrorCode` and a short user-facing `message`. `withFieldPaths` adds
+`fieldPath`, the `path` of the model field that takes the value (exact field, else
+the containing field, else the first field inside), so a UI can show the error at
+that input. This is deliberately
+outside the `Warning` scheme: warnings describe the descriptor or the formatting
+and go to wallet users, build errors describe bad user input and go next to the
+form input. Do not add a `WarningCode` for builder input errors.
 
 ## Important Concepts
 
@@ -432,7 +551,7 @@ A field may carry an `encryption` annotation (`DescriptorFieldEncryption`:
 Decryption is delegated entirely to the wallet and is optional — schemes
 generally need a live connection, a user signature, and an access-control check.
 `fhevm` is the only scheme ERC-7730 currently defines; the wallet-side
-integration is documented in [`DECRYPTION.md`](DECRYPTION.md) and kept out of the
+integration is documented in [`docs/DECRYPTION.md`](docs/DECRYPTION.md) and kept out of the
 library.
 
 The raw encrypted value is always reported on `DisplayField.rawEncryptedValue`,
@@ -610,10 +729,12 @@ When changing the public API, input/output types, descriptor resolver options, w
 codes, or the `ExternalDataProvider` interface, check whether [`GUIDE.md`](GUIDE.md)
 (the wallet integration guide) and [`README.md`](README.md) need updating too — they
 contain example code and type signatures that can drift out of sync with the source.
-If the change touches encryption, check [`DECRYPTION.md`](DECRYPTION.md) as well.
+If the change touches encryption, check [`docs/DECRYPTION.md`](docs/DECRYPTION.md) as well.
+If the change touches the builder, field classification, or the descriptor resolution it
+uses, check [`docs/BUILDER.md`](docs/BUILDER.md) as well.
 
 Keep scheme-specific integration detail (SDK calls, protocol internals) in
-[`DECRYPTION.md`](DECRYPTION.md) — `src/`, `README.md`, and `GUIDE.md` stay
+[`docs/DECRYPTION.md`](docs/DECRYPTION.md) — `src/`, `README.md`, and `GUIDE.md` stay
 scheme-agnostic and describe only the `resolveDecryptedValue` contract.
 
 ## Pull Requests
@@ -634,11 +755,15 @@ Tests live in `test/`. Current test files:
 - `test/utils.spec.ts` — unit tests for the shared utility functions in `utils.ts` (signed integer decoding of sign-extended ABI words)
 - `test/fields.spec.ts` — unit tests for the field processing pipeline (groups, iteration, slices, separators, encryption, `metadata.maps` references)
 - `test/github-registry-client.spec.ts` — unit tests for the GitHub client I/O layer
+- `test/builder.spec.ts` — unit tests for `builder.ts` (unit tests only): `buildInputFields` field classification (`$ref`, constants, `@.value`, slices, fixed indices, `hidden`, group prefixes, partial tuple coverage, appended inputs, definition errors, nested groups), `getCalldataInputModels` warnings with an in-memory resolver, `buildCalldata` known-answer vectors and every `BuildInputErrorCode`
+- `test/builder/*.spec.ts` — builder end-to-end tests, one file per descriptor owner or topic. They read the descriptors in `test/registry-cases/<owner>/` (and `test/attestations/`) and assert the input models and the built calldata: `paraswap.spec.ts` (byte slices, tuple array, struct group), `lifi.spec.ts` (`.[]` and fixed-index paths), `ekubo.spec.ts` (components and the hidden parent of a tuple array), `aave-lpv2.spec.ts` (enum entries and a metadata constant in params), `trusted-tokens.spec.ts` (bundled ERC-20), `attestations.spec.ts` (attestation policy)
 - `test/erc7730-test-cases/example-main.spec.ts` — ERC-7730 spec test cases using `example-main.json` descriptor (co-located in same directory), including EIP-5792 batch formatting tests
 - `test/erc7730-test-cases/example-array-iteration.spec.ts` — bundled/sequential array iteration tests
 - `test/erc7730-test-cases/example-maps.spec.ts` / `example-maps-pools.spec.ts` — `metadata.maps` references keyed on `@.chainId`; the spec files' `underlyingToken` addresses are 21 bytes, so that field asserts `FORMAT_PARAM_RESOLUTION_ERROR` as is (spec files are never edited)
 - `test/registry-cases/1inch/1inch.spec.ts` — 1inch AggregationRouterV6: swap + clipperSwap (byte slice paths)
 - `test/registry-cases/paraswap/paraswap.spec.ts` — Paraswap AugustusSwapper v6.2: RFQ batch fill (tuple array decoding) + BalancerV2 (dynamic bytes + byte range slices)
+- `test/registry-cases/lifi/lifi.spec.ts` — LI.FI LIFIDiamond: two-hop swap with array-indexed token paths
+- `test/registry-cases/rarible/rarible.spec.ts` — Rarible ERC-721 lazy mint (EIP-712, mid-path `.[]` iteration)
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
 - `test/registry-cases/across/across.spec.ts` — Across Ethereum SpokePool: deposit + depositNow (`addressName` / `tokenTicker` on `bytes32`, zero-padded EVM addresses and a Solana key)
@@ -654,6 +779,9 @@ Tests live in `test/`. Current test files:
   a new test directory layout for it.
 - **Unit tests live in `test/<module>.spec.ts`**, named after the `src/` module they cover.
   Do not name a test file after the feature or bug.
+- **Builder end-to-end tests live in `test/builder/`.** They reuse the descriptor files in
+  `test/registry-cases/<owner>/`. Do not add builder tests to the format spec files, and keep
+  `test/builder.spec.ts` for unit tests only.
 - **Be consistent** with the style and patterns of existing tests in the same file.
 - **Test all properties** of the returned `DisplayModel` and its nested objects:
   `intent`, `interpolatedIntent`, `fields`, `metadata` (including `owner`, `contractName`, `info`),
@@ -760,6 +888,9 @@ with `export type *`). A type belongs there when it is a parameter or return
 type of a public function, a member of a public interface, or a nested part
 of one (e.g. `Descriptor` → `DescriptorContext`, `OffchainAttestation` →
 `OffchainAttestationMessage`).
+
+Types that only the builder entry point uses live in `builder.types.ts`, by the
+same rule. Do not add them to `types.ts`.
 
 A type that a consumer can never reach stays in the module that owns it —
 module-private, or exported for other internal modules only. Examples:
