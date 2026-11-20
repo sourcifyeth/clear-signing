@@ -26,7 +26,11 @@ import type {
   TypedData,
   Warning,
 } from "./types.js";
-import { buildBundledTokenDescriptor } from "./bundled-descriptors.js";
+import {
+  buildBundledPermitDescriptor,
+  buildBundledTokenDescriptor,
+  ERC2612_PERMIT_ENCODE_TYPE,
+} from "./bundled-descriptors.js";
 import {
   bytesToHex,
   hexToBytes,
@@ -163,6 +167,12 @@ function lookupTrustedToken(
  * - `NO_TRUSTED_ATTESTATION` — no trusted attester has a valid attestation
  *   for the descriptor. The policy reads revocation state through
  *   `chainClient`.
+ *
+ * If no registry entry matches, the method also checks the optional
+ * `options.trustedTokens` list. When the list tags `verifyingContract` as
+ * `erc2612` and the message is an ERC-2612 `Permit`, the method builds a
+ * Permit descriptor from a bundled template. The attestation policy does not
+ * apply to this bundled descriptor.
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
@@ -176,30 +186,46 @@ export async function resolveTypedDataDescriptor(
   }
 
   const resolver = await createResolver(options);
+  const encodeTypeStr = typedData.types
+    ? computeEncodeType(typedData.primaryType, typedData.types)
+    : undefined;
+  if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
+
   const byPrimaryType =
     resolver.index.typedDataIndex[
       `eip155:${chainId}:${normalizeAddress(verifyingContract)}`
     ];
-  const entries = byPrimaryType?.[typedData.primaryType];
-  if (!entries?.length) return noDescriptorWarning(chainId, verifyingContract);
-
-  const encodeTypeStr = computeEncodeType(
-    typedData.primaryType,
-    typedData.types,
-  );
-  if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
   const hash = bytesToHex(keccak256(utf8ToBytes(encodeTypeStr)));
-
-  const match = entries.find((e) => e.encodeTypeHashes.includes(hash));
-  if (!match) return noDescriptorWarning(chainId, verifyingContract);
-  const resolved = await resolveWithIncludes(resolver, match.path);
-  return applyAttestationPolicy(
-    resolver,
-    match.path,
-    resolved,
-    options?.attestations,
-    chainClient,
+  const match = byPrimaryType?.[typedData.primaryType]?.find((e) =>
+    e.encodeTypeHashes.includes(hash),
   );
+  if (match) {
+    const resolved = await resolveWithIncludes(resolver, match.path);
+    return applyAttestationPolicy(
+      resolver,
+      match.path,
+      resolved,
+      options?.attestations,
+      chainClient,
+    );
+  }
+
+  // No registry descriptor. Check if a trusted ERC-2612 token matches.
+  if (
+    encodeTypeStr === ERC2612_PERMIT_ENCODE_TYPE &&
+    lookupTrustedToken(options?.trustedTokens, chainId, verifyingContract) ===
+      "erc2612"
+  ) {
+    return {
+      descriptor: buildBundledPermitDescriptor(
+        chainId,
+        verifyingContract,
+        typedData.domain,
+      ),
+    };
+  }
+
+  return noDescriptorWarning(chainId, verifyingContract);
 }
 
 /**

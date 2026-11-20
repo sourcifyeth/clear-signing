@@ -20,8 +20,8 @@ src/
 ├── eip712.ts                   # EIP-712 path: formatEip712(), encodeType matching, type resolution
 ├── resolver.ts                 # Descriptor lookup, includes resolution, descriptor merging, attestation policy
 ├── attestations.ts             # ERC-8176: descriptor hash (JCS), offchain attestation verification, sigs/ paths
-├── bundled-descriptors.ts      # Bundled ERC-20/721 templates → buildBundledTokenDescriptor()
-├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts)
+├── bundled-descriptors.ts      # Bundled templates → buildBundledTokenDescriptor(), buildBundledPermitDescriptor()
+├── bundled/                    # The bundled template descriptors as TS consts (erc20.ts, erc721.ts, erc2612-permit.ts)
 ├── github-registry-client.ts   # I/O layer: GitHub raw/API URL construction and fetch helpers
 ├── github-registry-index.ts    # In-memory index built from the GitHub registry file tree
 ├── filesystem.ts               # Separate entry point (/filesystem): Node-only filesystem resolver
@@ -122,12 +122,17 @@ docs/
   tests only), the scalar validation and the ABI encoder (all module-private). See
   [Builder](#builder).
 
-- **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 template descriptors (the
-  registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` files, transcribed as TS
-  `const`s in `bundled/erc20.ts` and `bundled/erc721.ts`). Exports
-  `buildBundledTokenDescriptor(standard, chainId, address)`, which clones the template and
-  injects `context.contract.deployments` so the result passes the deployment-binding check.
-  Used by `resolveCalldataDescriptor` for the trusted-token fallback. The descriptors are
+- **`bundled-descriptors.ts`** — Bundled ERC-20 / ERC-721 / ERC-2612 Permit template
+  descriptors (the registry's `calldata-erc20-tokens` / `calldata-erc721-nfts` /
+  `eip712-erc2612-permit` files, transcribed as TS `const`s in `bundled/erc20.ts`,
+  `bundled/erc721.ts` and `bundled/erc2612-permit.ts`). Exports
+  `buildBundledTokenDescriptor(standard, chainId, address)`, which clones the calldata
+  template (`erc2612` uses the ERC-20 one) and injects `context.contract.deployments` so the
+  result passes the deployment-binding check, and
+  `buildBundledPermitDescriptor(chainId, address, domain)`, which clones the Permit template
+  and injects `context.eip712.deployments` and `context.eip712.domain`. Also exports
+  `ERC2612_PERMIT_ENCODE_TYPE`. Used by `resolveCalldataDescriptor` and
+  `resolveTypedDataDescriptor` for the trusted-token fallback. The descriptors are
   committed as TS rather than imported JSON — see the gotcha below.
 
 ## Key Data Flow
@@ -164,7 +169,11 @@ docs/
        → looks up (chainId, verifyingContract, primaryType) in typedDataIndex
        → disambiguates entries by matching keccak256(encodeType) against
          each entry's encodeTypeHashes
-       → applyAttestationPolicy() — same attestation gating as the calldata path
+       → on a miss, if the encodeType is the ERC-2612 Permit and
+         options.trustedTokens tags verifyingContract "erc2612", return
+         buildBundledPermitDescriptor(chainId, verifyingContract, domain)
+       → on a hit, applyAttestationPolicy() — same attestation gating as the
+         calldata path
    → eip712.formatEip712(typedData, descriptor, externalDataProvider?)
        → findFormatSpec() matches display.formats key via encodeType string
        → applyFieldFormats() (from fields.ts) renders each field
@@ -201,12 +210,12 @@ Each builds a `BaseResolvePath` closure that handles `@.`, `$.`, `#.`, and bare 
 for its domain (calldata args vs. EIP-712 message fields). `applyFieldFormats()` internally
 wraps it with `buildSliceResolvePath` to handle byte slice paths (e.g. `srcToken.[-20:]`).
 
-## Trusted Token Descriptors (bundled ERC-20 / ERC-721)
+## Trusted Token Descriptors (bundled ERC-20 / ERC-721 / ERC-2612)
 
 `descriptorResolverOptions.trustedTokens` (type `TrustedTokens`, declared on the
 shared `BaseResolverOptions`, so both the GitHub and custom variants carry it) is
 an optional wallet-provided **data list** keyed `chainId → tokenAddress → standard`
-(`"erc20" | "erc721"`; address keys may be lowercase or EIP-55 checksummed —
+(`"erc20" | "erc721" | "erc2612"`; address keys may be lowercase or EIP-55 checksummed —
 `lookupTrustedToken` tries both). It is the **fallback after
 registry resolution**: `resolveCalldataDescriptor` first looks up the registry
 index by `(chainId, to)`; when the index has a path, its resolution result is
@@ -223,6 +232,18 @@ never parses the calldata.
 different semantics (ERC-20 `value` → tokenAmount vs. ERC-721 `tokenId` → nftName),
 so the calldata alone cannot disambiguate them. Trust is delegated entirely to the
 wallet.
+
+**ERC-2612 Permit.** `erc2612` marks an ERC-20 token with `permit`. Its calldata
+uses the ERC-20 template. `resolveTypedDataDescriptor` falls back to the bundled
+Permit template (a verbatim copy of the registry's `ercs/eip712-erc2612-permit.json`)
+when no registry entry matches `(chainId, verifyingContract, primaryType, encodeType)`,
+the message `encodeType` equals `ERC2612_PERMIT_ENCODE_TYPE`, and the token is tagged
+`erc2612`. The fallback binds the descriptor with `context.eip712.deployments` and
+copies the message domain into `context.eip712.domain`. Tokens tagged `erc20` get no
+Permit descriptor: a permit for a token without `permit` cannot be used on-chain.
+DAI-style permits (`Permit(address holder,...,bool allowed)`) have another
+`encodeType` and are not covered. When the registry template changes, update
+`src/bundled/erc2612-permit.ts` too.
 
 ## Descriptor Attestations (ERC-8176)
 
@@ -767,7 +788,7 @@ Tests live in `test/`. Current test files:
 - `test/registry-cases/zama/zama.spec.ts` — Zama ConfidentialWrapper: fhevm-encrypted `bytes32` amount handle decrypted via `resolveDecryptedValue` and rendered as a tokenAmount, plus plaintext-encoding edge cases (zero-padded ABI word, top-bit-set `uint64`, over-wide value) and both fallback paths — no provider, and a provider that declines
 - `test/registry-cases/ekubo/ekubo.spec.ts` — Ekubo Positions: mintAndDeposit + maybeInitializePool (sign-extended `int32` ticks next to a static tuple)
 - `test/registry-cases/across/across.spec.ts` — Across Ethereum SpokePool: deposit + depositNow (`addressName` / `tokenTicker` on `bytes32`, zero-padded EVM addresses and a Solana key)
-- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721 descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence
+- `test/bundled/trusted-tokens.spec.ts` — bundled ERC-20/721/ERC-2612 Permit descriptors via `trustedTokens`: standard tagging, selector collision, registry precedence, Permit binding, Permit registry precedence (also on an encodeType miss, and no fallback after a failed attestation), `NO_DESCRIPTOR` cases (`erc20` / `erc721` tag, no list, DAI-style type, other chain, missing `types`), no attestation gate on the bundled Permit
 - `test/attestations/attestations.spec.ts` — ERC-8176 attestations against the registry's real Tether USD descriptor + attestation fixtures: descriptor hashing (JCS known answers), `verifyAttestation` edge cases via test-key-signed attestations (expired, tampered message/uid, wrong schema/hash/domain/version — each thrown as an `Error`), `isAttestationRevoked` call encoding and result decoding, and the trusted-attester policy end to end through `format()` / `resolveTypedDataDescriptor` (fallbacks, `ATTESTATION_OPTIONS_INCOMPLETE` for both setup gaps, `chainClient` call encoding and transport errors, `trustedTokens` bypass, includes-resolved hashing)
 
 ### Test guidelines
