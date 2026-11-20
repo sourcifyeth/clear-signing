@@ -360,12 +360,15 @@ Notes:
 
 The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions (`transfer`, `approve`, `transferFrom`, `safeTransferFrom`, `setApprovalForAll`), add a `trustedTokens` list to `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard` (addresses lowercase or EIP-55 checksummed). When **no registry descriptor resolves** for a transaction's contract, the library looks it up there; if listed, the transaction is rendered from a **bundled ERC-20 / ERC-721 template descriptor** instead of falling back to raw calldata. A registry descriptor always takes precedence.
 
+Tag a token `erc2612` when it is an ERC-20 token that supports ERC-2612 `permit`. Its transactions use the ERC-20 template. In addition, `formatTypedData()` renders its `Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)` messages from a bundled copy of the registry's `ercs/eip712-erc2612-permit.json` template when no registry descriptor resolves for the message. Tokens tagged `erc20` get no Permit descriptor, because a permit for a token without `permit` cannot be used on-chain. The [CoW Protocol `PermitInfo.<chainId>.json` lists](https://github.com/cowprotocol/token-lists/tree/main/src/public) are one source for the permit type of a token.
+
 ```typescript
 import type { TrustedTokens } from "@ethereum-sourcify/clear-signing";
 
 const trustedTokens: TrustedTokens = {
   1: {
-    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "erc20", // USDC
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "erc2612", // USDC
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": "erc20", // USDT
     "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d": "erc721", // BAYC
   },
 };

@@ -1,0 +1,23 @@
+{
+  "context": {
+    "eip712": {
+      "deployments": [
+        {
+          "chainId": 1,
+          "address": "0xA0b86991c6218b36c1d19D4a2E9Eb0cE3606eB48"
+        }
+      ]
+    }
+  },
+  "metadata": { "owner": "Registry Owner" },
+  "display": {
+    "formats": {
+      "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)": {
+        "intent": "Registry Permit",
+        "fields": [
+          { "path": "spender", "label": "Registry Spender", "format": "raw" }
+        ]
+      }
+    }
+  }
+}

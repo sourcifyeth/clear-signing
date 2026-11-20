@@ -1,16 +1,23 @@
 /**
  * Trusted-token bundled descriptors: when no registry descriptor resolves for
  * a contract, a wallet-supplied `trustedTokens` list lets the library render
- * the transaction from a bundled ERC-20 / ERC-721 template.
+ * the transaction from a bundled ERC-20 / ERC-721 template, and an ERC-2612
+ * Permit message from the bundled Permit template.
  */
 
 import { describe, it, expect, assert } from "vitest";
-import { format, isFieldGroup } from "../../src/index.js";
+import {
+  format,
+  formatTypedData,
+  isFieldGroup,
+  resolveTypedDataDescriptor,
+} from "../../src/index.js";
 import type {
   DisplayModel,
   ExternalDataProvider,
   FormatOptions,
   TrustedTokens,
+  TypedData,
 } from "../../src/types.js";
 import { hexToBytes, toChecksumAddress } from "../../src/utils.js";
 import { buildFilesystemResolverOpts, padAddr, padInt } from "../utils.js";
@@ -46,6 +53,9 @@ const TRUSTED_ERC20: TrustedTokens = {
 };
 const TRUSTED_ERC721: TrustedTokens = {
   [CHAIN_ID]: { [COLLECTION.toLowerCase()]: "erc721" },
+};
+const TRUSTED_ERC2612: TrustedTokens = {
+  [CHAIN_ID]: { [TOKEN.toLowerCase()]: "erc2612" },
 };
 
 /** FormatOptions with an empty registry index (no network) + a trusted-token list. */
@@ -352,6 +362,302 @@ describe("trusted tokens — precedence and fallbacks", () => {
       opts(trusted),
     );
     expect(result.intent).toBe("Send");
+    expect(result.warnings).toBeUndefined();
+  });
+});
+
+const PERMIT_TYPES: TypedData["types"] = {
+  EIP712Domain: [
+    { name: "name", type: "string" },
+    { name: "version", type: "string" },
+    { name: "chainId", type: "uint256" },
+    { name: "verifyingContract", type: "address" },
+  ],
+  Permit: [
+    { name: "owner", type: "address" },
+    { name: "spender", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "deadline", type: "uint256" },
+  ],
+};
+
+function permit(value: string, overrides: Partial<TypedData> = {}): TypedData {
+  return {
+    account: ALICE,
+    types: PERMIT_TYPES,
+    primaryType: "Permit",
+    domain: {
+      name: "USD Coin",
+      version: "2",
+      chainId: CHAIN_ID,
+      verifyingContract: TOKEN,
+    },
+    message: {
+      owner: ALICE,
+      spender: OPERATOR,
+      value,
+      nonce: "7",
+      deadline: "1767225600", // 2026-01-01T00:00:00Z
+    },
+    ...overrides,
+  };
+}
+
+describe("trusted tokens — bundled ERC-2612 Permit", () => {
+  it("formats a Permit for a token tagged erc2612", async () => {
+    const result: DisplayModel = await formatTypedData(
+      permit("5000000"),
+      opts(TRUSTED_ERC2612),
+    );
+
+    expect(result.intent).toBe("Authorize spending of tokens");
+    expect(result.interpolatedIntent).toBeUndefined();
+    expect(result.rawCalldataFallback).toBeUndefined();
+    expect(result.warnings).toBeUndefined();
+    // The bundled Permit template carries no metadata.
+    expect(result.metadata).toBeUndefined();
+
+    assert(result.fields);
+    expect(result.fields).toHaveLength(4);
+
+    const spender = result.fields[0];
+    assert(!isFieldGroup(spender));
+    expect(spender.label).toBe("Spender");
+    expect(spender.value).toBe(checksum(OPERATOR));
+    expect(spender.fieldType).toBe("address");
+    expect(spender.format).toBe("raw");
+    expect(spender.rawAddress).toBe(checksum(OPERATOR));
+    expect(spender.tokenAddress).toBeUndefined();
+    expect(spender.embeddedCalldata).toBeUndefined();
+    expect(spender.warning).toBeUndefined();
+
+    const amount = result.fields[1];
+    assert(!isFieldGroup(amount));
+    expect(amount.label).toBe("Max spending amount");
+    expect(amount.value).toBe("5 TKN");
+    expect(amount.fieldType).toBe("uint");
+    expect(amount.format).toBe("tokenAmount");
+    expect(amount.tokenAddress).toBe(checksum(TOKEN));
+    expect(amount.rawAddress).toBeUndefined();
+    expect(amount.embeddedCalldata).toBeUndefined();
+    expect(amount.warning).toBeUndefined();
+
+    const deadline = result.fields[2];
+    assert(!isFieldGroup(deadline));
+    expect(deadline.label).toBe("Valid until");
+    expect(deadline.value).toBe("2026-01-01 00:00:00Z");
+    expect(deadline.fieldType).toBe("uint");
+    expect(deadline.format).toBe("date");
+    expect(deadline.tokenAddress).toBeUndefined();
+    expect(deadline.rawAddress).toBeUndefined();
+    expect(deadline.embeddedCalldata).toBeUndefined();
+    expect(deadline.warning).toBeUndefined();
+
+    const owner = result.fields[3];
+    assert(!isFieldGroup(owner));
+    expect(owner.label).toBe("Owner");
+    expect(owner.value).toBe(ALICE_NAME);
+    expect(owner.fieldType).toBe("address");
+    expect(owner.format).toBe("addressName");
+    expect(owner.rawAddress).toBe(checksum(ALICE));
+    expect(owner.tokenAddress).toBeUndefined();
+    expect(owner.embeddedCalldata).toBeUndefined();
+    expect(owner.warning).toBeUndefined();
+  });
+
+  it("binds the bundled Permit descriptor to the token and the message domain", async () => {
+    const typedData = permit("5000000");
+    const result = await resolveTypedDataDescriptor(
+      typedData,
+      opts(TRUSTED_ERC2612).descriptorResolverOptions,
+    );
+
+    assert("descriptor" in result);
+    expect(result.descriptor.context).toEqual({
+      eip712: {
+        deployments: [{ chainId: CHAIN_ID, address: TOKEN }],
+        domain: {
+          name: "USD Coin",
+          version: "2",
+          chainId: CHAIN_ID,
+          verifyingContract: TOKEN,
+        },
+      },
+    });
+    expect(Object.keys(result.descriptor.display?.formats ?? {})).toEqual([
+      "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)",
+    ]);
+  });
+
+  it("formats a Permit value over the threshold as Unlimited", async () => {
+    const result = await formatTypedData(
+      permit(BigInt("0x" + MAX_UINT256).toString()),
+      opts(TRUSTED_ERC2612),
+    );
+
+    expect(result.warnings).toBeUndefined();
+    assert(result.fields);
+    const amount = result.fields[1];
+    assert(!isFieldGroup(amount));
+    expect(amount.label).toBe("Max spending amount");
+    expect(amount.value).toBe("Unlimited TKN");
+    expect(amount.format).toBe("tokenAmount");
+    expect(amount.tokenAddress).toBe(checksum(TOKEN));
+    expect(amount.warning).toBeUndefined();
+  });
+
+  it("formats calls to a token tagged erc2612 with the ERC-20 template", async () => {
+    const data = "0xa9059cbb" + padAddr(ALICE) + padInt(1_000_000n);
+    const result = await format(
+      { chainId: CHAIN_ID, to: TOKEN, data },
+      opts(TRUSTED_ERC2612),
+    );
+
+    expect(result.intent).toBe("Send");
+    expect(result.warnings).toBeUndefined();
+    assert(result.fields);
+    expect(result.fields).toHaveLength(2);
+    const amount = result.fields[0];
+    assert(!isFieldGroup(amount));
+    expect(amount.label).toBe("Amount");
+    expect(amount.value).toBe("1 TKN");
+    expect(amount.format).toBe("tokenAmount");
+  });
+
+  it("matches a token tagged erc2612 by its EIP-55 checksum address", async () => {
+    const trusted: TrustedTokens = {
+      [CHAIN_ID]: { [checksum(TOKEN)]: "erc2612" },
+    };
+    const result = await formatTypedData(
+      permit("5000000", {
+        domain: {
+          name: "USD Coin",
+          version: "2",
+          chainId: "0x1",
+          verifyingContract: TOKEN.toLowerCase(),
+        },
+      }),
+      opts(trusted),
+    );
+
+    expect(result.intent).toBe("Authorize spending of tokens");
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it("returns NO_DESCRIPTOR for a Permit of a token tagged erc20", async () => {
+    const result = await formatTypedData(
+      permit("5000000"),
+      opts(TRUSTED_ERC20),
+    );
+
+    expect(result.intent).toBeUndefined();
+    expect(result.fields).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("NO_DESCRIPTOR");
+  });
+
+  it("returns NO_DESCRIPTOR for a DAI-style Permit of a token tagged erc2612", async () => {
+    const result = await formatTypedData(
+      permit("5000000", {
+        types: {
+          EIP712Domain: PERMIT_TYPES.EIP712Domain,
+          Permit: [
+            { name: "holder", type: "address" },
+            { name: "spender", type: "address" },
+            { name: "nonce", type: "uint256" },
+            { name: "expiry", type: "uint256" },
+            { name: "allowed", type: "bool" },
+          ],
+        },
+        message: {
+          holder: ALICE,
+          spender: OPERATOR,
+          nonce: "7",
+          expiry: "1767225600",
+          allowed: true,
+        },
+      }),
+      opts(TRUSTED_ERC2612),
+    );
+
+    expect(result.intent).toBeUndefined();
+    expect(result.fields).toBeUndefined();
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("NO_DESCRIPTOR");
+  });
+
+  it("returns NO_DESCRIPTOR for a Permit on another chain", async () => {
+    const result = await formatTypedData(
+      permit("5000000", {
+        domain: {
+          name: "USD Coin",
+          version: "2",
+          chainId: 10,
+          verifyingContract: TOKEN,
+        },
+      }),
+      opts(TRUSTED_ERC2612),
+    );
+
+    assert(result.warnings);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].code).toBe("NO_DESCRIPTOR");
+  });
+
+  it("registry descriptor takes precedence over a trusted erc2612 tag", async () => {
+    const fsOpts = buildFilesystemResolverOpts(
+      __dirname,
+      {
+        eip712DescriptorFiles: [
+          {
+            chainId: CHAIN_ID,
+            address: TOKEN,
+            file: "registry-permit.json",
+            encodeTypes: [
+              "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)",
+            ],
+          },
+        ],
+      },
+      externalData,
+    );
+    const resolverOptions = fsOpts.descriptorResolverOptions;
+    assert(resolverOptions);
+    const result = await formatTypedData(permit("5000000"), {
+      ...fsOpts,
+      descriptorResolverOptions: {
+        ...resolverOptions,
+        trustedTokens: TRUSTED_ERC2612,
+      },
+    });
+
+    expect(result.intent).toBe("Registry Permit");
+    expect(result.metadata?.owner).toBe("Registry Owner");
+    assert(result.fields);
+    expect(result.fields).toHaveLength(1);
+    const field = result.fields[0];
+    assert(!isFieldGroup(field));
+    expect(field.label).toBe("Registry Spender");
+    expect(field.format).toBe("raw");
+  });
+
+  it("does not apply the attestation policy to the bundled Permit descriptor", async () => {
+    const result = await formatTypedData(permit("5000000"), {
+      descriptorResolverOptions: {
+        type: "github",
+        index: { calldataIndex: {}, typedDataIndex: {} },
+        trustedTokens: TRUSTED_ERC2612,
+        attestations: {
+          trustedAttesters: ["0x0000000000000000000000000000000000000001"],
+        },
+      },
+      externalDataProvider: externalData,
+    });
+
+    expect(result.intent).toBe("Authorize spending of tokens");
     expect(result.warnings).toBeUndefined();
   });
 });

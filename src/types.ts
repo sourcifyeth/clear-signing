@@ -519,8 +519,15 @@ export interface AttestationOptions {
   trustedAttesters: string[];
 }
 
-/** Token standards for descriptor generation. */
-export type TokenStandard = "erc20" | "erc721";
+/**
+ * Token standards for descriptor generation.
+ *
+ * `erc2612` marks an ERC-20 token that supports the ERC-2612 `permit`
+ * function. Such a token gets the ERC-20 calldata descriptor and the
+ * ERC-2612 `Permit` typed-data descriptor. A token tagged `erc20` gets no
+ * `Permit` descriptor.
+ */
+export type TokenStandard = "erc20" | "erc721" | "erc2612";
 
 /** Nested map: chain ID → token address → token standard. */
 export interface TrustedTokens {
@@ -548,7 +555,8 @@ export interface BaseResolverOptions {
    * Wallet-provided trusted token list. Used to generate descriptors for tokens
    * on the fly. Standard tokens usually don't have a descriptor in the registry.
    * Without this option, the library can't format calls to standard tokens.
-   * Only wallet-trusted tokens should be included in this object.
+   * Tokens tagged `erc2612` also get a descriptor for ERC-2612 `Permit`
+   * typed data. Only wallet-trusted tokens should be included in this object.
    *
    * Both lowercase and checksummed token addresses are accepted.
    */
