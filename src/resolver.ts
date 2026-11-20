@@ -169,9 +169,10 @@ function lookupTrustedToken(
  *   `chainClient`.
  *
  * If no registry entry matches, the method also checks the optional
- * `options.trustedTokens` list. When `verifyingContract` is tagged `erc2612`
- * and the message is an ERC-2612 `Permit`, a Permit descriptor is generated on
- * the fly. The attestation policy does not apply to this bundled descriptor.
+ * `options.trustedTokens` list. When the list tags `verifyingContract` as
+ * `erc2612` and the message is an ERC-2612 `Permit`, the method builds a
+ * Permit descriptor from a bundled template. The attestation policy does not
+ * apply to this bundled descriptor.
  */
 export async function resolveTypedDataDescriptor(
   typedData: TypedData,
@@ -185,10 +186,9 @@ export async function resolveTypedDataDescriptor(
   }
 
   const resolver = await createResolver(options);
-  const encodeTypeStr = computeEncodeType(
-    typedData.primaryType,
-    typedData.types,
-  );
+  const encodeTypeStr = typedData.types
+    ? computeEncodeType(typedData.primaryType, typedData.types)
+    : undefined;
   if (!encodeTypeStr) return noDescriptorWarning(chainId, verifyingContract);
 
   const byPrimaryType =

@@ -88,7 +88,7 @@ The chain client is required for attestation verification. A transport error fro
 
 ## 4. Build the trusted token list
 
-The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions, pass a `trustedTokens` list inside `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard`. If a transaction's contract is listed there, the transaction is rendered from a bundled ERC-20 / ERC-721 template. Only include tokens in this object that you **trust** to be safe to interact with.
+The registry cannot hold a descriptor for every token. To still render plain ERC-20 and ERC-721 interactions and ERC-2612 `Permit` messages, pass a `trustedTokens` list inside `descriptorResolverOptions`. It maps `chainId → tokenAddress → standard`. If a transaction's contract is listed there and no registry descriptor resolves, the transaction is rendered from a bundled ERC-20 / ERC-721 template. Only include tokens in this object that you **trust** to be safe to interact with.
 
 Tag an ERC-20 token `erc2612` when it supports ERC-2612 `permit`. Its transactions use the ERC-20 template, and its ERC-2612 `Permit` messages are rendered from a bundled copy of the registry's Permit template. Tag it `erc20` when it has no `permit`: then a `Permit` message for it gets no descriptor. The [CoW Protocol `PermitInfo.<chainId>.json` lists](https://github.com/cowprotocol/token-lists/tree/main/src/public) give the permit type (`eip-2612`, `dai-like` or `unsupported`) of many tokens. Only `eip-2612` tokens qualify; DAI-style permits are not supported.
 

@@ -51,11 +51,11 @@ export function buildBundledTokenDescriptor(
 }
 
 /**
- * Builds a descriptor for an ERC-2612 `Permit` message of a trusted token by
- * cloning the bundled Permit template and injecting
- * `context.eip712.deployments = [{ chainId, address }]` and
- * `context.eip712.domain = domain`, so the resulting descriptor passes the
- * library's EIP-712 binding check.
+ * Builds a descriptor for an ERC-2612 `Permit` message of a trusted token.
+ * The function clones the bundled Permit template. It sets
+ * `context.eip712.deployments` to `[{ chainId, address }]` and
+ * `context.eip712.domain` to the message domain. Thus the descriptor passes
+ * the EIP-712 binding check.
  */
 export function buildBundledPermitDescriptor(
   chainId: number,

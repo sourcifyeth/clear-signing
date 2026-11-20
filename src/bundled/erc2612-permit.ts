@@ -4,8 +4,9 @@ import type { Descriptor } from "../types.js";
  * Bundled ERC-2612 Permit descriptor.
  *
  * Transcribed verbatim from the Ethereum clear-signing registry
- * (`ercs/eip712-erc2612-permit.json`). Committed as a TypeScript `const`
- * rather than imported JSON — see the rationale in `bundled-descriptors.ts`.
+ * (`ercs/eip712-erc2612-permit.json`), without the `$schema` key. Committed
+ * as a TypeScript `const` rather than imported JSON — see the rationale in
+ * `bundled-descriptors.ts`.
  *
  * The template carries no `context.eip712.deployments` and no
  * `context.eip712.domain`; both are injected per message by
