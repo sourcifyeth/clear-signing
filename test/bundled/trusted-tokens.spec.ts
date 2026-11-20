@@ -722,6 +722,15 @@ describe("trusted tokens — bundled ERC-2612 Permit", () => {
     assertNoDisplay(result, "NO_DESCRIPTOR");
   });
 
+  it("returns NO_DESCRIPTOR for a Permit without a types object", async () => {
+    const typedData = permit("5000000");
+    const result = await formatTypedData(
+      { ...typedData, types: undefined } as unknown as TypedData,
+      opts(TRUSTED_ERC2612),
+    );
+    assertNoDisplay(result, "NO_DESCRIPTOR");
+  });
+
   it("returns NO_DESCRIPTOR for a Permit on another chain", async () => {
     const result = await formatTypedData(
       permit("5000000", { domain: { ...PERMIT_DOMAIN, chainId: 10 } }),
